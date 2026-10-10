@@ -1,0 +1,24 @@
+---
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+BreakBeforeBraces: Attach
+ColumnLimit: 100
+ContinuationIndentWidth: 4
+DerivePointerAlignment: false
+IndentCaseLabels: false
+IndentWidth: 4
+NamespaceIndentation: None
+PackConstructorInitializers: Never
+PointerAlignment: Left
+ReflowComments: false
+SortIncludes: false
+TabWidth: 4
+UseTab: Never
