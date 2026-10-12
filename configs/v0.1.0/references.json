@@ -8,8 +8,10 @@
       "workload": "H100 persistent two-stage GEMM",
       "hardware": "H100 SXM",
       "arguments": ["512", "512", "512"],
-      "expected_total_cycles": 12956,
-      "command": "gtsim_gemm configs/v0.1.0/h100-sxm.yaml 512 512 512"
+      "previous_total_cycles": 12956,
+      "expected_total_cycles": 13169,
+      "cycle_change_reason": "Adds the configured D2D request/response path and HBM maximum-write-bandwidth limit.",
+      "command": "gtsim_gemm configs/v0.1.0/h100-sxm.yaml --memory-config configs/v0.1.0/memory_full_hbm.yaml 512 512 512"
     },
     {
       "id": "h100_fa3_1_1_1_128_128",
@@ -17,8 +19,10 @@
       "workload": "H100 FA3 two-stage pipeline",
       "hardware": "H100 SXM",
       "arguments": ["1", "1", "1", "128", "128"],
-      "expected_total_cycles": 7168,
-      "command": "gtsim_fa3 configs/v0.1.0/h100-sxm.yaml 1 1 1 128 128"
+      "previous_total_cycles": 7168,
+      "expected_total_cycles": 7212,
+      "cycle_change_reason": "Adds the configured D2D request/response path.",
+      "command": "gtsim_fa3 configs/v0.1.0/h100-sxm.yaml --memory-config configs/v0.1.0/memory_full_hbm.yaml 1 1 1 128 128"
     }
   ]
 }

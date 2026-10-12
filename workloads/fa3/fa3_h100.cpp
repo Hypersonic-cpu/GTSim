@@ -67,11 +67,11 @@ DAG* build_fa3_h100(int seq_q = 128,
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 1,
                 "K_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM);
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 2,
                 "V_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM);
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
         }
     }
 
@@ -533,13 +533,27 @@ DAG* build_fa3_h100(int seq_q = 128,
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: gtsim_fa3 <architecture.yaml> [batch heads_q heads_kv sequence_q sequence_kv]\n";
+        std::cerr << "Usage: gtsim_fa3 <architecture.yaml> "
+                     "[batch heads_q heads_kv sequence_q sequence_kv] "
+                     "[--memory-config memory.yaml]\n";
         return 1;
     }
 
     SimulatorConfig config;
+    std::vector<std::string> workload_args;
     try {
         config = make_h100_sxm_variants(argv[1]);
+        for (int index = 2; index < argc; ++index) {
+            if (std::string(argv[index]) == "--memory-config") {
+                if (index + 1 >= argc) {
+                    throw std::invalid_argument(
+                        "--memory-config requires a YAML path");
+                }
+                ArchConfYamlReader(argv[++index]).parse(config);
+            } else {
+                workload_args.emplace_back(argv[index]);
+            }
+        }
     } catch (const std::exception& error) {
         std::cerr << "Configuration error: " << error.what() << '\n';
         return 1;
@@ -550,11 +564,11 @@ int main(int argc, char* argv[]) {
     int num_heads_q = 1;
     int num_heads_kv = 1;
     int batch = 1;
-    if (argc > 2) batch = std::atoi(argv[2]);
-    if (argc > 3) num_heads_q = std::atoi(argv[3]);
-    if (argc > 4) num_heads_kv = std::atoi(argv[4]);
-    if (argc > 5) seq_q = std::atoi(argv[5]);
-    if (argc > 6) seq_kv = std::atoi(argv[6]);
+    if (!workload_args.empty()) batch = std::atoi(workload_args[0].c_str());
+    if (workload_args.size() > 1) num_heads_q = std::atoi(workload_args[1].c_str());
+    if (workload_args.size() > 2) num_heads_kv = std::atoi(workload_args[2].c_str());
+    if (workload_args.size() > 3) seq_q = std::atoi(workload_args[3].c_str());
+    if (workload_args.size() > 4) seq_kv = std::atoi(workload_args[4].c_str());
 
     if (num_heads_kv <= 0 || num_heads_q <= 0 || (num_heads_q % num_heads_kv) != 0) {
         std::cerr << "Invalid head configuration: head_q must be > 0, head_kv must be > 0, and head_q % head_kv == 0.\n";

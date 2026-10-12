@@ -8,16 +8,12 @@ desc:
 
 sm_count: 132
 core_frequency_mhz: 1980
-memory_frequency_mhz: 2619
 sram:
   bandwidth_bytes_per_cycle: 128
   latency_cycles: 33
 l2:
   bandwidth_bytes_per_cycle: 4300
   latency_cycles: 380
-dram:
-  bandwidth_gbps: 3100
-  latency_cycles: 270
 tma:
   issue_rate_bytes_per_cycle: 100
   setup_latency_cycles: 100

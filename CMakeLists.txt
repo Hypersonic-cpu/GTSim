@@ -30,14 +30,25 @@ target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
 include(CTest)
 if(BUILD_TESTING)
   set(H100_ARCH_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/h100-sxm.yaml)
-  add_test(NAME gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG} 512 512 512)
-  add_test(NAME fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG} 1 1 1 128 128)
+  set(MEMORY_FULL_HBM_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_full_hbm.yaml)
+  set(MEMORY_FULL_HBF_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_full_hbf.yaml)
+  set(MEMORY_CO_LOCATED_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_co_located.yaml)
+  set(MEMORY_CASCADED_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_cascaded.yaml)
+  add_test(NAME gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG}
+           --memory-config ${MEMORY_FULL_HBM_CONFIG} 512 512 512)
+  add_test(NAME fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG}
+           --memory-config ${MEMORY_FULL_HBM_CONFIG} 1 1 1 128 128)
   add_executable(arch_conf_tests tests/arch_conf_tests.cpp)
   target_link_libraries(arch_conf_tests PRIVATE gtsim_core)
-  add_test(NAME arch_conf_parser COMMAND arch_conf_tests ${H100_ARCH_CONFIG})
+  add_test(NAME arch_conf_parser COMMAND arch_conf_tests ${H100_ARCH_CONFIG}
+           ${MEMORY_FULL_HBM_CONFIG} ${MEMORY_FULL_HBF_CONFIG}
+           ${MEMORY_CO_LOCATED_CONFIG} ${MEMORY_CASCADED_CONFIG})
   add_executable(memory_address_tests tests/memory_address_tests.cpp)
   target_link_libraries(memory_address_tests PRIVATE gtsim_core)
   add_test(NAME memory_address_identity COMMAND memory_address_tests)
+  add_executable(memory_topology_tests tests/memory_topology_tests.cpp)
+  target_link_libraries(memory_topology_tests PRIVATE gtsim_core)
+  add_test(NAME memory_topology_routes COMMAND memory_topology_tests)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     add_test(NAME workload_profile_boundary

@@ -293,6 +293,16 @@ public:
         throw std::out_of_range("global address is outside registered tensor ranges");
     }
 
+    bool contains_tier(MemoryTier tier) const {
+        for (const auto& [unused_id, tensor] : tensors_) {
+            (void)unused_id;
+            if (tensor.initial_memory_tier == tier) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::size_t size() const { return tensors_.size(); }
 
 private:

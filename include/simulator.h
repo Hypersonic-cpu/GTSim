@@ -3,6 +3,7 @@
 
 #include "gpu.h"
 #include "dag_node.h"
+#include "memory_config.h"
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
@@ -50,18 +51,14 @@ struct SimulatorConfig {
     int l2_cache_size_bytes{40 * 1024 * 1024};
     int l2_line_size_bytes{128};
     int l2_hit_latency_cycles{300};
-    int l2_miss_penalty_cycles{566 - 300};
     int l2_bandwidth_bytes_per_cycle{1853};
     int l2_write_bandwidth_bytes_per_cycle{926};  // Half of the default L2 bandwidth
     int l2_queue_depth{65536};
     int l2_max_transactions_per_cycle_per_sp{1};
     bool l2_bypass_cache{false};
 
-    // DRAM configuration
-    long long dram_size_bytes{80LL * 1024 * 1024 * 1024};  // H100 SXM typical 80GB
-    double dram_bandwidth_gbps{1407.0};
     double core_frequency_mhz{1410.0};
-    double dram_frequency_mhz{1215.0};
+    MemorySystemConfig memory{};
 
     // Cluster NoC configuration (DSM)
     int cluster_size{0};
@@ -170,14 +167,11 @@ inline SimulatorConfig make_h100_sxm_config() {
     cfg.tensor_core_latency_cycles = 16;
     cfg.tensor_core_width = 32;
     cfg.l2_hit_latency_cycles = 380;
-    cfg.l2_miss_penalty_cycles = 270;
     cfg.l2_bandwidth_bytes_per_cycle = 4300;
     cfg.l2_write_bandwidth_bytes_per_cycle = 2150;
     cfg.l2_cache_size_bytes = 50 * 1024 * 1024;
     cfg.l2_bypass_cache = false;
-    cfg.dram_frequency_mhz = 2619;
     cfg.core_frequency_mhz = 1980;
-    cfg.dram_bandwidth_gbps = 3100;
     cfg.num_sms = 132;
     cfg.max_concurrent_blocks_per_sm = 1;
     cfg.O2_dynamic_allocation = false;
@@ -205,13 +199,12 @@ inline int bytes_per_cycle_from_tbps(double tbps, double core_frequency_mhz) {
 inline void apply_blackwell_b200_defaults(SimulatorConfig& cfg,
                                           double tmem_peak_tbps = 12.0) {
     cfg.core_frequency_mhz = 1965.0;
-    cfg.dram_frequency_mhz = 2000.0;
-    cfg.dram_size_bytes = 192LL * 1024 * 1024 * 1024; // 192GB HBM3e
-    cfg.dram_bandwidth_gbps = 8000.0; // 8 TB/s
+    cfg.memory.hbm.read_bw_gbps = 8000.0;
+    cfg.memory.hbm.write_max_bw_gbps = 4000.0;
+    cfg.memory.gpu_to_hbm.bandwidth_gbps = 8000.0;
     cfg.num_sms = 148;
     cfg.l2_cache_size_bytes = 50 * 1024 * 1024; // 50MB
     cfg.l2_hit_latency_cycles = 380;
-    cfg.l2_miss_penalty_cycles = 270; // Used as DRAM miss penalty in this model.
     cfg.l2_bandwidth_bytes_per_cycle = 6000;
     cfg.l2_write_bandwidth_bytes_per_cycle = 3000;
     cfg.tma_issue_rate_bytes_per_cycle = 100;
@@ -259,10 +252,6 @@ public:
             config.num_sms = active_sms;
         }
 
-        int dram_bandwidth_bytes_per_cycle = static_cast<int>(
-            std::lround((config.dram_bandwidth_gbps * 1e9) /
-                        (config.dram_frequency_mhz * 1e6)));
-
         simulated_gpu = new GPU(config.num_sms, config.warp_count,
                                config.tensor_core_throughput,
                                config.simd_throughput,
@@ -291,10 +280,8 @@ public:
                                config.l2_queue_depth,
                                config.l2_max_transactions_per_cycle_per_sp,
                                config.l2_bypass_cache,
-                               dram_bandwidth_bytes_per_cycle,
-                               config.l2_miss_penalty_cycles,
+                               config.memory,
                                config.core_frequency_mhz,
-                               config.dram_frequency_mhz,
                                config.tma_setup_latency_cycles,
                                config.tma_issue_interval_cycles,
                                config.tma_issue_rate_bytes_per_cycle,

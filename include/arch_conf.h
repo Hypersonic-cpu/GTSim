@@ -38,6 +38,13 @@ template <> struct meta<GTSim::NoCTopology> {
     static constexpr auto value = enumerate("CROSSBAR", CROSSBAR, "MESH", MESH);
 };
 
+template <> struct meta<GTSim::MemoryTopology> {
+    using enum GTSim::MemoryTopology;
+    static constexpr auto value = enumerate("FullHBM", FullHBM, "FullHBF",
+                                              FullHBF, "CoLocated", CoLocated,
+                                              "Cascaded", Cascaded);
+};
+
 } // namespace glz
 
 namespace GTSim {
@@ -124,6 +131,12 @@ public:
                 "invalid architecture config '" + filename_.string() +
                 "': " + glz::format_error(config_error, normalized_yaml));
         }
+        try {
+            validate_memory_system_config(candidate.memory);
+        } catch (const std::exception& error) {
+            throw std::runtime_error("invalid memory configuration in '" +
+                                     filename_.string() + "': " + error.what());
+        }
         conf = std::move(candidate);
     }
 
@@ -175,11 +188,15 @@ private:
                key == "cluster_noc" || key == "noc";
     }
 
+    static bool is_memory_config_field(std::string_view key) {
+        return key == "topology" || key == "hbm" || key == "hbf" ||
+               key == "d2dlink";
+    }
+
     static std::string member_name(std::string_view section,
                                    std::string_view field) {
         if (section.empty()) {
             if (field == "sm_count") return "num_sms";
-            if (field == "memory_frequency_mhz") return "dram_frequency_mhz";
             return std::string(field);
         }
 
@@ -188,17 +205,7 @@ private:
             if (field == "latency_cycles" || field == "hit_latency_cycles") {
                 return "l2_hit_latency_cycles";
             }
-            if (field == "miss_penalty_cycles") return "l2_miss_penalty_cycles";
             return "l2_" + std::string(field);
-        }
-        if (section == "dram") {
-            if (field == "latency_cycles" || field == "miss_penalty_cycles") {
-                return "l2_miss_penalty_cycles";
-            }
-            if (field == "frequency_mhz" || field == "memory_frequency_mhz") {
-                return "dram_frequency_mhz";
-            }
-            return "dram_" + std::string(field);
         }
         if (section == "tma") {
             if (field == "command_issue_interval_cycles")
@@ -255,9 +262,65 @@ private:
         YamlValue result;
         result.data = YamlObject{};
         auto& target = result.get<YamlObject>();
+        YamlValue memory;
+        memory.data = YamlObject{};
+        auto& memory_target = memory.get<YamlObject>();
 
         for (const auto& [key, value] : source.get<YamlObject>()) {
             if (is_metadata(key)) continue;
+
+            if (is_memory_config_field(key)) {
+                if (key == "topology") {
+                    add_member(memory_target, key, value);
+                    continue;
+                }
+                if (!value.is_object() || value.get<YamlObject>().empty()) {
+                    throw std::runtime_error("expected a non-empty mapping at '" +
+                                             key + "'");
+                }
+                const auto& section = value.get<YamlObject>();
+                if (key == "d2dlink") {
+                    for (const auto& [route, route_value] : section) {
+                        if (!route_value.is_object() ||
+                            route_value.get<YamlObject>().empty()) {
+                            throw std::runtime_error(
+                                "expected a non-empty mapping at 'd2dlink." +
+                                route + "'");
+                        }
+                        add_member(memory_target, route, route_value);
+                    }
+                } else {
+                    add_member(memory_target, key, value);
+                }
+                continue;
+            }
+
+            // Accept the previous DRAM patch spelling as an HBM alias. A
+            // config cannot specify both spellings because they normalize to
+            // the same reflected members and are rejected as duplicates.
+            if (key == "dram") {
+                if (!value.is_object() || value.get<YamlObject>().empty()) {
+                    throw std::runtime_error("expected a non-empty mapping at 'dram'");
+                }
+                YamlValue hbm;
+                hbm.data = YamlObject{};
+                auto& hbm_target = hbm.get<YamlObject>();
+                for (const auto& [field, member_value] : value.get<YamlObject>()) {
+                    if (field == "bandwidth_gbps") {
+                        add_member(hbm_target, "read_bw_gbps", member_value);
+                        add_member(hbm_target, "write_max_bw_gbps", member_value);
+                    } else if (field == "latency_cycles" ||
+                               field == "miss_penalty_cycles") {
+                        add_member(hbm_target, "read_latency_cycles", member_value);
+                        add_member(hbm_target, "write_latency_cycles", member_value);
+                    } else {
+                        throw std::runtime_error("unknown legacy DRAM field '" +
+                                                 field + "'");
+                    }
+                }
+                add_member(memory_target, "hbm", hbm);
+                continue;
+            }
 
             if (value.is_object() && is_section(key)) {
                 const auto& members = value.get<YamlObject>();
@@ -272,6 +335,9 @@ private:
             } else {
                 add_member(target, member_name({}, key), value);
             }
+        }
+        if (!memory_target.empty()) {
+            add_member(target, "memory", memory);
         }
         return result;
     }

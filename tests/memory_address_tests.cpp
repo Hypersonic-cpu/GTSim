@@ -51,17 +51,26 @@ int main() {
         keys.insert(aliased_key);
         require(keys.size() == 1, "global aliases must hash to one cache-line identity");
 
-        MemorySystem memory(0, 128, 0, 256, 0, 8, true,
-                            128, 0, 1.0, 1.0, tensors);
+        MemorySystemConfig memory_config;
+        memory_config.hbm = {10000.0, 10000.0, 0, 0, 8};
+        memory_config.gpu_to_hbm = {10000.0, 0, 8};
+        MemorySystem memory(0, 128, 0, 256, 128, 8, true,
+                            memory_config, 1000.0, tensors);
         require(memory.l2()->enqueue_transaction_key(10, first_key, false),
                 "first L2 access should enqueue");
         require(memory.l2()->enqueue_transaction_key(11, aliased_key, false),
                 "second L2 access should enqueue");
-        require(memory.step(1).empty(), "new backend accesses complete after the L2 step");
-        auto completed = memory.step(2);
+        std::vector<int> completed;
+        for (int cycle = 0; cycle < 16 && completed.size() < 2; ++cycle) {
+            auto cycle_completed = memory.step(cycle);
+            completed.insert(completed.end(), cycle_completed.begin(),
+                             cycle_completed.end());
+        }
         std::sort(completed.begin(), completed.end());
         require(completed == std::vector<int>({10, 11}),
                 "same-line accesses must share one HBF-tagged backend request and response");
+        require(memory.statistics(16).hbm.request_count == 1,
+                "merged HBF-tagged access must use FullHBM's single controller");
 
         std::cout << "Global memory address tests passed\n";
         return 0;

@@ -80,22 +80,49 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "L2 cache size: " << config.l2_cache_size_bytes << " bytes\n";
     *output_stream << "L2 line size: " << config.l2_line_size_bytes << " bytes\n";
     *output_stream << "L2 hit latency: " << config.l2_hit_latency_cycles << " cycles\n";
-    *output_stream << "L2 miss penalty: " << config.l2_miss_penalty_cycles << " cycles\n";
     *output_stream << "L2 bandwidth: " << config.l2_bandwidth_bytes_per_cycle << " bytes/cycle\n";
     *output_stream << "L2 write bandwidth: " << config.l2_write_bandwidth_bytes_per_cycle
                    << " bytes/cycle\n";
     *output_stream << "L2 queue depth: " << config.l2_queue_depth << "\n";
     *output_stream << "L2 max transactions per cycle per subpartition: "
                    << config.l2_max_transactions_per_cycle_per_sp << "\n";
-    *output_stream << "DRAM size: " << config.dram_size_bytes << " bytes\n";
-    double dram_bytes_per_cycle = (config.dram_bandwidth_gbps * 1e9) /
-                                  (config.dram_frequency_mhz * 1e6);
-    *output_stream << "DRAM bandwidth: " << config.dram_bandwidth_gbps << " GB/s"
-                   << " (" << std::fixed << std::setprecision(2)
-                   << dram_bytes_per_cycle << " bytes/cycle)\n";
-    *output_stream << "DRAM latency (miss penalty): " << config.l2_miss_penalty_cycles << " cycles\n";
     *output_stream << "Core frequency: " << config.core_frequency_mhz << " MHz\n";
-    *output_stream << "DRAM frequency: " << config.dram_frequency_mhz << " MHz\n\n";
+    *output_stream << "Memory topology: "
+                   << memory_topology_name(config.memory.topology) << "\n";
+    *output_stream << "HBM read bandwidth: " << config.memory.hbm.read_bw_gbps
+                   << " GB/s, write max: "
+                   << config.memory.hbm.write_max_bw_gbps << " GB/s\n";
+    *output_stream << "HBM read/write latency: "
+                   << config.memory.hbm.read_latency_cycles << "/"
+                   << config.memory.hbm.write_latency_cycles << " cycles\n";
+    *output_stream << "HBF read/write bandwidth: "
+                   << config.memory.hbf.read_bw_gbps << "/"
+                   << config.memory.hbf.write_bw_gbps << " GB/s\n";
+    *output_stream << "HBF read/write latency: "
+                   << config.memory.hbf.read_latency_cycles << "/"
+                   << config.memory.hbf.write_latency_cycles << " cycles\n";
+    const auto print_link_config = [&](const char* name,
+                                       const D2DLinkConfig& link) {
+        *output_stream << name << " link: " << link.bandwidth_gbps
+                       << " GB/s, " << link.latency_cycles << " cycles\n";
+    };
+    switch (config.memory.topology) {
+        case MemoryTopology::FullHBM:
+            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+            break;
+        case MemoryTopology::FullHBF:
+            print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
+            break;
+        case MemoryTopology::CoLocated:
+            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+            print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
+            break;
+        case MemoryTopology::Cascaded:
+            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+            print_link_config("hbm_to_hbf", config.memory.hbm_to_hbf);
+            break;
+    }
+    *output_stream << "\n";
 }
 
 void Simulator::print_statistics(bool verbose) {
@@ -118,6 +145,38 @@ void Simulator::print_statistics(bool verbose) {
         double avg_conflict = static_cast<double>(total_conflict_cycles) / total_conflicts;
         *output_stream << "  Average conflict cycles per conflicted load: "
                   << std::fixed << std::setprecision(2) << avg_conflict << "\n";
+    }
+    const auto memory_stats = simulated_gpu->memory_system->statistics(cycle);
+    const auto print_tier_stats = [&](const char* name,
+                                      const TierMemoryStatistics& stats) {
+        *output_stream << name << " requests: " << stats.request_count
+                       << " (read " << stats.read_requests << ", write "
+                       << stats.write_requests << "), bytes: read "
+                       << stats.read_bytes << ", write " << stats.write_bytes
+                       << ", average latency: " << std::fixed
+                       << std::setprecision(2)
+                       << stats.average_latency_cycles() << " cycles\n";
+    };
+    *output_stream << "Off-chip memory statistics:\n";
+    print_tier_stats("  HBM", memory_stats.hbm);
+    print_tier_stats("  HBF", memory_stats.hbf);
+    const auto print_link_stats = [&](const char* name,
+                                      const D2DLinkStatistics& stats) {
+        *output_stream << "  " << name << " transferred bytes: GPU->memory "
+                       << stats.forward_bytes << ", memory->GPU "
+                       << stats.reverse_bytes << "; utilization: "
+                       << std::fixed << std::setprecision(1)
+                       << (stats.forward_utilization * 100.0) << "%/"
+                       << (stats.reverse_utilization * 100.0) << "%\n";
+    };
+    if (memory_stats.has_gpu_to_hbm) {
+        print_link_stats("gpu_to_hbm", memory_stats.gpu_to_hbm);
+    }
+    if (memory_stats.has_gpu_to_hbf) {
+        print_link_stats("gpu_to_hbf", memory_stats.gpu_to_hbf);
+    }
+    if (memory_stats.has_hbm_to_hbf) {
+        print_link_stats("hbm_to_hbf", memory_stats.hbm_to_hbf);
     }
     *output_stream << "\n";
 }

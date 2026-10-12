@@ -2,6 +2,7 @@
 #define MEMORY_H
 
 #include "dag_node.h"
+#include "memory_config.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -434,6 +435,8 @@ struct MemResponse {
     std::uint64_t global_addr;
     MemoryTier tier;
     bool completed;
+    int size_bytes{};
+    MemoryOperation operation{MemoryOperation::Read};
 };
 
 inline int compute_dram_subops(const DAGNode& node, int access_granularity_bytes) {
@@ -557,62 +560,6 @@ inline std::vector<CacheLineKey> compute_dram_subop_lines(const DAGNode& node,
     }
     return lines;
 }
-
-class DRAMModel {
-public:
-    struct Request {
-        MemRequest memory_request;
-        int ready_cycle;
-    };
-
-    DRAMModel(int bandwidth_bytes_per_cycle, int latency_cycles, int line_size_bytes,
-              double core_freq_mhz, double dram_freq_mhz)
-        : bandwidth_bytes_per_cycle(bandwidth_bytes_per_cycle),
-          latency_cycles(latency_cycles),
-          line_size_bytes(line_size_bytes),
-          freq_ratio(dram_freq_mhz / core_freq_mhz),
-          budget_bytes(0.0) {}
-
-    void enqueue(const MemRequest& request, int current_cycle) {
-        requests.push_back({request, current_cycle + latency_cycles});
-    }
-
-    std::vector<MemResponse> step(int current_cycle) {
-        budget_bytes += static_cast<double>(bandwidth_bytes_per_cycle) * freq_ratio;
-        std::vector<MemResponse> completed;
-
-        std::deque<Request> remaining;
-        for (const auto& req : requests) {
-            if (req.ready_cycle > current_cycle) {
-                remaining.push_back(req);
-                continue;
-            }
-            const int request_bytes = req.memory_request.size_bytes > 0
-                                          ? req.memory_request.size_bytes
-                                          : line_size_bytes;
-            if (budget_bytes < request_bytes) {
-                remaining.push_back(req);
-                continue;
-            }
-            budget_bytes -= request_bytes;
-            if (req.memory_request.operation != MemoryOperation::Writeback) {
-                completed.push_back({req.memory_request.request_id,
-                                     req.memory_request.global_addr,
-                                     req.memory_request.tier, true});
-            }
-        }
-        requests = std::move(remaining);
-        return completed;
-    }
-
-private:
-    int bandwidth_bytes_per_cycle;
-    int latency_cycles;
-    int line_size_bytes;
-    double freq_ratio;
-    double budget_bytes;
-    std::deque<Request> requests;
-};
 
 class L2Cache {
 public:
@@ -923,92 +870,816 @@ private:
     }
 };
 
-// Timing-neutral point-to-point connection between L2 and the DRAM model.
-class D2DLink {
+
+inline constexpr int kMemoryControlBytes = 16;
+
+struct TierMemoryStatistics {
+    std::uint64_t request_count{};
+    std::uint64_t read_requests{};
+    std::uint64_t write_requests{};
+    std::uint64_t read_bytes{};
+    std::uint64_t write_bytes{};
+    std::uint64_t completed_requests{};
+    std::uint64_t total_latency_cycles{};
+
+    double average_latency_cycles() const {
+        return completed_requests == 0
+                   ? 0.0
+                   : static_cast<double>(total_latency_cycles) /
+                         static_cast<double>(completed_requests);
+    }
+};
+
+struct D2DLinkStatistics {
+    std::uint64_t forward_bytes{};
+    std::uint64_t reverse_bytes{};
+    double forward_busy_cycles{};
+    double reverse_busy_cycles{};
+    double forward_utilization{};
+    double reverse_utilization{};
+};
+
+struct MemorySystemStatistics {
+    TierMemoryStatistics hbm{};
+    TierMemoryStatistics hbf{};
+    D2DLinkStatistics gpu_to_hbm{};
+    D2DLinkStatistics gpu_to_hbf{};
+    D2DLinkStatistics hbm_to_hbf{};
+    bool has_gpu_to_hbm{};
+    bool has_gpu_to_hbf{};
+    bool has_hbm_to_hbf{};
+};
+
+// HBM controller with a shared read/write data path and an additional write
+// throughput ceiling. Bandwidth is expressed in bytes per GPU core cycle.
+class HBMModel {
 public:
-    void connect(L2Cache* l2, DRAMModel* dram) {
-        l2_ = l2;
-        dram_ = dram;
+    HBMModel(const HBMConfig& config, double core_frequency_mhz)
+        : total_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
+              config.read_bw_gbps, core_frequency_mhz)),
+          write_max_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
+              config.write_max_bw_gbps, core_frequency_mhz)),
+          read_latency_cycles_(config.read_latency_cycles),
+          write_latency_cycles_(config.write_latency_cycles),
+          queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
+
+    // Compatibility constructor for code that used the previous DRAMModel API.
+    HBMModel(int bandwidth_bytes_per_cycle, int latency_cycles,
+             int /*line_size_bytes*/, double core_frequency_mhz,
+             double dram_frequency_mhz)
+        : total_bandwidth_bytes_per_cycle_(
+              static_cast<double>(bandwidth_bytes_per_cycle) *
+              dram_frequency_mhz / core_frequency_mhz),
+          write_max_bandwidth_bytes_per_cycle_(
+              static_cast<double>(bandwidth_bytes_per_cycle) *
+              dram_frequency_mhz / core_frequency_mhz),
+          read_latency_cycles_(latency_cycles),
+          write_latency_cycles_(latency_cycles),
+          queue_capacity_(65536) {}
+
+    bool try_submit(const MemRequest& request, int now) {
+        if (queued_requests() >= queue_capacity_) {
+            return false;
+        }
+        Request queued{request,
+                       now + (request.operation == MemoryOperation::Read
+                                  ? read_latency_cycles_
+                                  : write_latency_cycles_),
+                       static_cast<double>(std::max(1, request.size_bytes))};
+        if (request.operation == MemoryOperation::Read) {
+            read_requests_.push_back(queued);
+        } else {
+            write_requests_.push_back(queued);
+        }
+        return true;
     }
 
-    void enqueue_request(const MemRequest& request) {
-        request_queue_.push_back(request);
-    }
-
-    void flush_requests(int current_cycle) {
-        if (!dram_) {
-            throw std::logic_error("D2DLink has no DRAMModel connection");
-        }
-        while (!request_queue_.empty()) {
-            dram_->enqueue(request_queue_.front(), current_cycle);
-            request_queue_.pop_front();
+    void submit(const MemRequest& request, int now) {
+        if (!try_submit(request, now)) {
+            throw std::runtime_error("HBM request queue is full");
         }
     }
 
-    void step(int current_cycle) {
-        if (!dram_ || !l2_) {
-            throw std::logic_error("D2DLink is not connected");
+    void enqueue(const MemRequest& request, int now) { submit(request, now); }
+
+    std::vector<MemResponse> step(int now) {
+        std::vector<MemResponse> completed;
+        const bool read_ready = !read_requests_.empty() &&
+                                read_requests_.front().ready_cycle <= now;
+        const bool write_ready = !write_requests_.empty() &&
+                                 write_requests_.front().ready_cycle <= now;
+        if (!read_ready && !write_ready) {
+            total_fractional_credit_ = 0.0;
+            write_fractional_credit_ = 0.0;
+            return completed;
         }
-        flush_requests(current_cycle);
-        for (const auto& response : dram_->step(current_cycle)) {
-            response_queue_.push_back(response);
+
+        double total_budget = total_bandwidth_bytes_per_cycle_ +
+                              total_fractional_credit_;
+        double write_budget = write_max_bandwidth_bytes_per_cycle_ +
+                              write_fractional_credit_;
+        while (total_budget > kBandwidthEpsilon) {
+            const bool can_read = !read_requests_.empty() &&
+                                  read_requests_.front().ready_cycle <= now;
+            const bool can_write = !write_requests_.empty() &&
+                                   write_requests_.front().ready_cycle <= now &&
+                                   write_budget > kBandwidthEpsilon;
+            if (!can_read && !can_write) {
+                break;
+            }
+
+            const bool use_write = can_write && (!can_read || prefer_write_);
+            Request& request = use_write ? write_requests_.front()
+                                         : read_requests_.front();
+            const double available = use_write
+                                         ? std::min(total_budget, write_budget)
+                                         : total_budget;
+            const double transferred = std::min(
+                static_cast<double>(request.remaining_bytes), available);
+            if (transferred <= kBandwidthEpsilon) {
+                break;
+            }
+
+            request.remaining_bytes -= transferred;
+            total_budget -= transferred;
+            if (use_write) {
+                write_budget -= transferred;
+            }
+            prefer_write_ = !use_write;
+
+            if (request.remaining_bytes <= kBandwidthEpsilon) {
+                completed.push_back(make_response(request.memory_request));
+                if (use_write) {
+                    write_requests_.pop_front();
+                } else {
+                    read_requests_.pop_front();
+                }
+            }
         }
-        while (!response_queue_.empty()) {
-            l2_->handle_response(response_queue_.front(), current_cycle);
-            response_queue_.pop_front();
-        }
+
+        total_fractional_credit_ =
+            queued_requests() == 0 ? 0.0 : fractional_part(total_budget);
+        write_fractional_credit_ =
+            write_requests_.empty() ? 0.0 : fractional_part(write_budget);
+        return completed;
     }
 
 private:
-    L2Cache* l2_{};
-    DRAMModel* dram_{};
-    std::deque<MemRequest> request_queue_;
-    std::deque<MemResponse> response_queue_;
+    struct Request {
+        MemRequest memory_request;
+        int ready_cycle;
+        double remaining_bytes;
+    };
+
+    static constexpr double kBandwidthEpsilon = 1.0e-9;
+
+    double total_bandwidth_bytes_per_cycle_;
+    double write_max_bandwidth_bytes_per_cycle_;
+    int read_latency_cycles_;
+    int write_latency_cycles_;
+    std::size_t queue_capacity_;
+    std::deque<Request> read_requests_;
+    std::deque<Request> write_requests_;
+    double total_fractional_credit_{};
+    double write_fractional_credit_{};
+    bool prefer_write_{};
+
+    std::size_t queued_requests() const {
+        return read_requests_.size() + write_requests_.size();
+    }
+
+    static double fractional_part(double value) {
+        return value - std::floor(value);
+    }
+
+    static MemResponse make_response(const MemRequest& request) {
+        const int response_bytes = request.operation == MemoryOperation::Read
+                                       ? std::max(1, request.size_bytes)
+                                       : kMemoryControlBytes;
+        return {request.request_id, request.global_addr, request.tier, true,
+                response_bytes, request.operation};
+    }
 };
 
-// Owns the single supported topology: L2Cache <-> D2DLink <-> DRAMModel.
+// Keep the old type spelling available for downstream code while all new
+// topology construction uses HBMModel.
+using DRAMModel = HBMModel;
+
+// HBF controller with independent read and write service queues and bandwidths.
+class HBFModel {
+public:
+    HBFModel(const HBFConfig& config, double core_frequency_mhz)
+        : read_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
+              config.read_bw_gbps, core_frequency_mhz)),
+          write_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
+              config.write_bw_gbps, core_frequency_mhz)),
+          read_latency_cycles_(config.read_latency_cycles),
+          write_latency_cycles_(config.write_latency_cycles),
+          queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
+
+    bool try_submit(const MemRequest& request, int now) {
+        if (queued_requests() >= queue_capacity_) {
+            return false;
+        }
+        Request queued{request,
+                       now + (request.operation == MemoryOperation::Read
+                                  ? read_latency_cycles_
+                                  : write_latency_cycles_),
+                       static_cast<double>(std::max(1, request.size_bytes))};
+        if (request.operation == MemoryOperation::Read) {
+            read_requests_.push_back(queued);
+        } else {
+            write_requests_.push_back(queued);
+        }
+        return true;
+    }
+
+    void submit(const MemRequest& request, int now) {
+        if (!try_submit(request, now)) {
+            throw std::runtime_error("HBF request queue is full");
+        }
+    }
+
+    std::vector<MemResponse> step(int now) {
+        std::vector<MemResponse> completed;
+        service_queue(read_requests_, read_bandwidth_bytes_per_cycle_,
+                      read_fractional_credit_, now, completed);
+        service_queue(write_requests_, write_bandwidth_bytes_per_cycle_,
+                      write_fractional_credit_, now, completed);
+        return completed;
+    }
+
+private:
+    struct Request {
+        MemRequest memory_request;
+        int ready_cycle;
+        double remaining_bytes;
+    };
+
+    static constexpr double kBandwidthEpsilon = 1.0e-9;
+
+    double read_bandwidth_bytes_per_cycle_;
+    double write_bandwidth_bytes_per_cycle_;
+    int read_latency_cycles_;
+    int write_latency_cycles_;
+    std::size_t queue_capacity_;
+    std::deque<Request> read_requests_;
+    std::deque<Request> write_requests_;
+    double read_fractional_credit_{};
+    double write_fractional_credit_{};
+
+    std::size_t queued_requests() const {
+        return read_requests_.size() + write_requests_.size();
+    }
+
+    static double fractional_part(double value) {
+        return value - std::floor(value);
+    }
+
+    static MemResponse make_response(const MemRequest& request) {
+        const int response_bytes = request.operation == MemoryOperation::Read
+                                       ? std::max(1, request.size_bytes)
+                                       : kMemoryControlBytes;
+        return {request.request_id, request.global_addr, request.tier, true,
+                response_bytes, request.operation};
+    }
+
+    static void service_queue(std::deque<Request>& requests,
+                              double bandwidth_bytes_per_cycle,
+                              double& fractional_credit, int now,
+                              std::vector<MemResponse>& completed) {
+        if (requests.empty() || requests.front().ready_cycle > now) {
+            fractional_credit = 0.0;
+            return;
+        }
+
+        double budget = bandwidth_bytes_per_cycle + fractional_credit;
+        while (budget > kBandwidthEpsilon && !requests.empty() &&
+               requests.front().ready_cycle <= now) {
+            Request& request = requests.front();
+            const double transferred = std::min(request.remaining_bytes, budget);
+            if (transferred <= kBandwidthEpsilon) {
+                break;
+            }
+            request.remaining_bytes -= transferred;
+            budget -= transferred;
+            if (request.remaining_bytes <= kBandwidthEpsilon) {
+                completed.push_back(make_response(request.memory_request));
+                requests.pop_front();
+            }
+        }
+        fractional_credit = requests.empty() ? 0.0 : fractional_part(budget);
+    }
+};
+
+// Full-duplex point-to-point link. Each direction has its own serializer and
+// propagation latency; queueing is FIFO and bounded by queue_capacity.
+class D2DLink {
+public:
+    D2DLink(const D2DLinkConfig& config, double core_frequency_mhz)
+        : bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
+              config.bandwidth_gbps, core_frequency_mhz)),
+          latency_cycles_(config.latency_cycles),
+          queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
+
+    bool enqueue_request(const MemRequest& request, int now) {
+        if (request_queue_.size() >= queue_capacity_) {
+            return false;
+        }
+        const int transfer_bytes = request.operation == MemoryOperation::Read
+                                       ? kMemoryControlBytes
+                                       : std::max(1, request.size_bytes);
+        const double serialization = serialization_cycles(transfer_bytes);
+        const double start_cycle =
+            std::max(static_cast<double>(now), next_forward_cycle_);
+        const double finish_cycle = start_cycle + serialization;
+        request_queue_.push_back({request, arrival_cycle(
+                                               finish_cycle + latency_cycles_)});
+        next_forward_cycle_ = finish_cycle;
+        statistics_.forward_bytes += static_cast<std::uint64_t>(transfer_bytes);
+        statistics_.forward_busy_cycles += serialization;
+        return true;
+    }
+
+    bool enqueue_response(const MemResponse& response, int now) {
+        if (response_queue_.size() >= queue_capacity_) {
+            return false;
+        }
+        const int transfer_bytes = response.size_bytes > 0
+                                       ? response.size_bytes
+                                       : kMemoryControlBytes;
+        const double serialization = serialization_cycles(transfer_bytes);
+        const double start_cycle =
+            std::max(static_cast<double>(now), next_reverse_cycle_);
+        const double finish_cycle = start_cycle + serialization;
+        response_queue_.push_back({response, arrival_cycle(
+                                                 finish_cycle + latency_cycles_)});
+        next_reverse_cycle_ = finish_cycle;
+        statistics_.reverse_bytes += static_cast<std::uint64_t>(transfer_bytes);
+        statistics_.reverse_busy_cycles += serialization;
+        return true;
+    }
+
+    std::vector<MemRequest> step_requests(int now) {
+        std::vector<MemRequest> ready;
+        while (!request_queue_.empty() && request_queue_.front().ready_cycle <= now) {
+            ready.push_back(request_queue_.front().value);
+            request_queue_.pop_front();
+        }
+        return ready;
+    }
+
+    std::vector<MemResponse> step_responses(int now) {
+        std::vector<MemResponse> ready;
+        while (!response_queue_.empty() && response_queue_.front().ready_cycle <= now) {
+            ready.push_back(response_queue_.front().value);
+            response_queue_.pop_front();
+        }
+        return ready;
+    }
+
+    D2DLinkStatistics statistics(int elapsed_cycles) const {
+        D2DLinkStatistics result = statistics_;
+        const double duration = static_cast<double>(std::max(1, elapsed_cycles));
+        result.forward_utilization = std::min(
+            1.0, static_cast<double>(result.forward_busy_cycles) / duration);
+        result.reverse_utilization = std::min(
+            1.0, static_cast<double>(result.reverse_busy_cycles) / duration);
+        return result;
+    }
+
+private:
+    template <typename T>
+    struct Transit {
+        T value;
+        int ready_cycle;
+    };
+
+    double bandwidth_bytes_per_cycle_;
+    int latency_cycles_;
+    std::size_t queue_capacity_;
+    double next_forward_cycle_{};
+    double next_reverse_cycle_{};
+    std::deque<Transit<MemRequest>> request_queue_;
+    std::deque<Transit<MemResponse>> response_queue_;
+    D2DLinkStatistics statistics_{};
+
+    double serialization_cycles(int bytes) const {
+        return static_cast<double>(bytes) / bandwidth_bytes_per_cycle_;
+    }
+
+    static int arrival_cycle(double fractional_cycle) {
+        return static_cast<int>(std::ceil(fractional_cycle - 1.0e-12));
+    }
+};
+
+// Owns one of the four supported topologies. Routing is explicit and fixed;
+// D2DLink instances are shared by the routes that physically traverse them.
 class MemorySystem {
 public:
     MemorySystem(int cache_size_bytes, int line_size_bytes, int hit_latency_cycles,
                  int l2_bandwidth_bytes_per_cycle,
                  int l2_write_bandwidth_bytes_per_cycle, int l2_queue_depth,
-                 bool bypass_cache, int dram_bandwidth_bytes_per_cycle,
-                 int dram_latency_cycles, double core_freq_mhz,
-                 double dram_freq_mhz, const TensorRegistry& tensors)
-        : dram_(std::make_unique<DRAMModel>(dram_bandwidth_bytes_per_cycle,
-                                             dram_latency_cycles, line_size_bytes,
-                                             core_freq_mhz, dram_freq_mhz)),
+                 bool bypass_cache, const MemorySystemConfig& memory_config,
+                 double core_frequency_mhz, const TensorRegistry& tensors)
+        : memory_config_(memory_config),
+          tensors_(tensors),
           l2_(std::make_unique<L2Cache>(cache_size_bytes, line_size_bytes,
-                                       hit_latency_cycles,
-                                       l2_bandwidth_bytes_per_cycle,
-                                       l2_write_bandwidth_bytes_per_cycle,
-                                       l2_queue_depth, bypass_cache, tensors)),
-          link_(std::make_unique<D2DLink>()) {
-        link_->connect(l2_.get(), dram_.get());
+                                        hit_latency_cycles,
+                                        l2_bandwidth_bytes_per_cycle,
+                                        l2_write_bandwidth_bytes_per_cycle,
+                                        l2_queue_depth, bypass_cache, tensors)) {
+        validate_memory_system_config(memory_config_);
+        if (!std::isfinite(core_frequency_mhz) || core_frequency_mhz <= 0.0) {
+            throw std::invalid_argument("core frequency must be positive");
+        }
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM: build_full_hbm(core_frequency_mhz); break;
+            case MemoryTopology::FullHBF: build_full_hbf(core_frequency_mhz); break;
+            case MemoryTopology::CoLocated: build_co_located(core_frequency_mhz); break;
+            case MemoryTopology::Cascaded: build_cascaded(core_frequency_mhz); break;
+            default: throw std::invalid_argument("unsupported memory topology");
+        }
+        report_placement_override();
     }
 
     L2Cache* l2() const { return l2_.get(); }
 
     std::vector<int> step(int current_cycle) {
-        auto completed = l2_->step(current_cycle);
-        forward_l2_requests(current_cycle);
-        link_->step(current_cycle);
-        // A response may evict a dirty line. Forward that writeback at the
-        // same cycle the old integrated DRAM model enqueued it.
-        forward_l2_requests(current_cycle);
+        std::vector<int> completed = l2_->step(current_cycle);
+        collect_l2_requests(current_cycle);
+        launch_pending_requests(current_cycle);
+        advance_forward_links(current_cycle);
+        retry_controller_admission(current_cycle);
+
+        if (hbm_) {
+            for (const auto& response : hbm_->step(current_cycle)) {
+                route_response(response, current_cycle);
+            }
+        }
+        if (hbf_) {
+            for (const auto& response : hbf_->step(current_cycle)) {
+                route_response(response, current_cycle);
+            }
+        }
+
+        launch_pending_responses(current_cycle);
+        advance_cascaded_return(current_cycle);
+        advance_gpu_return_links(current_cycle);
+
+        // A response can evict a dirty L2 line. Start its writeback on the
+        // appropriate route in this same cycle, as the integrated model did.
+        collect_l2_requests(current_cycle);
+        launch_pending_requests(current_cycle);
         return completed;
     }
 
-private:
-    std::unique_ptr<DRAMModel> dram_;
-    std::unique_ptr<L2Cache> l2_;
-    std::unique_ptr<D2DLink> link_;
-
-    void forward_l2_requests(int current_cycle) {
-        for (const auto& request : l2_->take_backend_requests()) {
-            link_->enqueue_request(request);
+    MemorySystemStatistics statistics(int current_cycle) const {
+        MemorySystemStatistics result;
+        result.hbm = hbm_statistics_;
+        result.hbf = hbf_statistics_;
+        const int elapsed_cycles = std::max(1, current_cycle + 1);
+        if (gpu_to_hbm_) {
+            result.gpu_to_hbm = gpu_to_hbm_->statistics(elapsed_cycles);
+            result.has_gpu_to_hbm = true;
         }
-        link_->flush_requests(current_cycle);
+        if (gpu_to_hbf_) {
+            result.gpu_to_hbf = gpu_to_hbf_->statistics(elapsed_cycles);
+            result.has_gpu_to_hbf = true;
+        }
+        if (hbm_to_hbf_) {
+            result.hbm_to_hbf = hbm_to_hbf_->statistics(elapsed_cycles);
+            result.has_hbm_to_hbf = true;
+        }
+        return result;
+    }
+
+private:
+    struct RequestRoute {
+        MemoryTier tier;
+        int start_cycle;
+    };
+
+    MemorySystemConfig memory_config_;
+    const TensorRegistry& tensors_;
+    std::unique_ptr<L2Cache> l2_;
+    std::unique_ptr<HBMModel> hbm_;
+    std::unique_ptr<HBFModel> hbf_;
+    std::unique_ptr<D2DLink> gpu_to_hbm_;
+    std::unique_ptr<D2DLink> gpu_to_hbf_;
+    std::unique_ptr<D2DLink> hbm_to_hbf_;
+    std::deque<MemRequest> pending_to_hbm_;
+    std::deque<MemRequest> pending_to_hbf_;
+    std::deque<MemRequest> pending_to_base_;
+    std::deque<MemRequest> pending_hbm_to_hbf_;
+    std::deque<MemRequest> pending_hbm_device_;
+    std::deque<MemRequest> pending_hbf_device_;
+    std::deque<MemResponse> pending_hbm_response_;
+    std::deque<MemResponse> pending_hbf_response_;
+    std::deque<MemResponse> pending_hbm_to_hbf_response_;
+    std::unordered_map<std::uint64_t, RequestRoute> request_routes_;
+    TierMemoryStatistics hbm_statistics_{};
+    TierMemoryStatistics hbf_statistics_{};
+
+    void build_full_hbm(double core_frequency_mhz) {
+        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
+                                          core_frequency_mhz);
+        gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
+                                                 core_frequency_mhz);
+    }
+
+    void build_full_hbf(double core_frequency_mhz) {
+        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
+                                          core_frequency_mhz);
+        gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
+                                                 core_frequency_mhz);
+    }
+
+    void build_co_located(double core_frequency_mhz) {
+        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
+                                          core_frequency_mhz);
+        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
+                                          core_frequency_mhz);
+        gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
+                                                 core_frequency_mhz);
+        gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
+                                                 core_frequency_mhz);
+    }
+
+    void build_cascaded(double core_frequency_mhz) {
+        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
+                                          core_frequency_mhz);
+        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
+                                          core_frequency_mhz);
+        gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
+                                                 core_frequency_mhz);
+        hbm_to_hbf_ = std::make_unique<D2DLink>(memory_config_.hbm_to_hbf,
+                                                 core_frequency_mhz);
+    }
+
+    MemoryTier effective_tier(MemoryTier requested) const {
+        if (memory_config_.topology == MemoryTopology::FullHBM) {
+            return MemoryTier::HBM;
+        }
+        if (memory_config_.topology == MemoryTopology::FullHBF) {
+            return MemoryTier::HBF;
+        }
+        return requested;
+    }
+
+    void report_placement_override() const {
+        if (memory_config_.topology == MemoryTopology::FullHBM &&
+            tensors_.contains_tier(MemoryTier::HBF)) {
+            std::clog << "MemorySystem: automatic placement override: "
+                         "FullHBM routes HBF-tagged allocations to HBM.\n";
+        } else if (memory_config_.topology == MemoryTopology::FullHBF &&
+                   tensors_.contains_tier(MemoryTier::HBM)) {
+            std::clog << "MemorySystem: automatic placement override: "
+                         "FullHBF routes HBM-tagged allocations to HBF.\n";
+        }
+    }
+
+    TierMemoryStatistics& statistics_for(MemoryTier tier) {
+        return tier == MemoryTier::HBM ? hbm_statistics_ : hbf_statistics_;
+    }
+
+    void route_request(const MemRequest& request, int current_cycle) {
+        const MemoryTier tier = effective_tier(request.tier);
+        const auto [it, inserted] = request_routes_.emplace(
+            request.request_id, RequestRoute{tier, current_cycle});
+        if (!inserted) {
+            throw std::logic_error("duplicate memory request id in MemorySystem");
+        }
+        TierMemoryStatistics& stats = statistics_for(tier);
+        ++stats.request_count;
+        if (request.operation == MemoryOperation::Read) {
+            ++stats.read_requests;
+            stats.read_bytes += static_cast<std::uint64_t>(
+                std::max(1, request.size_bytes));
+        } else {
+            ++stats.write_requests;
+            stats.write_bytes += static_cast<std::uint64_t>(
+                std::max(1, request.size_bytes));
+        }
+
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+            case MemoryTopology::CoLocated:
+                if (tier == MemoryTier::HBM) pending_to_hbm_.push_back(request);
+                else pending_to_hbf_.push_back(request);
+                break;
+            case MemoryTopology::FullHBF:
+                pending_to_hbf_.push_back(request);
+                break;
+            case MemoryTopology::Cascaded:
+                pending_to_base_.push_back(request);
+                break;
+        }
+    }
+
+    void collect_l2_requests(int current_cycle) {
+        for (const auto& request : l2_->take_backend_requests()) {
+            route_request(request, current_cycle);
+        }
+    }
+
+    static void launch_requests(D2DLink* link, std::deque<MemRequest>& pending,
+                                int current_cycle) {
+        while (link && !pending.empty() &&
+               link->enqueue_request(pending.front(), current_cycle)) {
+            pending.pop_front();
+        }
+    }
+
+    static void launch_responses(D2DLink* link,
+                                 std::deque<MemResponse>& pending,
+                                 int current_cycle) {
+        while (link && !pending.empty() &&
+               link->enqueue_response(pending.front(), current_cycle)) {
+            pending.pop_front();
+        }
+    }
+
+    void launch_pending_requests(int current_cycle) {
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+                launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
+                break;
+            case MemoryTopology::FullHBF:
+                launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
+                break;
+            case MemoryTopology::CoLocated:
+                launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
+                launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
+                break;
+            case MemoryTopology::Cascaded:
+                launch_requests(gpu_to_hbm_.get(), pending_to_base_, current_cycle);
+                launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
+                                current_cycle);
+                break;
+        }
+    }
+
+    void route_first_hop_arrivals(const std::vector<MemRequest>& requests) {
+        for (const auto& request : requests) {
+            const auto route = request_routes_.find(request.request_id);
+            if (route == request_routes_.end()) {
+                throw std::logic_error("memory request lost its route metadata");
+            }
+            if (memory_config_.topology == MemoryTopology::Cascaded &&
+                route->second.tier == MemoryTier::HBF) {
+                // The HBM base die forwards HBF traffic without submitting it
+                // to HBM DRAM or consuming HBM controller bandwidth.
+                pending_hbm_to_hbf_.push_back(request);
+            } else if (route->second.tier == MemoryTier::HBM) {
+                pending_hbm_device_.push_back(request);
+            } else {
+                pending_hbf_device_.push_back(request);
+            }
+        }
+    }
+
+    void advance_forward_links(int current_cycle) {
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+                route_first_hop_arrivals(
+                    gpu_to_hbm_->step_requests(current_cycle));
+                break;
+            case MemoryTopology::FullHBF:
+                route_first_hop_arrivals(
+                    gpu_to_hbf_->step_requests(current_cycle));
+                break;
+            case MemoryTopology::CoLocated:
+                route_first_hop_arrivals(
+                    gpu_to_hbm_->step_requests(current_cycle));
+                route_first_hop_arrivals(
+                    gpu_to_hbf_->step_requests(current_cycle));
+                break;
+            case MemoryTopology::Cascaded:
+                route_first_hop_arrivals(
+                    gpu_to_hbm_->step_requests(current_cycle));
+                launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
+                                current_cycle);
+                for (const auto& request :
+                     hbm_to_hbf_->step_requests(current_cycle)) {
+                    pending_hbf_device_.push_back(request);
+                }
+                break;
+        }
+    }
+
+    void retry_controller_admission(int current_cycle) {
+        while (hbm_ && !pending_hbm_device_.empty() &&
+               hbm_->try_submit(pending_hbm_device_.front(), current_cycle)) {
+            pending_hbm_device_.pop_front();
+        }
+        while (hbf_ && !pending_hbf_device_.empty() &&
+               hbf_->try_submit(pending_hbf_device_.front(), current_cycle)) {
+            pending_hbf_device_.pop_front();
+        }
+    }
+
+    void route_response(const MemResponse& response, int /*current_cycle*/) {
+        const auto route = request_routes_.find(response.request_id);
+        if (route == request_routes_.end()) {
+            throw std::logic_error("memory response lost its route metadata");
+        }
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+                pending_hbm_response_.push_back(response);
+                break;
+            case MemoryTopology::FullHBF:
+                pending_hbf_response_.push_back(response);
+                break;
+            case MemoryTopology::CoLocated:
+                if (route->second.tier == MemoryTier::HBM) {
+                    pending_hbm_response_.push_back(response);
+                } else {
+                    pending_hbf_response_.push_back(response);
+                }
+                break;
+            case MemoryTopology::Cascaded:
+                if (route->second.tier == MemoryTier::HBM) {
+                    pending_hbm_response_.push_back(response);
+                } else {
+                    pending_hbm_to_hbf_response_.push_back(response);
+                }
+                break;
+        }
+    }
+
+    void launch_pending_responses(int current_cycle) {
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                                 current_cycle);
+                break;
+            case MemoryTopology::FullHBF:
+                launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
+                                 current_cycle);
+                break;
+            case MemoryTopology::CoLocated:
+                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                                 current_cycle);
+                launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
+                                 current_cycle);
+                break;
+            case MemoryTopology::Cascaded:
+                launch_responses(hbm_to_hbf_.get(),
+                                 pending_hbm_to_hbf_response_, current_cycle);
+                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                                 current_cycle);
+                break;
+        }
+    }
+
+    void advance_cascaded_return(int current_cycle) {
+        if (!hbm_to_hbf_) {
+            return;
+        }
+        for (const auto& response : hbm_to_hbf_->step_responses(current_cycle)) {
+            pending_hbm_response_.push_back(response);
+        }
+        launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                         current_cycle);
+    }
+
+    void advance_gpu_return_links(int current_cycle) {
+        std::vector<MemResponse> responses;
+        switch (memory_config_.topology) {
+            case MemoryTopology::FullHBM:
+                responses = gpu_to_hbm_->step_responses(current_cycle);
+                break;
+            case MemoryTopology::FullHBF:
+                responses = gpu_to_hbf_->step_responses(current_cycle);
+                break;
+            case MemoryTopology::CoLocated: {
+                auto hbm_responses = gpu_to_hbm_->step_responses(current_cycle);
+                auto hbf_responses = gpu_to_hbf_->step_responses(current_cycle);
+                responses.reserve(hbm_responses.size() + hbf_responses.size());
+                responses.insert(responses.end(), hbm_responses.begin(),
+                                 hbm_responses.end());
+                responses.insert(responses.end(), hbf_responses.begin(),
+                                 hbf_responses.end());
+                break;
+            }
+            case MemoryTopology::Cascaded:
+                responses = gpu_to_hbm_->step_responses(current_cycle);
+                break;
+        }
+
+        for (const auto& response : responses) {
+            const auto route = request_routes_.find(response.request_id);
+            if (route == request_routes_.end()) {
+                throw std::logic_error("completed response has no request route");
+            }
+            TierMemoryStatistics& stats = statistics_for(route->second.tier);
+            ++stats.completed_requests;
+            stats.total_latency_cycles += static_cast<std::uint64_t>(
+                std::max(0, current_cycle - route->second.start_cycle));
+            request_routes_.erase(route);
+            l2_->handle_response(response, current_cycle);
+        }
     }
 };
 

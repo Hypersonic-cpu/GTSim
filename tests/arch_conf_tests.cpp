@@ -1,6 +1,7 @@
 #include "arch_conf.h"
 
 #include <chrono>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -53,18 +54,17 @@ void require_throws(Function&& function, const std::string& message) {
 int main(int argc, char** argv) {
     try {
         static_assert(glz::reflectable<GTSim::SimulatorConfig>);
-        require(argc == 2, "expected the H100 YAML path");
+        require(argc == 6, "expected the architecture YAML and four memory YAML paths");
 
-        const auto config = GTSim::make_h100_sxm_variants(argv[1]);
+        auto config = GTSim::make_h100_sxm_variants(argv[1]);
         require(config.num_sms == 132, "sm_count was not mapped to num_sms");
         require(config.core_frequency_mhz == 1980.0, "core frequency was not loaded");
-        require(config.dram_frequency_mhz == 2619.0, "memory frequency was not mapped");
         require(config.sram_bandwidth_bytes_per_cycle == 128, "SRAM bandwidth was not loaded");
         require(config.sram_latency_cycles == 33, "SRAM latency was not loaded");
         require(config.l2_bandwidth_bytes_per_cycle == 4300, "L2 bandwidth was not loaded");
         require(config.l2_hit_latency_cycles == 380, "L2 latency was not mapped");
-        require(config.dram_bandwidth_gbps == 3100.0, "DRAM bandwidth was not loaded");
-        require(config.l2_miss_penalty_cycles == 270, "DRAM latency was not mapped");
+        require(config.memory.topology == GTSim::MemoryTopology::FullHBM,
+                "default memory topology is not FullHBM");
         require(config.tma_issue_rate_bytes_per_cycle == 100, "TMA issue rate was not loaded");
         require(config.tma_setup_latency_cycles == 100, "TMA setup latency was not loaded");
         require(config.tma_issue_interval_cycles == 1, "TMA issue interval was not mapped");
@@ -72,6 +72,25 @@ int main(int argc, char** argv) {
                 "omitted patch field did not preserve the base profile");
         require(config.tensor_core_throughput == 128,
                 "descriptive hardware metadata unexpectedly changed simulator throughput");
+
+        const std::array<GTSim::MemoryTopology, 4> expected_topologies{
+            GTSim::MemoryTopology::FullHBM, GTSim::MemoryTopology::FullHBF,
+            GTSim::MemoryTopology::CoLocated, GTSim::MemoryTopology::Cascaded};
+        for (int index = 2; index < argc; ++index) {
+            auto memory_patch = config;
+            GTSim::ArchConfYamlReader(argv[index]).parse(memory_patch);
+            require(memory_patch.memory.topology ==
+                        expected_topologies[static_cast<std::size_t>(index - 2)],
+                    "memory topology YAML enum did not parse");
+            require(memory_patch.memory.hbm.read_bw_gbps == 3100.0 &&
+                        memory_patch.memory.hbf.read_bw_gbps == 1500.0,
+                    "memory controller parameters were not loaded");
+        }
+        GTSim::ArchConfYamlReader(argv[2]).parse(config);
+        require(config.memory.hbm.write_max_bw_gbps == 1550.0,
+                "HBM maximum write bandwidth was not loaded");
+        require(config.memory.hbf.write_latency_cycles == 150000,
+                "HBF write latency was not loaded");
 
         TemporaryYaml partial(R"yaml(
 name: test patch
@@ -91,10 +110,12 @@ scheduler:
         require(patched.num_sms == 8, "partial patch did not override sm_count");
         require(patched.l2_bandwidth_bytes_per_cycle == 2048,
                 "nested L2 patch did not override bandwidth");
-        require(patched.dram_bandwidth_gbps == 900.5,
+        require(patched.memory.hbm.read_bw_gbps == 900.5 &&
+                    patched.memory.hbm.write_max_bw_gbps == 900.5,
                 "partial patch did not preserve floating-point values");
-        require(patched.l2_miss_penalty_cycles == 42,
-                "nested DRAM latency did not map to miss penalty");
+        require(patched.memory.hbm.read_latency_cycles == 42 &&
+                    patched.memory.hbm.write_latency_cycles == 42,
+                "legacy DRAM latency did not map to HBM latency");
         require(patched.startup_delay_cycles == 12, "scheduler field was not mapped");
         require(patched.l2_write_bandwidth_bytes_per_cycle == 512,
                 "omitted field did not preserve the caller's value");
@@ -122,6 +143,26 @@ tmem:
         require(patched.tmem_read_latency_cycles == 18 &&
                     patched.tmem_write_latency_cycles == 23,
                 "nested TMEM fields were not deserialized");
+
+        TemporaryYaml memory_override(R"yaml(
+topology: CoLocated
+hbm:
+  read_bw_gbps: 2500.5
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_gbps: 1000
+)yaml");
+        auto sequential = GTSim::make_h100_sxm_config();
+        GTSim::ArchConfYamlReader(argv[2]).parse(sequential);
+        GTSim::ArchConfYamlReader(memory_override.path()).parse(sequential);
+        require(sequential.memory.topology == GTSim::MemoryTopology::CoLocated,
+                "topology patch did not override the previous memory config");
+        require(sequential.memory.hbm.read_bw_gbps == 2500.5 &&
+                    sequential.memory.hbm.write_max_bw_gbps == 1550.0,
+                "sequential memory patch reset unspecified HBM fields");
+        require(sequential.memory.gpu_to_hbm.bandwidth_gbps == 1000.0 &&
+                    sequential.memory.gpu_to_hbm.latency_cycles == 10,
+                "nested D2D link patch did not preserve omitted link fields");
 
         TemporaryYaml unknown("l2:\n  unknown_bandwidth: 7\n");
         const int old_l2_bandwidth = patched.l2_bandwidth_bytes_per_cycle;
@@ -154,6 +195,18 @@ tmem:
         TemporaryYaml invalid_enum("schedule_policy: random\n");
         require_throws([&] { GTSim::ArchConfYamlReader(invalid_enum.path()).parse(patched); },
                        "invalid enum value was accepted");
+
+        TemporaryYaml invalid_topology("topology: SomeOtherTopology\n");
+        require_throws([&] { GTSim::ArchConfYamlReader(invalid_topology.path()).parse(patched); },
+                       "invalid memory topology was accepted");
+
+        TemporaryYaml invalid_bandwidth("hbf:\n  read_bw_gbps: 0\n");
+        require_throws([&] { GTSim::ArchConfYamlReader(invalid_bandwidth.path()).parse(patched); },
+                       "invalid memory bandwidth was accepted");
+
+        TemporaryYaml unknown_memory("hbm:\n  bandwidth_typo_gbps: 7\n");
+        require_throws([&] { GTSim::ArchConfYamlReader(unknown_memory.path()).parse(patched); },
+                       "unknown memory field was accepted");
 
         TemporaryYaml malformed("l2: [\n");
         require_throws([&] { GTSim::ArchConfYamlReader(malformed.path()).parse(patched); },

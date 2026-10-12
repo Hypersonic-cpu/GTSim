@@ -16,13 +16,16 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
     constexpr int TensorID_C { 2 };
     dag->tensor_registry.allocate_tensor(TensorID_A, "A", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(K)},
-                                 {static_cast<std::uint64_t>(K), 1}, DataType::FP16);
+                                 {static_cast<std::uint64_t>(K), 1}, DataType::FP16,
+                                 MemoryTier::HBF);
     dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
                                            static_cast<std::uint64_t>(N)},
-                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16);
+                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
+                                 MemoryTier::HBF);
     dag->tensor_registry.allocate_tensor(TensorID_C, "C", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(N)},
-                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16);
+                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
+                                 MemoryTier::HBM);
 
     const int bm_tile = 128;
     const int bn_tile = 256;
@@ -287,13 +290,26 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: gtsim_gemm <architecture.yaml> [M N K]\n";
+        std::cerr << "Usage: gtsim_gemm <architecture.yaml> [M N K] "
+                     "[--memory-config memory.yaml]\n";
         return 1;
     }
 
     SimulatorConfig config;
+    std::vector<std::string> workload_args;
     try {
         config = make_h100_sxm_variants(argv[1]);
+        for (int index = 2; index < argc; ++index) {
+            if (std::string(argv[index]) == "--memory-config") {
+                if (index + 1 >= argc) {
+                    throw std::invalid_argument(
+                        "--memory-config requires a YAML path");
+                }
+                ArchConfYamlReader(argv[++index]).parse(config);
+            } else {
+                workload_args.emplace_back(argv[index]);
+            }
+        }
     } catch (const std::exception& error) {
         std::cerr << "Configuration error: " << error.what() << '\n';
         return 1;
@@ -303,9 +319,9 @@ int main(int argc, char* argv[]) {
     int N = 1024;
     int K = 1024;
 
-    if (argc > 2) M = std::atoi(argv[2]);
-    if (argc > 3) N = std::atoi(argv[3]);
-    if (argc > 4) K = std::atoi(argv[4]);
+    if (!workload_args.empty()) M = std::atoi(workload_args[0].c_str());
+    if (workload_args.size() > 1) N = std::atoi(workload_args[1].c_str());
+    if (workload_args.size() > 2) K = std::atoi(workload_args[2].c_str());
 
     std::cout << "=== H100 GEMM ===\n\n";
 

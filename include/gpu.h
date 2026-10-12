@@ -65,8 +65,7 @@ public:
         int l2_write_bandwidth_bytes_per_cycle, int l2_queue_depth,
         int l2_max_transactions_per_cycle_per_sp,
         bool l2_bypass_cache,
-        int dram_bandwidth_bytes_per_cycle, int dram_latency_cycles,
-        double core_freq_mhz, double dram_freq_mhz,
+        const MemorySystemConfig& memory_config, double core_freq_mhz,
         int tma_setup_latency_cycles,
         int tma_issue_interval_cycles,
         int tma_issue_rate_bytes_per_cycle,
@@ -109,8 +108,8 @@ public:
         memory_system = std::make_unique<MemorySystem>(
             l2_cache_size_bytes, l2_line_size_bytes, l2_hit_latency,
             l2_bandwidth_bytes_per_cycle, l2_write_bandwidth_bytes_per_cycle,
-            l2_queue_depth, l2_bypass_cache, dram_bandwidth_bytes_per_cycle,
-            dram_latency_cycles, core_freq_mhz, dram_freq_mhz, tensors);
+            l2_queue_depth, l2_bypass_cache, memory_config, core_freq_mhz,
+            tensors);
         l2 = memory_system->l2();
         node_id_to_sp = nullptr;
         node_id_to_sm = nullptr;
