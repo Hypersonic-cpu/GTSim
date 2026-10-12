@@ -423,7 +423,7 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
             if (is_l2_dram_op(node)) {
                 auto lines = l2->get_subop_lines(*node, subop_index);
                 if (lines.empty()) {
-                    lines.push_back({node->matrix_id, 0});
+                    lines.push_back(l2->get_transaction_key(*node, 0));
                 }
                 for (const auto& line_key : lines) {
                     bool success = false;
@@ -455,11 +455,11 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
             if (setup_latency > 0) {
                 retry_queue_sram.push_back({node_id, bytes_val, bank_conflict_factor,
                                             subop_index, false, current_cycle + setup_latency,
-                                            CacheLineKey{0, 0}, false});
+                                            CacheLineKey{0, 0, 0}, false});
             } else {
                 success = try_enqueue_memory(node, bytes_val, current_cycle,
                                              bank_conflict_factor, subop_index,
-                                             CacheLineKey{0, 0}, false, sram, tmem_mem, l2);
+                                             CacheLineKey{0, 0, 0}, false, sram, tmem_mem, l2);
             }
 
             if (success) {
@@ -473,7 +473,7 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
                 if (setup_latency == 0) {
                     retry_queue_sram.push_back({node_id, bytes_val, bank_conflict_factor,
                                                 subop_index, false, current_cycle,
-                                                CacheLineKey{0, 0}, false});
+                                                CacheLineKey{0, 0, 0}, false});
                 }
             }
         } else {

@@ -5,6 +5,7 @@
 #include <deque>
 #include <cmath>
 #include <cstdlib>
+#include <algorithm>
 
 namespace GTSim {
 

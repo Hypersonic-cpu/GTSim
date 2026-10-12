@@ -47,8 +47,8 @@ static bool enqueue_forward_to_destination_sram(
 }
 
 void GPU::step(int current_cycle) {
-    // Step 1: Step L2/DRAM and handle completions (unchanged)
-    auto completed = l2->step(current_cycle);
+    // Step 1: Step L2 and its DRAM backend through the memory system.
+    auto completed = memory_system->step(current_cycle);
     for (int node_id : completed) {
         if (node_id_to_sp && node_id >= 0 &&
             node_id < static_cast<int>(node_id_to_sp->size())) {

@@ -306,7 +306,8 @@ public:
                                config.tmem_write_bandwidth_bytes_per_cycle,
                                config.tmem_queue_depth,
                                config.startup_delay_cycles,
-                               config.block_schedule_latency_cycles);
+                               config.block_schedule_latency_cycles,
+                               dag->tensor_registry);
 
         // Initialize schedulers with nodes
         int total_nodes = static_cast<int>(dag->nodes.size());

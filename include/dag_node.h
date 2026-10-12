@@ -2,7 +2,11 @@
 #define DAG_NODE_H
 
 #include <array>
+#include <algorithm>
+#include <cstdint>
 #include <initializer_list>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -169,6 +173,144 @@ inline int bytes_per_element(DataType type) {
             return 2;
     }
 }
+
+enum class MemoryTier : std::uint8_t {
+    HBM,
+    HBF
+};
+
+struct TensorMetadata {
+    int id{};
+    std::string name;
+    std::uint64_t global_base_address{};
+    std::vector<std::uint64_t> shape;
+    std::vector<std::uint64_t> strides;
+    DataType dtype{DataType::FP16};
+    MemoryTier initial_memory_tier{MemoryTier::HBM};
+
+    std::uint64_t byte_size() const {
+        if (shape.size() != strides.size()) {
+            throw std::invalid_argument("tensor shape and strides must have the same rank");
+        }
+        if (shape.empty()) {
+            return 0;
+        }
+
+        std::uint64_t last_element = 0;
+        for (std::size_t i = 0; i < shape.size(); ++i) {
+            if (shape[i] == 0) {
+                return 0;
+            }
+            const std::uint64_t extent = shape[i] - 1;
+            if (strides[i] > 0 &&
+                extent > (std::numeric_limits<std::uint64_t>::max() - last_element) /
+                             strides[i]) {
+                throw std::overflow_error("tensor stride span overflows uint64_t");
+            }
+            last_element += extent * strides[i];
+        }
+        if (last_element == std::numeric_limits<std::uint64_t>::max()) {
+            throw std::overflow_error("tensor element count overflows uint64_t");
+        }
+        const std::uint64_t element_count = last_element + 1;
+        const std::uint64_t elem_bytes =
+            static_cast<std::uint64_t>(bytes_per_element(dtype));
+        if (element_count > std::numeric_limits<std::uint64_t>::max() / elem_bytes) {
+            throw std::overflow_error("tensor byte size overflows uint64_t");
+        }
+        return element_count * elem_bytes;
+    }
+
+    bool contains(std::uint64_t address) const {
+        const std::uint64_t size = byte_size();
+        return size > 0 && address >= global_base_address &&
+               address - global_base_address < size;
+    }
+};
+
+// Workload tensors occupy non-overlapping global address ranges. 4 KiB bases
+// keep cache-line alignment stable for the simulator's current power-of-two
+// cache-line sizes while leaving address assignment out of Tile/DAGNode.
+class TensorRegistry {
+public:
+    static constexpr std::uint64_t kAddressAlignment = 4096;
+    static constexpr std::uint64_t kFirstGlobalAddress = 1ULL << 32;
+
+    TensorRegistry() : next_global_address_(kFirstGlobalAddress) {}
+
+    const TensorMetadata& allocate_tensor(int id, std::string name,
+                                          std::vector<std::uint64_t> shape,
+                                          std::vector<std::uint64_t> strides,
+                                          DataType dtype,
+                                          MemoryTier tier = MemoryTier::HBM) {
+        const std::uint64_t base = align_up(next_global_address_, kAddressAlignment);
+        TensorMetadata tensor{id, std::move(name), base, std::move(shape),
+                              std::move(strides), dtype, tier};
+        return register_tensor(std::move(tensor));
+    }
+
+    const TensorMetadata& register_tensor(TensorMetadata tensor) {
+        const auto existing = tensors_.find(tensor.id);
+        if (existing != tensors_.end()) {
+            throw std::invalid_argument("duplicate tensor id " + std::to_string(tensor.id));
+        }
+        const std::uint64_t size = tensor.byte_size();
+        const std::uint64_t reserved_size = std::max<std::uint64_t>(size, 1);
+        if (tensor.global_base_address >
+            std::numeric_limits<std::uint64_t>::max() - reserved_size) {
+            throw std::overflow_error("global tensor address range overflows uint64_t");
+        }
+        for (const auto& [unused_id, existing_tensor] : tensors_) {
+            (void)unused_id;
+            const std::uint64_t existing_size = existing_tensor.byte_size();
+            if (size > 0 && existing_size > 0 &&
+                tensor.global_base_address < existing_tensor.global_base_address + existing_size &&
+                existing_tensor.global_base_address < tensor.global_base_address + size) {
+                throw std::invalid_argument("overlapping global tensor address ranges");
+            }
+        }
+        next_global_address_ = std::max(
+            next_global_address_,
+            align_up(tensor.global_base_address + reserved_size, kAddressAlignment));
+        return tensors_.emplace(tensor.id, std::move(tensor)).first->second;
+    }
+
+    const TensorMetadata& at(int id) const {
+        const auto it = tensors_.find(id);
+        if (it == tensors_.end()) {
+            throw std::out_of_range("tensor id " + std::to_string(id) + " is not registered");
+        }
+        return it->second;
+    }
+
+    MemoryTier resolve_tier(std::uint64_t address) const {
+        for (const auto& [unused_id, tensor] : tensors_) {
+            (void)unused_id;
+            if (tensor.contains(address)) {
+                return tensor.initial_memory_tier;
+            }
+        }
+        throw std::out_of_range("global address is outside registered tensor ranges");
+    }
+
+    std::size_t size() const { return tensors_.size(); }
+
+private:
+    std::unordered_map<int, TensorMetadata> tensors_;
+    std::uint64_t next_global_address_;
+
+    static std::uint64_t align_up(std::uint64_t value, std::uint64_t alignment) {
+        const std::uint64_t remainder = value % alignment;
+        if (remainder == 0) {
+            return value;
+        }
+        const std::uint64_t increment = alignment - remainder;
+        if (value > std::numeric_limits<std::uint64_t>::max() - increment) {
+            throw std::overflow_error("global tensor address alignment overflows uint64_t");
+        }
+        return value + increment;
+    }
+};
 
 // DAG node representing a single operation
 class DAGNode {
@@ -340,6 +482,7 @@ public:
 // DAG containing all nodes for a workload
 class DAG {
 public:
+    TensorRegistry tensor_registry;
     std::vector<DAGNode*> nodes;
     std::unordered_map<int, DAGNode*> nodes_dict;
     std::unordered_map<std::string, DAGNode*> nodes_by_name;

@@ -42,7 +42,7 @@ public:
             lines.insert(lines.end(), sub_lines.begin(), sub_lines.end());
         }
         if (lines.empty()) {
-            lines.push_back({node->matrix_id, 0});
+            lines.push_back(l2->get_transaction_key(*node, 0));
         }
 
         int node_setup = node->tma_setup_latency >= 0 ? node->tma_setup_latency

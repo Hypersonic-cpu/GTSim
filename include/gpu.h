@@ -6,6 +6,7 @@
 #include "noc.h"
 #include <vector>
 #include <deque>
+#include <memory>
 #include <unordered_map>
 
 namespace GTSim {
@@ -35,6 +36,7 @@ class GPU {
 public:
     std::vector<SM*> sms;
     L2Cache* l2;  // L2 cache
+    std::unique_ptr<MemorySystem> memory_system;
     NoC* noc;  // NoC interconnect (nullptr if disabled)
     std::vector<Subpartition*>* node_id_to_sp;
     std::vector<int>* node_id_to_sm;
@@ -76,8 +78,9 @@ public:
         int tmem_write_bandwidth_bytes_per_cycle,
         int tmem_queue_depth,
         int startup_delay_cycles,
-        int block_schedule_latency_cycles)
-        : noc(nullptr), num_sms(num_streaming_multiprocessors) {
+        int block_schedule_latency_cycles,
+        const TensorRegistry& tensors)
+        : l2(nullptr), noc(nullptr), num_sms(num_streaming_multiprocessors) {
 
         // Create SMs
         for (int i = 0; i < num_sms; ++i) {
@@ -103,20 +106,18 @@ public:
                                  block_schedule_latency_cycles));
         }
 
-        // Create L2 cache with integrated DRAM model
-        l2 = new L2Cache(l2_cache_size_bytes, l2_line_size_bytes, l2_hit_latency,
-                         l2_bandwidth_bytes_per_cycle,
-                         l2_write_bandwidth_bytes_per_cycle, l2_queue_depth,
-                         l2_bypass_cache,
-                         dram_bandwidth_bytes_per_cycle, dram_latency_cycles,
-                         core_freq_mhz, dram_freq_mhz);
+        memory_system = std::make_unique<MemorySystem>(
+            l2_cache_size_bytes, l2_line_size_bytes, l2_hit_latency,
+            l2_bandwidth_bytes_per_cycle, l2_write_bandwidth_bytes_per_cycle,
+            l2_queue_depth, l2_bypass_cache, dram_bandwidth_bytes_per_cycle,
+            dram_latency_cycles, core_freq_mhz, dram_freq_mhz, tensors);
+        l2 = memory_system->l2();
         node_id_to_sp = nullptr;
         node_id_to_sm = nullptr;
     }
 
     ~GPU() {
         for (auto* sm : sms) delete sm;
-        delete l2;
         delete noc;
     }
 

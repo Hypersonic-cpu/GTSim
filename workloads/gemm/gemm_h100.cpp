@@ -11,6 +11,19 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
     DAG* dag = new DAG();
     int node_id = 0;
 
+    constexpr int TensorID_A { 0 };
+    constexpr int TensorID_B { 1 };
+    constexpr int TensorID_C { 2 };
+    dag->tensor_registry.allocate_tensor(TensorID_A, "A", {static_cast<std::uint64_t>(M),
+                                           static_cast<std::uint64_t>(K)},
+                                 {static_cast<std::uint64_t>(K), 1}, DataType::FP16);
+    dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
+                                           static_cast<std::uint64_t>(N)},
+                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16);
+    dag->tensor_registry.allocate_tensor(TensorID_C, "C", {static_cast<std::uint64_t>(M),
+                                           static_cast<std::uint64_t>(N)},
+                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16);
+
     const int bm_tile = 128;
     const int bn_tile = 256;
     const int bk_tile = 64;
@@ -107,7 +120,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                                       base_tb_r, k * bk_tile, bm_tile, bk_tile, 0, tma_deps);
                 tma_a->sm_id = sm_id;
                 tma_a->thread_block_id = tb_id;
-                tma_a->matrix_id = 0;
+                tma_a->matrix_id = TensorID_A;
                 tma_a->layout = Layout::RowMajor;
                 tma_a->matrix_leading_dim = K;
                 tma_all_per_k[k].push_back(tma_a->id);
@@ -124,7 +137,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                                           k * bk_tile, off_c, bk_tile, 64, 0, tma_deps);
                     tma_b->sm_id = sm_id;
                     tma_b->thread_block_id = tb_id;
-                    tma_b->matrix_id = 1;
+                    tma_b->matrix_id = TensorID_B;
                     tma_b->layout = Layout::RowMajor;
                     tma_b->matrix_leading_dim = N;
                     tma_b_ids[chunk] = tma_b->id;
@@ -163,7 +176,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                                                       base_r, base_c, 16, 64, 0, deps);
                                 wgmma->sm_id = sm_id;
                                 wgmma->thread_block_id = tb_id;
-                                wgmma->matrix_id = 2;
+                                wgmma->matrix_id = TensorID_C;
                                 wgmma->data_type = DataType::FP32;
                                 if (k == 0 && !prev_tile_post_store.empty()) {
                                     wgmma->depends_on.insert(wgmma->depends_on.end(),
@@ -215,7 +228,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                                               base_r, base_c, 16, 16, 0, deps);
                         store->sm_id = sm_id;
                         store->thread_block_id = tb_id;
-                        store->matrix_id = 2;
+                        store->matrix_id = TensorID_C;
                         store->data_type = DataType::FP16;
                         store->layout = Layout::RowMajor;
                         store_ids.push_back(store->id);
@@ -235,7 +248,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                                       base_tb_r, off_c, bm_tile, 64, 0, store_ids);
                 tma_c->sm_id = sm_id;
                 tma_c->thread_block_id = tb_id;
-                tma_c->matrix_id = 2;
+                tma_c->matrix_id = TensorID_C;
                 tma_c->layout = Layout::RowMajor;
                 tma_c->matrix_leading_dim = N;
                 if (!tma_store_ids.empty()) {

@@ -45,6 +45,38 @@ DAG* build_fa3_h100(int seq_q = 128,
 
     for (int b = 0; b < batch; ++b) {
         for (int h = 0; h < num_heads_q; ++h) {
+            const int matrix_base_q = (b * num_heads_q + h) * 4;
+            dag->tensor_registry.allocate_tensor(
+                matrix_base_q, "Q_b" + std::to_string(b) + "_h" + std::to_string(h),
+                {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
+                {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP16,
+                MemoryTier::HBM);
+            dag->tensor_registry.allocate_tensor(
+                matrix_base_q + 3,
+                "O_b" + std::to_string(b) + "_h" + std::to_string(h),
+                {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
+                {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP16,
+                MemoryTier::HBM);
+        }
+        for (int h = 0; h < num_heads_kv; ++h) {
+            const int matrix_base_kv = (b * num_heads_kv + h) * 4;
+            const std::vector<std::uint64_t> kv_shape{
+                static_cast<std::uint64_t>(head_dim), static_cast<std::uint64_t>(seq_kv)};
+            const std::vector<std::uint64_t> kv_strides{
+                static_cast<std::uint64_t>(seq_kv), 1};
+            dag->tensor_registry.allocate_tensor(
+                matrix_base_kv + 1,
+                "K_b" + std::to_string(b) + "_h" + std::to_string(h),
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM);
+            dag->tensor_registry.allocate_tensor(
+                matrix_base_kv + 2,
+                "V_b" + std::to_string(b) + "_h" + std::to_string(h),
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM);
+        }
+    }
+
+    for (int b = 0; b < batch; ++b) {
+        for (int h = 0; h < num_heads_q; ++h) {
             for (int bx = 0; bx < blocks_q; ++bx) {
                 int base_r = bx * q_tile;
                 int q_rows = std::min(q_tile, std::max(0, seq_q - base_r));
