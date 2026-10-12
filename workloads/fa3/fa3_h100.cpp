@@ -1,4 +1,4 @@
-#include "simulator.h"
+#include "arch_conf.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -500,16 +500,29 @@ DAG* build_fa3_h100(int seq_q = 128,
 }
 
 int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cerr << "Usage: gtsim_fa3 <architecture.yaml> [batch heads_q heads_kv sequence_q sequence_kv]\n";
+        return 1;
+    }
+
+    SimulatorConfig config;
+    try {
+        config = make_h100_sxm_variants(argv[1]);
+    } catch (const std::exception& error) {
+        std::cerr << "Configuration error: " << error.what() << '\n';
+        return 1;
+    }
+
     int seq_q = 128;
     int seq_kv = 128;
     int num_heads_q = 1;
     int num_heads_kv = 1;
     int batch = 1;
-    if (argc > 1) batch = std::atoi(argv[1]);
-    if (argc > 2) num_heads_q = std::atoi(argv[2]);
-    if (argc > 3) num_heads_kv = std::atoi(argv[3]);
-    if (argc > 4) seq_q = std::atoi(argv[4]);
-    if (argc > 5) seq_kv = std::atoi(argv[5]);
+    if (argc > 2) batch = std::atoi(argv[2]);
+    if (argc > 3) num_heads_q = std::atoi(argv[3]);
+    if (argc > 4) num_heads_kv = std::atoi(argv[4]);
+    if (argc > 5) seq_q = std::atoi(argv[5]);
+    if (argc > 6) seq_kv = std::atoi(argv[6]);
 
     if (num_heads_kv <= 0 || num_heads_q <= 0 || (num_heads_q % num_heads_kv) != 0) {
         std::cerr << "Invalid head configuration: head_q must be > 0, head_kv must be > 0, and head_q % head_kv == 0.\n";
@@ -520,7 +533,6 @@ int main(int argc, char* argv[]) {
     DAG* dag = build_fa3_h100(seq_q, seq_kv, num_heads_q, num_heads_kv, batch);
     std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
 
-    SimulatorConfig config = make_h100_sxm_config();
     config.silence_mode = true;
     config.workload_type = WorkloadType::FA3;
 

@@ -23,15 +23,21 @@ citing or extending the repository.
 ## Build and run
 
 ```bash
+git submodule update --init --recursive
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
 # H100 persistent two-stage GEMM: M N K
-./build/gtsim_gemm 512 512 512
+./build/gtsim_gemm configs/v0.1.0/h100-sxm.yaml 512 512 512
 
 # H100 FA3 reference: batch heads_q heads_kv sequence_q sequence_kv
-./build/gtsim_fa3 1 32 8 128 128
+./build/gtsim_fa3 configs/v0.1.0/h100-sxm.yaml 1 32 8 128 128
 ```
+
+Each workload takes an architecture YAML patch as its first argument. The H100
+profile starts from the simulator's shared H100 defaults; YAML values override
+matching fields, omitted values retain those defaults, and unknown fields are
+reported as configuration errors.
 
 Run the smoke tests with `ctest --test-dir build --output-on-failure`. The
 checked reference outputs are in

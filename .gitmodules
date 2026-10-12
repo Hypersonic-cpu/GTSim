@@ -1,0 +1,3 @@
+[submodule "3rdparty/glaze"]
+	path = 3rdparty/glaze
+	url = https://github.com/stephenberry/glaze.git

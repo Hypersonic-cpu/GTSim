@@ -10,7 +10,7 @@ AllowShortCaseLabelsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLoopsOnASingleLine: true
 BreakBeforeBraces: Attach
-ColumnLimit: 100
+ColumnLimit: 80
 ContinuationIndentWidth: 4
 DerivePointerAlignment: false
 IndentCaseLabels: false

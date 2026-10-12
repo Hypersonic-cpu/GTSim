@@ -1,11 +1,14 @@
 name: H100 SXM
 source: GTSim v0.1.0 configuration
+desc:
+  tma.command_issue_interval_provenance: shared modeling baseline; pending dedicated microbenchmark
+  cuda_cores_per_sm: 128
+  sfus_per_sm: 16
+  tensor_core_throughput_fmas_per_clk: 2048
+
 sm_count: 132
 core_frequency_mhz: 1980
 memory_frequency_mhz: 2619
-cuda_cores_per_sm: 128
-sfus_per_sm: 16
-tensor_core_throughput_fmas_per_clk: 2048
 sram:
   bandwidth_bytes_per_cycle: 128
   latency_cycles: 33
@@ -19,7 +22,6 @@ tma:
   issue_rate_bytes_per_cycle: 100
   setup_latency_cycles: 100
   command_issue_interval_cycles: 1
-  command_issue_interval_provenance: shared modeling baseline; pending dedicated microbenchmark
 scheduler:
   startup_delay_cycles: 0
   block_schedule_latency_cycles: 0

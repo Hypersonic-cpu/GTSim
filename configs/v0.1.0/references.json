@@ -9,7 +9,7 @@
       "hardware": "H100 SXM",
       "arguments": ["512", "512", "512"],
       "expected_total_cycles": 12956,
-      "command": "gtsim_gemm 512 512 512"
+      "command": "gtsim_gemm configs/v0.1.0/h100-sxm.yaml 512 512 512"
     },
     {
       "id": "h100_fa3_1_1_1_128_128",
@@ -18,7 +18,7 @@
       "hardware": "H100 SXM",
       "arguments": ["1", "1", "1", "128", "128"],
       "expected_total_cycles": 7168,
-      "command": "gtsim_fa3 1 1 1 128 128"
+      "command": "gtsim_fa3 configs/v0.1.0/h100-sxm.yaml 1 1 1 128 128"
     }
   ]
 }

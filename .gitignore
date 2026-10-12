@@ -17,3 +17,4 @@ __pycache__/
 validation/results/
 .clangd
 *.local
+3rdparty/

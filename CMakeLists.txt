@@ -1,9 +1,11 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(GTSim VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -15,7 +17,9 @@ add_library(gtsim_core STATIC
   src/sm.cpp
   src/gpu.cpp
   src/simulator.cpp)
-target_include_directories(gtsim_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(gtsim_core PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/glaze/include)
 
 add_executable(gtsim_gemm workloads/gemm/gemm_h100.cpp)
 target_link_libraries(gtsim_gemm PRIVATE gtsim_core)
@@ -25,8 +29,12 @@ target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
 
 include(CTest)
 if(BUILD_TESTING)
-  add_test(NAME gemm_smoke COMMAND gtsim_gemm 512 512 512)
-  add_test(NAME fa3_smoke COMMAND gtsim_fa3 1 1 1 128 128)
+  set(H100_ARCH_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/h100-sxm.yaml)
+  add_test(NAME gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG} 512 512 512)
+  add_test(NAME fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG} 1 1 1 128 128)
+  add_executable(arch_conf_tests tests/arch_conf_tests.cpp)
+  target_link_libraries(arch_conf_tests PRIVATE gtsim_core)
+  add_test(NAME arch_conf_parser COMMAND arch_conf_tests ${H100_ARCH_CONFIG})
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     add_test(NAME workload_profile_boundary
@@ -41,3 +49,4 @@ install(TARGETS gtsim_core gtsim_gemm gtsim_fa3
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include/gtsim)
+install(DIRECTORY 3rdparty/glaze/include/glaze DESTINATION include)

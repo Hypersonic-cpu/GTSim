@@ -1,4 +1,4 @@
-#include "simulator.h"
+#include "arch_conf.h"
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -273,20 +273,32 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
 }
 
 int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cerr << "Usage: gtsim_gemm <architecture.yaml> [M N K]\n";
+        return 1;
+    }
+
+    SimulatorConfig config;
+    try {
+        config = make_h100_sxm_variants(argv[1]);
+    } catch (const std::exception& error) {
+        std::cerr << "Configuration error: " << error.what() << '\n';
+        return 1;
+    }
+
     int M = 1024;
     int N = 1024;
     int K = 1024;
 
-    if (argc > 1) M = std::atoi(argv[1]);
-    if (argc > 2) N = std::atoi(argv[2]);
-    if (argc > 3) K = std::atoi(argv[3]);
+    if (argc > 2) M = std::atoi(argv[2]);
+    if (argc > 3) N = std::atoi(argv[3]);
+    if (argc > 4) K = std::atoi(argv[4]);
 
     std::cout << "=== H100 GEMM ===\n\n";
 
     DAG* dag = build_gemm_h100(M, N, K);
     std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
 
-    SimulatorConfig config = make_h100_sxm_config();
     config.silence_mode = true;
 
     Simulator simulator(dag, config);

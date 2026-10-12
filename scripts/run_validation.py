@@ -55,10 +55,11 @@ def validate(root: Path, build: Path, name: str, fields: list[str], start: int, 
     executable = build / f"gtsim_{name}"
     if not executable.is_file():
         raise FileNotFoundError(f"missing executable: {executable}")
+    config_file = root / "configs" / "v0.1.0" / "h100-sxm.yaml"
 
     rows = []
     for index, case in enumerate(cases, start=1):
-        command = [str(executable), *(case[field] for field in fields)]
+        command = [str(executable), str(config_file), *(case[field] for field in fields)]
         simulated = run_simulator(command)
         measured = int(case["measured_cycles"])
         error = abs(simulated - measured) / measured * 100.0

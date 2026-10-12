@@ -24,6 +24,7 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "configs/v0.1.0/references.json").read_text())
+    config_file = root / "configs/v0.1.0/h100-sxm.yaml"
     build = (root / args.build_dir).resolve()
     failures = []
 
@@ -31,7 +32,7 @@ def main() -> int:
         if item["status"] != "release_reproduced":
             continue
         executable = build / ("gtsim_gemm" if "gemm" in item["id"] else "gtsim_fa3")
-        run = subprocess.run([str(executable), *item["arguments"]], text=True,
+        run = subprocess.run([str(executable), str(config_file), *item["arguments"]], text=True,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         if run.returncode != 0:
             failures.append(f"{item['id']}: exit status {run.returncode}")

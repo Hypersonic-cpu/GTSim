@@ -21,71 +21,71 @@ enum class WorkloadType {
 
 // Configuration for the simulator
 struct SimulatorConfig {
-    int warp_count;
-    int tensor_core_throughput;
-    int tensor_core_latency_cycles;
-    int simd_throughput;
-    int simd_latency_cycles;
-    int sfu_throughput;
-    int sfu_latency_cycles;
-    int shfl_latency_cycles;
-    int ls_throughput_bytes;
-    int ls_latency_cycles;
-    int sram_latency_cycles;
-    int sram_bandwidth_bytes_per_cycle;
-    int sram_queue_depth;
-    int tensor_core_width;
-    int simd_width;
-    int sfu_width;
-    int ls_width_bytes;
-    int num_sms;
-    int max_concurrent_blocks_per_sm;  // Maximum concurrent thread blocks per SM
-    bool O2_dynamic_allocation;
-    bool aggressive_store_coalesce;
-    bool silence_mode;
-    SchedulePolicy schedule_policy;
-    WorkloadType workload_type;
+    int warp_count{4};
+    int tensor_core_throughput{256};  // Tensor ops per instruction
+    int tensor_core_latency_cycles{48};
+    int simd_throughput{32};
+    int simd_latency_cycles{4};
+    int sfu_throughput{32};
+    int sfu_latency_cycles{30};
+    int shfl_latency_cycles{4};
+    int ls_throughput_bytes{128};
+    int ls_latency_cycles{10};
+    int sram_latency_cycles{33};  // H100 local DSMEM access (microbenchmark)
+    int sram_bandwidth_bytes_per_cycle{128};
+    int sram_queue_depth{64};
+    int tensor_core_width{32};
+    int simd_width{32};
+    int sfu_width{4};
+    int ls_width_bytes{128};
+    int num_sms{1};
+    int max_concurrent_blocks_per_sm{4};  // Maximum concurrent thread blocks per SM
+    bool O2_dynamic_allocation{false};
+    bool aggressive_store_coalesce{false};
+    bool silence_mode{false};
+    SchedulePolicy schedule_policy{SchedulePolicy::GTO};
+    WorkloadType workload_type{WorkloadType::GEMM};
 
     // L2 cache configuration
-    int l2_cache_size_bytes;
-    int l2_line_size_bytes;
-    int l2_hit_latency_cycles;
-    int l2_miss_penalty_cycles;
-    int l2_bandwidth_bytes_per_cycle;
-    int l2_write_bandwidth_bytes_per_cycle;
-    int l2_queue_depth;
-    int l2_max_transactions_per_cycle_per_sp;
-    bool l2_bypass_cache;
+    int l2_cache_size_bytes{40 * 1024 * 1024};
+    int l2_line_size_bytes{128};
+    int l2_hit_latency_cycles{300};
+    int l2_miss_penalty_cycles{566 - 300};
+    int l2_bandwidth_bytes_per_cycle{1853};
+    int l2_write_bandwidth_bytes_per_cycle{926};  // Half of the default L2 bandwidth
+    int l2_queue_depth{65536};
+    int l2_max_transactions_per_cycle_per_sp{1};
+    bool l2_bypass_cache{false};
 
     // DRAM configuration
-    long long dram_size_bytes;
-    double dram_bandwidth_gbps;
-    double core_frequency_mhz;
-    double dram_frequency_mhz;
+    long long dram_size_bytes{80LL * 1024 * 1024 * 1024};  // H100 SXM typical 80GB
+    double dram_bandwidth_gbps{1407.0};
+    double core_frequency_mhz{1410.0};
+    double dram_frequency_mhz{1215.0};
 
     // Cluster NoC configuration (DSM)
-    int cluster_size;
-    int cluster_noc_bandwidth_bytes_per_cycle;
-    int cluster_noc_latency_cycles;
+    int cluster_size{0};
+    int cluster_noc_bandwidth_bytes_per_cycle{0};
+    int cluster_noc_latency_cycles{0};
 
     // TMA configuration
-    int tma_setup_latency_cycles;
-    int tma_issue_interval_cycles;
-    int tma_issue_rate_bytes_per_cycle;
+    int tma_setup_latency_cycles{200};
+    int tma_issue_interval_cycles{60};
+    int tma_issue_rate_bytes_per_cycle{100};
 
     // Tensor Memory (Blackwell/UMMA) configuration
-    int tmem_cols_per_cta;
-    int tmem_issue_interval_cycles;
-    int tmem_read_latency_cycles;
-    int tmem_read_bandwidth_bytes_per_cycle;
-    int tmem_write_latency_cycles;
-    int tmem_write_bandwidth_bytes_per_cycle;
-    int tmem_queue_depth;
+    int tmem_cols_per_cta{256};
+    int tmem_issue_interval_cycles{1};
+    int tmem_read_latency_cycles{33};
+    int tmem_read_bandwidth_bytes_per_cycle{128};
+    int tmem_write_latency_cycles{33};
+    int tmem_write_bandwidth_bytes_per_cycle{128};
+    int tmem_queue_depth{64};
 
     // Startup delay (cycles) before any node can issue
-    int startup_delay_cycles;
+    int startup_delay_cycles{0};
     // Delay (cycles) before scheduling a new TB after a TB completes (per SM)
-    int block_schedule_latency_cycles;
+    int block_schedule_latency_cycles{0};
 
     // ========================================================================
     // NoC configuration — H100 DSMEM reference parameters
@@ -149,88 +149,17 @@ struct SimulatorConfig {
     // Key insight: mesh vs crossbar difference is mainly in BANDWIDTH
     // contention, not latency. Near-neighbor traffic avoids far links.
     // ========================================================================
-    bool noc_enabled;
-    NoCTopology noc_topology;
-    int noc_latency_cycles;           // Crossbar: one-way latency; Mesh: per-hop latency
-    int noc_bandwidth_bytes_per_cycle; // Per-GPC aggregate bandwidth (bytes/cycle at core freq)
-    int noc_queue_depth;
-    int noc_mesh_rows;                // Mesh: grid rows (rows × cols >= sms_per_cluster)
-    int noc_mesh_cols;                // Mesh: grid columns
-    int noc_sms_per_cluster;          // SMs per cluster/GPC (0 = no cluster restriction)
-    int noc_link_bandwidth_bytes_per_cycle;  // Mesh: per-link bandwidth (0 = use aggregate)
-    int noc_mesh_base_latency_cycles; // Mesh: fixed injection+ejection overhead (DSMEM protocol)
-    std::vector<int> noc_mesh_sm_mapping; // Mesh: logical SM → physical node mapping (empty = identity)
-
-    SimulatorConfig()
-        : warp_count(4),
-          tensor_core_throughput(256),  // Tensor ops per instruction
-          tensor_core_latency_cycles(48),
-          simd_throughput(32),
-          simd_latency_cycles(4),
-          sfu_throughput(32),
-          sfu_latency_cycles(30),
-          shfl_latency_cycles(4),
-          ls_throughput_bytes(128),
-          ls_latency_cycles(10),
-          sram_latency_cycles(33),           // H100 local DSMEM access (microbenchmark)
-          sram_bandwidth_bytes_per_cycle(128),
-          sram_queue_depth(64),
-          tensor_core_width(32),
-          simd_width(32),
-          sfu_width(4),
-          ls_width_bytes(128),
-          num_sms(1),
-          max_concurrent_blocks_per_sm(4),  // Default: 4 concurrent blocks
-          O2_dynamic_allocation(false),
-          aggressive_store_coalesce(false),
-          silence_mode(false),
-          schedule_policy(SchedulePolicy::GTO),
-          workload_type(WorkloadType::GEMM),
-          l2_cache_size_bytes(40 * 1024 * 1024),
-          l2_line_size_bytes(128),
-          l2_hit_latency_cycles(300),
-          l2_miss_penalty_cycles(566 - 300),
-          l2_bandwidth_bytes_per_cycle(1853),
-          l2_write_bandwidth_bytes_per_cycle(0),
-          l2_queue_depth(65536),
-          l2_max_transactions_per_cycle_per_sp(1),
-          l2_bypass_cache(false),
-          dram_size_bytes(80LL * 1024 * 1024 * 1024), // H100 SXM typical 80GB
-          dram_bandwidth_gbps(1407.0), // 1407
-          core_frequency_mhz(1410.0),
-          dram_frequency_mhz(1215.0),
-          cluster_size(0),
-          cluster_noc_bandwidth_bytes_per_cycle(0),
-          cluster_noc_latency_cycles(0),
-          tma_setup_latency_cycles(200),
-          tma_issue_interval_cycles(60),
-          tma_issue_rate_bytes_per_cycle(100),
-          tmem_cols_per_cta(256),
-          tmem_issue_interval_cycles(1),
-          tmem_read_latency_cycles(33),
-          tmem_read_bandwidth_bytes_per_cycle(128),
-          tmem_write_latency_cycles(33),
-          tmem_write_bandwidth_bytes_per_cycle(128),
-          tmem_queue_depth(64),
-          startup_delay_cycles(0),
-          block_schedule_latency_cycles(0),
-          // H100 DSMEM defaults (crossbar model, per-GPC)
-          noc_enabled(false),
-          noc_topology(NoCTopology::CROSSBAR),
-          noc_latency_cycles(74),            // Crossbar one-way: (181 - 33) / 2
-          noc_bandwidth_bytes_per_cycle(237), // 3.28 TB/s / 7 GPCs @ 1980 MHz
-          noc_queue_depth(128),
-          noc_mesh_rows(4),                  // 4×4 mesh for 16-SM cluster
-          noc_mesh_cols(4),
-          noc_sms_per_cluster(16),           // H100: 16 SMs per GPC
-          noc_link_bandwidth_bytes_per_cycle(30), // Bisection equiv: 237/2/4 ≈ 30
-          noc_mesh_base_latency_cycles(60)   // DSMEM protocol overhead (dominant term)
-          {
-            if (l2_write_bandwidth_bytes_per_cycle <= 0) {
-                l2_write_bandwidth_bytes_per_cycle =
-                    l2_bandwidth_bytes_per_cycle / 2;
-            }
-          }
+    bool noc_enabled{false};
+    NoCTopology noc_topology{NoCTopology::CROSSBAR};
+    int noc_latency_cycles{74};  // Crossbar one-way: (181 - 33) / 2
+    int noc_bandwidth_bytes_per_cycle{237};  // 3.28 TB/s / 7 GPCs @ 1980 MHz
+    int noc_queue_depth{128};
+    int noc_mesh_rows{4};  // 4×4 mesh for 16-SM cluster
+    int noc_mesh_cols{4};
+    int noc_sms_per_cluster{16};  // H100: 16 SMs per GPC
+    int noc_link_bandwidth_bytes_per_cycle{30};  // Bisection equiv: 237/2/4 ≈ 30
+    int noc_mesh_base_latency_cycles{60};  // DSMEM protocol overhead (dominant term)
+    std::vector<int> noc_mesh_sm_mapping{};  // Empty means identity mapping
 };
 
 // Shared H100 SXM kernel-simulation profile.  Workload builders must not
