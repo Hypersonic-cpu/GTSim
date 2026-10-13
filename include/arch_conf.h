@@ -306,9 +306,9 @@ private:
                 hbm.data = YamlObject{};
                 auto& hbm_target = hbm.get<YamlObject>();
                 for (const auto& [field, member_value] : value.get<YamlObject>()) {
-                    if (field == "bandwidth_gbps") {
-                        add_member(hbm_target, "read_bw_gbps", member_value);
-                        add_member(hbm_target, "write_max_bw_gbps", member_value);
+                    if (field == "bandwidth_GBps") {
+                        add_member(hbm_target, "read_bw_GBps", member_value);
+                        add_member(hbm_target, "write_max_bw_GBps", member_value);
                     } else if (field == "latency_cycles" ||
                                field == "miss_penalty_cycles") {
                         add_member(hbm_target, "read_latency_cycles", member_value);

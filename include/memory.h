@@ -2,7 +2,7 @@
 #define MEMORY_H
 
 #include "dag_node.h"
-#include "memory_config.h"
+#include "mem_conf.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -915,10 +915,10 @@ struct MemorySystemStatistics {
 class HBMModel {
 public:
     HBMModel(const HBMConfig& config, double core_frequency_mhz)
-        : total_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
-              config.read_bw_gbps, core_frequency_mhz)),
-          write_max_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
-              config.write_max_bw_gbps, core_frequency_mhz)),
+        : total_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
+              config.read_bw_GBps, core_frequency_mhz)),
+          write_max_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
+              config.write_max_bw_GBps, core_frequency_mhz)),
           read_latency_cycles_(config.read_latency_cycles),
           write_latency_cycles_(config.write_latency_cycles),
           queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
@@ -1069,10 +1069,10 @@ using DRAMModel = HBMModel;
 class HBFModel {
 public:
     HBFModel(const HBFConfig& config, double core_frequency_mhz)
-        : read_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
-              config.read_bw_gbps, core_frequency_mhz)),
-          write_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
-              config.write_bw_gbps, core_frequency_mhz)),
+        : read_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
+              config.read_bw_GBps, core_frequency_mhz)),
+          write_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
+              config.write_bw_GBps, core_frequency_mhz)),
           read_latency_cycles_(config.read_latency_cycles),
           write_latency_cycles_(config.write_latency_cycles),
           queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
@@ -1177,8 +1177,8 @@ private:
 class D2DLink {
 public:
     D2DLink(const D2DLinkConfig& config, double core_frequency_mhz)
-        : bandwidth_bytes_per_cycle_(bytes_per_cycle_from_gbps(
-              config.bandwidth_gbps, core_frequency_mhz)),
+        : bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
+              config.bandwidth_GBps, core_frequency_mhz)),
           latency_cycles_(config.latency_cycles),
           queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
 

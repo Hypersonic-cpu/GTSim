@@ -89,21 +89,21 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "Core frequency: " << config.core_frequency_mhz << " MHz\n";
     *output_stream << "Memory topology: "
                    << memory_topology_name(config.memory.topology) << "\n";
-    *output_stream << "HBM read bandwidth: " << config.memory.hbm.read_bw_gbps
+    *output_stream << "HBM read bandwidth: " << config.memory.hbm.read_bw_GBps
                    << " GB/s, write max: "
-                   << config.memory.hbm.write_max_bw_gbps << " GB/s\n";
+                   << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
     *output_stream << "HBM read/write latency: "
                    << config.memory.hbm.read_latency_cycles << "/"
                    << config.memory.hbm.write_latency_cycles << " cycles\n";
     *output_stream << "HBF read/write bandwidth: "
-                   << config.memory.hbf.read_bw_gbps << "/"
-                   << config.memory.hbf.write_bw_gbps << " GB/s\n";
+                   << config.memory.hbf.read_bw_GBps << "/"
+                   << config.memory.hbf.write_bw_GBps << " GB/s\n";
     *output_stream << "HBF read/write latency: "
                    << config.memory.hbf.read_latency_cycles << "/"
                    << config.memory.hbf.write_latency_cycles << " cycles\n";
     const auto print_link_config = [&](const char* name,
                                        const D2DLinkConfig& link) {
-        *output_stream << name << " link: " << link.bandwidth_gbps
+        *output_stream << name << " link: " << link.bandwidth_GBps
                        << " GB/s, " << link.latency_cycles << " cycles\n";
     };
     switch (config.memory.topology) {

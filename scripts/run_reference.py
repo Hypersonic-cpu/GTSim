@@ -25,7 +25,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "configs/v0.1.0/references.json").read_text())
     config_file = root / "configs/v0.1.0/h100-sxm.yaml"
-    memory_config_file = root / "configs/v0.1.0/memory_full_hbm.yaml"
+    memory_config_file = root / "configs/v0.1.0/memory_full_hbm-0F5M.yaml"
     build = (root / args.build_dir).resolve()
     failures = []
 

@@ -106,7 +106,7 @@ void test_co_located_independent_routes() {
     const auto& hbf_tensor = tensors.allocate_tensor(
         1, "hbf_data", {64}, {1}, DataType::FP16, MemoryTier::HBF);
     auto config = fast_config(MemoryTopology::CoLocated);
-    config.gpu_to_hbm.bandwidth_gbps = 100.0;
+    config.gpu_to_hbm.bandwidth_GBps = 100.0;
     auto memory = make_memory(tensors, config);
     const auto completed = run_pair(memory, 10, line_key(hbm_tensor),
                                     11, line_key(hbf_tensor));
@@ -127,7 +127,7 @@ void test_cascaded_shared_link_and_bypass() {
     const auto& hbf_tensor = tensors.allocate_tensor(
         1, "hbf_data", {64}, {1}, DataType::FP16, MemoryTier::HBF);
     auto config = fast_config(MemoryTopology::Cascaded);
-    config.gpu_to_hbm.bandwidth_gbps = 100.0;
+    config.gpu_to_hbm.bandwidth_GBps = 100.0;
     auto memory = make_memory(tensors, config);
     run_pair(memory, 20, line_key(hbm_tensor), 21, line_key(hbf_tensor));
     const auto stats = memory.statistics(100);

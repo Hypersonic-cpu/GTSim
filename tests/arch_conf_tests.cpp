@@ -76,20 +76,27 @@ int main(int argc, char** argv) {
         const std::array<GTSim::MemoryTopology, 4> expected_topologies{
             GTSim::MemoryTopology::FullHBM, GTSim::MemoryTopology::FullHBF,
             GTSim::MemoryTopology::CoLocated, GTSim::MemoryTopology::Cascaded};
+        const std::array<double, 4> expected_hbm_read_bw{3100.0, 0.0,
+                                                          1240.0, 1240.0};
+        const std::array<double, 4> expected_hbf_read_bw{0.0, 2621.44,
+                                                          1572.864, 1572.864};
         for (int index = 2; index < argc; ++index) {
             auto memory_patch = config;
             GTSim::ArchConfYamlReader(argv[index]).parse(memory_patch);
+            const auto profile_index = static_cast<std::size_t>(index - 2);
             require(memory_patch.memory.topology ==
-                        expected_topologies[static_cast<std::size_t>(index - 2)],
+                        expected_topologies[profile_index],
                     "memory topology YAML enum did not parse");
-            require(memory_patch.memory.hbm.read_bw_gbps == 3100.0 &&
-                        memory_patch.memory.hbf.read_bw_gbps == 1500.0,
+            require(memory_patch.memory.hbm.read_bw_GBps ==
+                        expected_hbm_read_bw[profile_index] &&
+                        memory_patch.memory.hbf.read_bw_GBps ==
+                            expected_hbf_read_bw[profile_index],
                     "memory controller parameters were not loaded");
         }
         GTSim::ArchConfYamlReader(argv[2]).parse(config);
-        require(config.memory.hbm.write_max_bw_gbps == 1550.0,
+        require(config.memory.hbm.write_max_bw_GBps == 1550.0,
                 "HBM maximum write bandwidth was not loaded");
-        require(config.memory.hbf.write_latency_cycles == 150000,
+        require(config.memory.hbf.write_latency_cycles == 148500,
                 "HBF write latency was not loaded");
 
         TemporaryYaml partial(R"yaml(
@@ -99,7 +106,7 @@ sm_count: 8
 l2:
   bandwidth_bytes_per_cycle: 2048
 dram:
-  bandwidth_gbps: 900.5
+  bandwidth_GBps: 900.5
   latency_cycles: 42
 scheduler:
   startup_delay_cycles: 12
@@ -110,8 +117,8 @@ scheduler:
         require(patched.num_sms == 8, "partial patch did not override sm_count");
         require(patched.l2_bandwidth_bytes_per_cycle == 2048,
                 "nested L2 patch did not override bandwidth");
-        require(patched.memory.hbm.read_bw_gbps == 900.5 &&
-                    patched.memory.hbm.write_max_bw_gbps == 900.5,
+        require(patched.memory.hbm.read_bw_GBps == 900.5 &&
+                    patched.memory.hbm.write_max_bw_GBps == 900.5,
                 "partial patch did not preserve floating-point values");
         require(patched.memory.hbm.read_latency_cycles == 42 &&
                     patched.memory.hbm.write_latency_cycles == 42,
@@ -147,20 +154,26 @@ tmem:
         TemporaryYaml memory_override(R"yaml(
 topology: CoLocated
 hbm:
-  read_bw_gbps: 2500.5
+  read_bw_GBps: 2500.5
+hbf:
+  read_bw_GBps: 1572.864
+  write_bw_GBps: 83.88
 d2dlink:
   gpu_to_hbm:
-    bandwidth_gbps: 1000
+    bandwidth_GBps: 1000
 )yaml");
         auto sequential = GTSim::make_h100_sxm_config();
         GTSim::ArchConfYamlReader(argv[2]).parse(sequential);
         GTSim::ArchConfYamlReader(memory_override.path()).parse(sequential);
         require(sequential.memory.topology == GTSim::MemoryTopology::CoLocated,
                 "topology patch did not override the previous memory config");
-        require(sequential.memory.hbm.read_bw_gbps == 2500.5 &&
-                    sequential.memory.hbm.write_max_bw_gbps == 1550.0,
+        require(sequential.memory.hbm.read_bw_GBps == 2500.5 &&
+                    sequential.memory.hbm.write_max_bw_GBps == 1550.0,
                 "sequential memory patch reset unspecified HBM fields");
-        require(sequential.memory.gpu_to_hbm.bandwidth_gbps == 1000.0 &&
+        require(sequential.memory.hbf.read_bw_GBps == 1572.864 &&
+                    sequential.memory.hbf.write_bw_GBps == 83.88,
+                "topology patch did not configure the newly active HBF tier");
+        require(sequential.memory.gpu_to_hbm.bandwidth_GBps == 1000.0 &&
                     sequential.memory.gpu_to_hbm.latency_cycles == 10,
                 "nested D2D link patch did not preserve omitted link fields");
 
@@ -200,11 +213,12 @@ d2dlink:
         require_throws([&] { GTSim::ArchConfYamlReader(invalid_topology.path()).parse(patched); },
                        "invalid memory topology was accepted");
 
-        TemporaryYaml invalid_bandwidth("hbf:\n  read_bw_gbps: 0\n");
+        TemporaryYaml invalid_bandwidth(
+            "topology: CoLocated\nhbf:\n  read_bw_GBps: 0\n");
         require_throws([&] { GTSim::ArchConfYamlReader(invalid_bandwidth.path()).parse(patched); },
                        "invalid memory bandwidth was accepted");
 
-        TemporaryYaml unknown_memory("hbm:\n  bandwidth_typo_gbps: 7\n");
+        TemporaryYaml unknown_memory("hbm:\n  bandwidth_typo_GBps: 7\n");
         require_throws([&] { GTSim::ArchConfYamlReader(unknown_memory.path()).parse(patched); },
                        "unknown memory field was accepted");
 

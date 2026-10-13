@@ -3,7 +3,7 @@
 
 #include "gpu.h"
 #include "dag_node.h"
-#include "memory_config.h"
+#include "mem_conf.h"
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
@@ -199,9 +199,9 @@ inline int bytes_per_cycle_from_tbps(double tbps, double core_frequency_mhz) {
 inline void apply_blackwell_b200_defaults(SimulatorConfig& cfg,
                                           double tmem_peak_tbps = 12.0) {
     cfg.core_frequency_mhz = 1965.0;
-    cfg.memory.hbm.read_bw_gbps = 8000.0;
-    cfg.memory.hbm.write_max_bw_gbps = 4000.0;
-    cfg.memory.gpu_to_hbm.bandwidth_gbps = 8000.0;
+    cfg.memory.hbm.read_bw_GBps = 8000.0;
+    cfg.memory.hbm.write_max_bw_GBps = 4000.0;
+    cfg.memory.gpu_to_hbm.bandwidth_GBps = 8000.0;
     cfg.num_sms = 148;
     cfg.l2_cache_size_bytes = 50 * 1024 * 1024; // 50MB
     cfg.l2_hit_latency_cycles = 380;
