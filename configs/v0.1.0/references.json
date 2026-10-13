@@ -9,8 +9,8 @@
       "hardware": "H100 SXM",
       "arguments": ["512", "512", "512"],
       "previous_total_cycles": 12956,
-      "expected_total_cycles": 13169,
-      "cycle_change_reason": "Adds the configured D2D request/response path and HBM maximum-write-bandwidth limit.",
+      "expected_total_cycles": 12249,
+      "cycle_change_reason": "TMA loads for successive K tiles use issue-order dependencies, allowing transfers to overlap before prior values return.",
       "command": "gtsim_gemm configs/v0.1.0/h100-sxm.yaml --memory-config configs/v0.1.0/memory_full_hbm-0F5M.yaml 512 512 512"
     },
     {

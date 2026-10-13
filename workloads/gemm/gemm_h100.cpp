@@ -89,24 +89,21 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
             // Loader warpgroup (warp 8..11) issues TMA loads
             for (int k = 0; k < tiles_k; ++k) {
                 std::vector<int> tma_deps;
+                const auto& previous_tma_issue =
+                    k == 0 ? prev_tile_last_tma : tma_all_per_k[k - 1];
                 if (k == 0) {
-                    if (!prev_tile_last_tma.empty()) {
-                        tma_deps.insert(tma_deps.end(),
-                                        prev_tile_last_tma.begin(),
-                                        prev_tile_last_tma.end());
-                    }
-                    const bool use_last = (tiles_k == 1) || ((tiles_k % 2) == 0);
-                    const auto& cross_wgmma = use_last ? prev_tile_last_wgmma : prev_tile_prev_wgmma;
+                    // k and k-2 reuse the same ping-pong input buffer. The
+                    // next output tile starts at buffer 0, so wait for the
+                    // prior tile's final use of that buffer.
+                    const bool reuse_last_k_buffer = (tiles_k % 2) != 0;
+                    const auto& cross_wgmma = reuse_last_k_buffer
+                                                   ? prev_tile_last_wgmma
+                                                   : prev_tile_prev_wgmma;
                     if (!cross_wgmma.empty()) {
                         tma_deps.insert(tma_deps.end(),
                                         cross_wgmma.begin(),
                                         cross_wgmma.end());
                     }
-                }
-                if (k > 0) {
-                    tma_deps.insert(tma_deps.end(),
-                                    tma_all_per_k[k - 1].begin(),
-                                    tma_all_per_k[k - 1].end());
                 }
                 if (k > 1) {
                     tma_deps.insert(tma_deps.end(),
@@ -146,6 +143,16 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
                     tma_b_ids[chunk] = tma_b->id;
                     tma_b_all.push_back(tma_b->id);
                     tma_all_per_k[k].push_back(tma_b->id);
+                }
+                if (!previous_tma_issue.empty()) {
+                    // Keep TMA stages in issue order, but allow the previous
+                    // stage's transfers to remain in flight.
+                    for (int previous_tma : previous_tma_issue) {
+                        dag->add_issue_dependency(previous_tma, tma_a->id);
+                        for (int tma_b : tma_b_all) {
+                            dag->add_issue_dependency(previous_tma, tma_b);
+                        }
+                    }
                 }
 
                 // Compute warps (0..7): two warp groups, 2 m-halves, 4 k-steps per k
