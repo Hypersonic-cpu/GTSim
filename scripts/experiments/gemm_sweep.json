@@ -1,0 +1,12 @@
+{
+  "name": "gemm",
+  "cmd": "./build/gtsim_gemm configs/v0.1.0/h100-sxm.yaml ${m} ${n} ${k} --memory-config configs/memconf/${memconf_yaml}.yaml --stages ${stages} --bm ${bm} --bn ${bn} --bk ${bk}",
+  "arch": {
+    "memconf_yaml": [
+      "cascaded-5F5M",
+      "colocated-3F2M",
+      "full_hbm"
+    ]
+  },
+  "outfmt": "_${memconf_yaml}_${m}-${n}-${k}_b${bm}-${bn}-${bk}_stg${stages}"
+}

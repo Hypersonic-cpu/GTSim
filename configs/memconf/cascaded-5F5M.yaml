@@ -1,0 +1,26 @@
+# Stack allocation: 3 HBF, 2 HBM. Bandwidths are decimal GB/s.
+# HBM uses its 5-stack total scaled to two stacks; HBF rates aggregate three per-stack values.
+# UCIe Grade 2 effective bandwidth is 1536 GB/s per stack; rates are aggregated.
+# At 1980 MHz, 4 us = 7920 cycles and 75 us = 148500 cycles.
+topology: Cascaded
+
+hbm:
+  read_bw_GBps: 3100
+  write_max_bw_GBps: 1550
+  read_latency_cycles: 270
+  write_latency_cycles: 270
+
+hbf:
+  read_bw_GBps: 2621.44
+  write_bw_GBps: 139.8
+  read_latency_cycles: 7920
+  write_latency_cycles: 148500
+
+d2dlink:
+  # Shared by all five stacks, including HBF pass-through requests.
+  gpu_to_hbm:
+    bandwidth_GBps: 7680
+    latency_cycles: 10
+  hbm_to_hbf:
+    bandwidth_GBps: 4608
+    latency_cycles: 10
