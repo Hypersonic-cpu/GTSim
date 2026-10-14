@@ -23,6 +23,10 @@ enum class WorkloadType {
 // Configuration for the simulator
 struct SimulatorConfig {
     int warp_count{4};
+    int shared_memory_per_sm_bytes{228 * 1024};
+    int shared_memory_per_cta_bytes{227 * 1024};
+    int register_file_per_sm_bytes{65536 * 4};
+    int max_warps_per_sm{64};
     int tensor_core_throughput{256};  // Tensor ops per instruction
     int tensor_core_latency_cycles{48};
     int simd_throughput{32};
@@ -379,6 +383,8 @@ public:
         }
 
         // Initialize thread block residency scheduler for each SM
+        // Constructor errors do not invoke ~Simulator(). Guard GPU ownership.
+        std::unique_ptr<GPU> admission_guard(simulated_gpu);
         for (auto* sm_inst : simulated_gpu->sms) {
             std::vector<DAGNode*> sm_nodes;
             for (auto* node : dag->nodes) {
@@ -386,8 +392,13 @@ public:
                     sm_nodes.push_back(node);
                 }
             }
+            sm_inst->cta_resources = dag->cta_resources;
+            sm_inst->shared_capacity = config.shared_memory_per_sm_bytes;
+            sm_inst->register_capacity = config.register_file_per_sm_bytes;
+            sm_inst->warp_capacity = config.max_warps_per_sm;
             sm_inst->initialize_tb_scheduler(sm_nodes);
         }
+        admission_guard.release();
 
     }
 

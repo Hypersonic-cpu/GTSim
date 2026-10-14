@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shlex
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import re
@@ -254,7 +256,54 @@ def build_command(binary: Path, case: dict[str, Any], memory_config: Path) -> li
         command.extend(str(params[key]) for key in ("M", "N", "K"))
     else:
         command.extend(str(params[key]) for key in ("batch", "heads_q", "heads_kv", "seq_q", "seq_kv"))
+    command.extend(params.get("kernel_args", []))
     return command
+
+
+def execute_record(record: dict[str, Any], command: list[str], log_path: Path, timeout_seconds: int) -> dict[str, Any]:
+    start = time.perf_counter()
+    try:
+        with log_path.open("w") as log:
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=timeout_seconds or None,
+                check=False,
+            )
+        record["duration_seconds"] = round(time.perf_counter() - start, 3)
+        record["return_code"] = completed.returncode
+        output = log_path.read_text(errors="replace")
+        cycle_matches = TOTAL_CYCLES.findall(output)
+        if completed.returncode == 0 and cycle_matches:
+            record["status"] = "completed"
+            record["total_cycles"] = int(cycle_matches[-1])
+            record["slowdown_vs_full_hbm"] = "pending"
+        else:
+            record["status"] = "failed"
+            record["error"] = "no total-cycle line" if not cycle_matches else f"exit status {completed.returncode}"
+    except subprocess.TimeoutExpired:
+        record["duration_seconds"] = round(time.perf_counter() - start, 3)
+        record["status"] = "timeout"
+        record["error"] = f"exceeded {timeout_seconds} seconds"
+
+    if record["status"] == "failed" and record.get("return_code") == 2 and "infeasible kernel" in log_path.read_text(errors="replace"):
+        record["status"] = "infeasible"
+        message = re.search(r"infeasible kernel:.*", output)
+        if message: record["error"] = message.group(0)
+    output = log_path.read_text(errors="replace")
+    match = re.search(r"Generated DAG with (\d+) nodes", output)
+    if match: record["actual_nodes"] = int(match.group(1))
+    match = re.search(r"shared_bytes=(\d+) register_bytes=(\d+) resident_CTA_limit=(\d+)", output)
+    if match: record["resources"] = dict(zip(("shared_bytes", "register_bytes", "resident_cta_limit"), map(int, match.groups())))
+    tiers = re.findall(r"^\s*(HBM|HBF) requests: (\d+) \(read (\d+), write (\d+)\), bytes: read (\d+), write (\d+), average latency: ([\d.]+) cycles", output, re.MULTILINE)
+    record["memory_statistics"] = {
+        tier: dict(requests=int(requests), read_requests=int(reads), write_requests=int(writes),
+                   read_bytes=int(read_bytes), write_bytes=int(write_bytes), average_latency_cycles=float(latency))
+        for tier,requests,reads,writes,read_bytes,write_bytes,latency in tiers
+    }
+    return record
 
 
 def run() -> int:
@@ -266,6 +315,9 @@ def run() -> int:
                         help="Run only the named workload case; may be provided multiple times.")
     parser.add_argument("--output-dir", default="validation/results/gemm_fa3-param-sweep/results/baseline")
     parser.add_argument("--build-dir", default="build")
+    parser.add_argument("--parallelism", type=int, default=4)
+    parser.add_argument("--variant", default="baseline")
+    parser.add_argument("--kernel-args", default="", help="Quoted kernel CLI options for this variant.")
     parser.add_argument("--max-estimated-nodes", type=int, default=2_000_000,
                         help="Skip larger estimated DAGs; use 0 to disable this safety guard (default: 2,000,000).")
     parser.add_argument("--timeout-seconds", type=int, default=600,
@@ -276,6 +328,8 @@ def run() -> int:
     parser.add_argument("--overwrite", action="store_true",
                         help="Force selected cases to rerun and replace their matching result rows.")
     args = parser.parse_args()
+    if args.parallelism < 1:
+        parser.error("parallelism must be positive")
     if args.max_estimated_nodes < 0 or args.timeout_seconds < 0:
         parser.error("node limit and timeout must be non-negative")
 
@@ -300,6 +354,9 @@ def run() -> int:
         if not binaries[workload].is_file():
             parser.error(f"simulator binary not found: {binaries[workload]} (build the project first)")
 
+    if args.kernel_args:
+        for case in cases:
+            case["parameters"] = dict(case["parameters"], kernel_args=shlex.split(args.kernel_args))
     commit, dirty = git_metadata()
     output_dir = Path(args.output_dir)
     if not output_dir.is_absolute():
@@ -327,6 +384,8 @@ def run() -> int:
         payload = {"schema_version": 1, "runs": []}
     existing_identities = {record_identity(record) for record in payload["runs"]}
 
+    executor = ThreadPoolExecutor(max_workers=args.parallelism)
+    futures = {}
     for case, topology, nodes in planned:
         binary = binaries[case["workload"]]
         memory_config = MEMORY_CONFIGS[topology]
@@ -343,7 +402,7 @@ def run() -> int:
         }
         run_key = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()
         identity = case_identity(case, topology)
-        run_id = f"{case['name']}__{topology}"
+        run_id = f"{case['name']}__{topology}__{args.variant}"
         log_path = logs_dir / f"{run_id}.log"
         if not args.overwrite and (identity in existing_identities or log_path.exists()):
             print(f"SKIP    {case['name']} / {topology}: prior result or run log already exists")
@@ -383,39 +442,18 @@ def run() -> int:
             persist(output_dir, payload, commit, dirty)
             continue
 
-        start = time.perf_counter()
-        try:
-            with log_path.open("w") as log:
-                completed = subprocess.run(
-                    command,
-                    cwd=ROOT,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    timeout=args.timeout_seconds or None,
-                    check=False,
-                )
-            record["duration_seconds"] = round(time.perf_counter() - start, 3)
-            record["return_code"] = completed.returncode
-            output = log_path.read_text(errors="replace")
-            cycle_matches = TOTAL_CYCLES.findall(output)
-            if completed.returncode == 0 and cycle_matches:
-                record["status"] = "completed"
-                record["total_cycles"] = int(cycle_matches[-1])
-                record["slowdown_vs_full_hbm"] = "pending"
-            else:
-                record["status"] = "failed"
-                record["error"] = "no total-cycle line" if not cycle_matches else f"exit status {completed.returncode}"
-        except subprocess.TimeoutExpired:
-            record["duration_seconds"] = round(time.perf_counter() - start, 3)
-            record["status"] = "timeout"
-            record["error"] = f"exceeded {args.timeout_seconds} seconds"
+        future = executor.submit(execute_record, record, command, log_path, args.timeout_seconds)
+        futures[future] = identity
 
+    for future in as_completed(futures):
+        record = future.result()
+        identity = futures[future]
         payload["runs"] = [old for old in payload["runs"] if record_identity(old) != identity]
         payload["runs"].append(record)
-        existing_identities.add(identity)
         update_slowdowns(payload["runs"])
-        print(f"{record['status'].upper():8} {run_id}: {record.get('total_cycles', '—')} cycles in {record.get('duration_seconds', '—')} s")
+        print(f"{record['status'].upper():8} {record['run_id']}: {record.get('total_cycles', '—')} cycles", flush=True)
         persist(output_dir, payload, commit, dirty)
+    executor.shutdown()
 
     update_slowdowns(payload["runs"])
     persist(output_dir, payload, commit, dirty)

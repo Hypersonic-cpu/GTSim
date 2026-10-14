@@ -26,6 +26,16 @@ public:
     TMEMUnit* tmem;                   // Tensor Memory unit
     std::vector<Subpartition*>* node_id_to_sp;
 
+    std::unordered_map<int, CTAResources> cta_resources;
+    int shared_capacity{228 * 1024};
+    int register_capacity{65536 * 4};
+    int warp_capacity{64};
+    int shared_used{0};
+    int registers_used{0};
+    int warps_used{0};
+    bool can_admit(int tb) const;
+    void reserve_cta(int tb, int sign);
+
     int max_concurrent_blocks;  // Maximum concurrent thread blocks per SM
 
     // Thread block residency scheduling

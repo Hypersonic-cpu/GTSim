@@ -4,6 +4,24 @@
 
 namespace GTSim {
 
+bool SM::can_admit(int tb) const {
+    auto it = cta_resources.find(tb);
+    if (it == cta_resources.end()) return true;
+    const auto& r = it->second;
+    return shared_used + r.shared_bytes <= shared_capacity &&
+           registers_used + r.register_bytes <= register_capacity &&
+           warps_used + r.warps <= warp_capacity;
+}
+
+void SM::reserve_cta(int tb, int sign) {
+    auto it = cta_resources.find(tb);
+    if (it == cta_resources.end()) return;
+    shared_used += sign * it->second.shared_bytes;
+    registers_used += sign * it->second.register_bytes;
+    warps_used += sign * it->second.warps;
+}
+
+
 void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
     // Build mapping from TB ID to nodes
     int max_node_id = 0;
@@ -27,8 +45,10 @@ void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
 
     // Dispatch first R TBs as resident
     int dispatched = 0;
+    bool admission_open = true;
     for (int tb_id : all_tb_ids) {
-        if (dispatched < max_resident_tbs) {
+        if (admission_open && dispatched < max_resident_tbs && can_admit(tb_id)) {
+            reserve_cta(tb_id, 1);
             resident_tb_ids.insert(tb_id);
 
             // Notify all subpartitions about TB dispatch (event-driven)
@@ -38,6 +58,7 @@ void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
 
             dispatched++;
         } else {
+            admission_open = false;
             waiting_tb_queue.push(tb_id);
         }
     }
@@ -55,7 +76,7 @@ bool SM::is_tb_complete(int tb_id) {
 }
 
 bool SM::dispatch_next_tb(int current_cycle) {
-    if (waiting_tb_queue.empty()) {
+    if (waiting_tb_queue.empty() || !can_admit(waiting_tb_queue.front())) {
         return false;  // No TBs waiting
     }
 
@@ -69,6 +90,7 @@ bool SM::dispatch_next_tb(int current_cycle) {
 
     int next_tb = waiting_tb_queue.front();
     waiting_tb_queue.pop();
+    reserve_cta(next_tb, 1);
     resident_tb_ids.insert(next_tb);
 
     // Notify all subpartitions about TB dispatch (event-driven)
@@ -179,6 +201,7 @@ void SM::step(int current_cycle, L2Cache* l2,
             sp->sp_scheduler->on_tb_retire(tb_id);
         }
 
+        reserve_cta(tb_id, -1);
         resident_tb_ids.erase(tb_id);
         if (block_schedule_latency_cycles > 0) {
             tb_dispatch_ready.push_back(current_cycle + block_schedule_latency_cycles);

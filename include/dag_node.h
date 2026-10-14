@@ -489,10 +489,17 @@ public:
     }
 };
 
+struct CTAResources {
+    int shared_bytes{0};
+    int register_bytes{0};
+    int warps{0};
+};
+
 // DAG containing all nodes for a workload
 class DAG {
 public:
     TensorRegistry tensor_registry;
+    std::unordered_map<int, CTAResources> cta_resources;
     std::vector<DAGNode*> nodes;
     std::unordered_map<int, DAGNode*> nodes_dict;
     std::unordered_map<std::string, DAGNode*> nodes_by_name;
