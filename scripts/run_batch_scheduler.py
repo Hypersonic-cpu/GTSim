@@ -26,6 +26,7 @@ PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
 VARIABLE = re.compile(r"[A-Za-z0-9_-]+\Z")
 CONFIG_SUFFIXES = {".yaml", ".yml", ".json", ".toml"}
 RESERVED_OUTPUT_NAMES = {"inputs", "all_case_names.txt", "all_case_status.log"}
+SUCCESS_MARKER = "✅ Simulation completed"
 
 
 class TaskConfigError(ValueError):
@@ -318,8 +319,19 @@ def validate_output_state(output_root: Path, cases: list[Case], overwrite: bool,
             raise TaskConfigError(f"case output path must not be a symlink: {target}")
         if target.exists() and not target.is_dir():
             raise TaskConfigError(f"case output path exists and is not a directory: {target}")
-        if target.exists() and any(target.iterdir()) and not overwrite:
-            skipped.add(case.name)
+        if target.exists():
+            stats_path = target / "stats.txt"
+            if stats_path.is_symlink() or (stats_path.exists() and not stats_path.is_file()):
+                raise TaskConfigError(f"case stats path is not a regular file: {stats_path}")
+            if not overwrite and stats_path.is_file():
+                try:
+                    completed = SUCCESS_MARKER in stats_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError as error:
+                    raise TaskConfigError(f"cannot read case stats file {stats_path}: {error}") from error
+                if completed:
+                    skipped.add(case.name)
     return skipped
 
 
@@ -410,7 +422,7 @@ def main() -> int:
     for case in cases:
         if case.name in skipped:
             append_status(output_root, start_time, "SKIP", case.name, status_lock)
-            print(f"SKIP {case.name}: nonempty output folder exists (use --overwrite to rerun)")
+            print(f"SKIP {case.name}: stats.txt contains the simulation completion marker")
 
     print(f"Launching {len(active_cases)} cases with {args.parallel_jobs} parallel job(s).")
     failures: list[tuple[str, int]] = []

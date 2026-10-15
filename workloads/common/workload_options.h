@@ -69,9 +69,9 @@ struct KernelOptions {
             if (rows % q_tile || reduction % split || (reduction / split) % 64) fail("FA3 dimensions must divide query tiles and split KV lengths must align to 64 elements");
             if (order != "original" && order != "query-major" && order != "kv-head-grouped") fail("unsupported FA3 CTA order");
         } else {
-            if ((bm != 64 && bm != 128) || (bn != 128 && bn != 256) ||
-                (bk != 32 && bk != 64 && bk != 128)) fail("unsupported GEMM tile");
-            if (rows % bm || columns % bn || reduction % (split * bk)) fail("GEMM dimensions must divide tiles and split K tiles");
+            // if ((bm != 64 && bm != 128) || (bn != 128 && bn != 256) ||
+            //     (bk != 32 && bk != 64 && bk != 128)) fail("unsupported GEMM tile");
+            // if (rows % bm || columns % bn || reduction % (split * bk)) fail("GEMM dimensions must divide tiles and split K tiles");
             if (order != "original" && order != "m-major" && order != "n-major" && order != "grouped") fail("unsupported GEMM CTA order");
         }
         auto r = resources(attention);

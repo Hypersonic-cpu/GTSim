@@ -5,7 +5,7 @@
     "memconf_yaml": [
       "cascaded-5F5M",
       "colocated-3F2M",
-      "full_hbm"
+      "full-hbm"
     ]
   },
   "outfmt": "_${memconf_yaml}_${m}-${n}-${k}_b${bm}-${bn}-${bk}_stg${stages}"
