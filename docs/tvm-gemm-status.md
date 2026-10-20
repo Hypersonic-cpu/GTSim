@@ -104,10 +104,10 @@ known schedule, evaluates its access expressions and exports the common Tile
 IR. It rejects altered/unknown instruction, binding, access and barrier patterns.
 Production generation/lowering does not call or import the manual graph builder.
 
-**Scope limitation:** automatic translation currently accepts one persistent CTA
-wave, covering all eight validation cases. Cross-wave TMA-store completion is
-explicitly unsupported and rejected. Manual persistent-wave graph expansion is
-still available and tested. This is a bounded schedule frontend, not arbitrary
+**Current scope:** automatic translation supports persistent CTAs across multiple
+output tiles, with the TVM TIR's bulk-store completion wait and CTA barrier
+preserved between tiles. The original eight validation cases use one wave.
+Manual persistent-wave graph expansion remains available and tested. This is a bounded schedule frontend, not arbitrary
 TVM kernel lowering. No CUDA numerical execution or hardware timing validation
 was performed for generated kernels.
 
@@ -159,6 +159,73 @@ parity with one, two, and three K stages and a clamped final column group. The
 profile check passes. Both deterministic references remain unchanged:
 GEMM **12,249 cycles**, FA3 **7,212 cycles**. Native TVM tests additionally compare
 legal tile variants against the original builder and reject missing operations,
-barriers or register redistribution, invalid dimensions/layouts, multi-wave
-scope, HBF topology and hardware overflow. These green regression results are
+barriers or register redistribution, invalid dimensions/layouts, HBF topology
+and hardware overflow. Multi-wave tests independently audit the TIR semantics,
+including odd/even barrier phases and incomplete final waves. These green regression results are
 separate from the failed Phase 2 measurement accuracy gate.
+
+
+## Persistent multi-wave extension and 2048x2048x512 sweep
+
+The automatic frontend now expands the authoritative TVM TIR's persistent wave
+loop and final-wave guard. Its per-tile `cp.async.bulk.wait_group(0)` without
+`.read`, followed by a CTA barrier, requires all prior output-store completions
+before any thread starts its next tile. Completion edges into the next first
+loads enforce this boundary; issue-only edges would be incorrect. The native
+protocol follows [NVIDIA's PTX bulk wait-group semantics](https://docs.nvidia.com/cuda/archive/13.1.2/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk-wait-group).
+The C++ builder's different cross-wave overlap is not reproduced. The simulator
+core, hardware configuration, pinned TVM source, manual builder and reference
+cycles are unchanged.
+
+Validation in `validation/results/tvm/automatic-multiwave/` retains exact graph
+and cycle parity for all eight historical single-wave cases. Seven additional
+multi-wave cases pass independent native-TIR trace checks for TMA regions,
+barrier phases, input/output buffer reuse, four-warp collectives, issue order
+and completion-event reachability; all seven run twice with identical cycles.
+They cover K iteration counts 1/2/3/4, one/two compute warpgroups, two/four waves,
+multiple output rows, clamped column groups and incomplete final waves. A
+negative test weakening cross-wave completion dependencies to issue-only edges
+fails the audit. All 13 CTests and the workload-profile check pass; the public
+GEMM validation still reports MAPE 5.70198% (the existing 10.79678% case remains
+waived). These are graph/synchronization and simulated-timing checks, not
+numerical CUDA execution.
+
+The existing `scripts/experiments/tvm_gemm_tiles_2048.csv` was executed without
+changing its candidate rows. The baseline was regenerated and simulated twice
+through the updated TVM pipeline: **26717 cycles**. Every feasible candidate ran
+twice, and both samples matched exactly:
+
+| BM x BN x BK | Waves | Simulated cycles | Baseline speedup |
+|---|---|---|---|
+| 64 x 128 x 32 | 4 | 46058 | 0.5801x |
+| 64 x 128 x 64 | 4 | 37434 | 0.7137x |
+| 64 x 128 x 128 | 4 | 37059 | 0.7209x |
+| 64 x 256 x 32 | 2 | 39870 | 0.6701x |
+| 64 x 256 x 64 | 2 | 34785 | 0.7681x |
+| 64 x 256 x 128 | 2 | 26978 | 0.9903x |
+| 128 x 128 x 32 | 2 | 41014 | 0.6514x |
+| 128 x 128 x 64 | 2 | 33231 | 0.8040x |
+| 128 x 128 x 128 | 2 | 32570 | 0.8203x |
+| 128 x 256 x 32 | 1 | 31384 | 0.8513x |
+| 128 x 256 x 64 | 1 | 26717 | 1.0000x |
+| 128 x 256 x 128 | - | rejected | shared-memory footprint 262144 exceeds capacity |
+
+**Best tested tile: 128x256x64, 26717 cycles, 1.0000x baseline.** All 11 feasible
+configurations complete, including all nine that previously failed the one-wave
+guard. Only 128x256x128 is rejected: 262144 shared bytes exceeds the unchanged
+232448-byte per-CTA limit. No valid candidate is rejected for multiple waves.
+
+Results, source/IR hashes, baseline, input CSV snapshot and both per-case logs
+are in `validation/results/tvm/tile-sweep-2048x2048x512-multiwave/`. Previous
+results remain in their original directories. To reproduce:
+
+```sh
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py \
+  --allow-measurement-error --jobs 4 \
+  --out-dir validation/results/tvm/automatic-multiwave
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py \
+  --params scripts/experiments/tvm_gemm_tiles_2048.csv \
+  --validation validation/results/tvm/automatic-multiwave/results.json \
+  --out-dir validation/results/tvm/tile-sweep-2048x2048x512-multiwave \
+  --jobs 4 --repeats 2
+```

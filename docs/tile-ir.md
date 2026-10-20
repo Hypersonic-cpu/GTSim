@@ -245,14 +245,36 @@ To lower a saved module independently:
 ```
 
 Scope is deliberately bounded: compact rank-2 FP16 A/B/C, two stages, 12 warps,
-split=1, original order, FullHBM, and **one persistent CTA wave**. All eight
-measurement cases fit that limit. Multi-wave kernels fail before simulation:
-the reference's overlapping cross-wave TMA-store completion protocol is not
-translated by this initial automatic frontend. The manual IR path retains its
-tested persistent-wave expansion. Arbitrary scheduled TIR, generic GEMM,
-alternate layouts/synchronization, HBF, partial tiles and incomplete warpgroups
-are rejected. These commands verify compiler representation and GTSim behavior;
-they do not establish numerical CUDA correctness or physical H100 performance.
+split=1, original order, FullHBM, and persistent CTAs with one or more output
+tiles each. The lowerer expands the native `wave` loop and evaluates its guard
+and TMA coordinates for each CTA, including an incomplete final wave. CTA/SM
+and warp assignments and per-CTA resources remain fixed across its tiles.
+
+The selected TVM TIR is authoritative for synchronization. It ends each tile
+with `cp.async.bulk.commit_group`, `cp.async.bulk.wait_group(0)` without `.read`,
+and a CTA barrier. Therefore **every prior output TMA completion gates the next
+tile's first input loads**; issue-only dependencies are insufficient. Later
+loads and compute inherit that boundary. Input-stage reuse within a tile waits
+for consumers of the same ping-pong slot to complete. The boundary also covers
+both slots across tiles, including odd K iteration counts. No extra barrier
+latency or hardware timing is introduced: these are existing completion edges.
+The C++ builder permits different cross-wave overlap and is not the oracle for
+this extension. Its existing manual graph path and reference timings are kept.
+
+`semantic_checks.py` independently expands the actual TIR control flow with TVM
+symbolic bindings and checks TMA regions, four-warp collective counts, barrier
+phases, completion-event reachability, buffer reuse and output joins. An
+issue-only edge does not count as predecessor completion. The validation suite
+runs seven multi-wave cases twice each on the configured hardware: one/two/three/
+four K steps, both compute-warpgroup counts, multiple rows, clamped column
+mapping and incomplete final waves. Eight historical single-wave cases retain
+exact manual/builder graph and cycle parity. Altered waits/barriers are rejected,
+and a deliberately weakened cross-wave graph fails the semantic audit.
+
+Arbitrary scheduled TIR, generic GEMM, alternate layouts/synchronization, HBF,
+partial tiles and incomplete warpgroups remain unsupported. These checks verify
+compiler representation and GTSim behavior; they do not execute a numerical
+CUDA kernel or measure physical H100 performance.
 
 Optional native-TVM tests can be enabled without adding TVM to the core build:
 
@@ -270,7 +292,7 @@ ctest --test-dir build --output-on-failure
 
 The CSV selects M/N/K and BM/BN/BK. Supported tile axes are BM={64,128},
 BN={128,256}, BK={32,64,128}, subject to divisibility, complete intrinsic layout,
-one-wave scope and hardware capacity. Two stages, 12 warps, split=1, original
+hardware capacity. Two stages, 12 warps, split=1, original
 order and FullHBM stay fixed. Optional CSV fields for these settings must match
 their fixed values. Unknown fields and duplicate schedules fail explicitly.
 
@@ -278,7 +300,8 @@ Hardware capacity and topology come from the existing C++ YAML reader through
 the runner's read-only `--describe-config` query, so Python never silently
 substitutes a different profile. Invalid candidates are recorded before
 simulation. The launcher requires the eight-case Phase 3 report, its explicit
-accuracy waiver when needed, and matching frontend/core/configuration hashes.
+accuracy waiver when needed, successful multi-wave TIR synchronization checks,
+and matching frontend/core/configuration hashes.
 It generates a native TVM kernel for each distinct candidate and simulates every
 accepted schedule at least twice. At least two distinct TIR kernels and graph
 specifications must complete reproducibly.
@@ -298,3 +321,18 @@ For the supplied 512x512x512 sweep, 11 candidates complete reproducibly and
 simulated** configuration is BM=64, BN=128, BK=128: 6500 cycles versus the fixed
 128x256x64 baseline's 12249 cycles, a 1.8845x simulated speedup. This is not an
 optimality claim or a physical-H100 result.
+
+
+For the existing 2048x2048x512 CSV, preserve previous results in a separate output
+folder and recompute both validation and the fixed baseline with the new frontend:
+
+```sh
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py \
+  --allow-measurement-error --jobs 4 \
+  --out-dir validation/results/tvm/automatic-multiwave
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py \
+  --params scripts/experiments/tvm_gemm_tiles_2048.csv \
+  --validation validation/results/tvm/automatic-multiwave/results.json \
+  --out-dir validation/results/tvm/tile-sweep-2048x2048x512-multiwave \
+  --jobs 4 --repeats 2
+```

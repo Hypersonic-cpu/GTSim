@@ -14,6 +14,7 @@ from h100_schedule import GemmSchedule, scheduled_gemm
 from lower_gemm import lower_gemm
 from manual_gemm import manual_gemm
 from pinned_tvm import load_tvm
+from semantic_checks import check_semantics, multiwave_cases
 
 
 def replace_calls(tvm, stmt, operation):
@@ -55,6 +56,26 @@ def main():
         path, _ = generate(tvm, (128, 2816, 64), GemmSchedule(), hardware, directory)
         if path.read_text() != manual_gemm(128, 2816, 64).text():
             raise RuntimeError("clamped original CTA order mismatch")
+    for dimensions, tile in multiwave_cases(2):
+        func = scheduled_gemm(tvm, *dimensions, GemmSchedule(*tile), sms=2)
+        # Consume a saved/reloaded native module, with no C++ parity oracle.
+        func = tvm.ir.load_json(tvm.ir.save_json(tvm.IRModule({"gemm": func})))["gemm"]
+        ir, evidence = lower_gemm(tvm, func)
+        check_semantics(tvm, func, ir, selected_ctas=range(len(ir.ctas)))
+        assert evidence["waves"] > 1
+    # A completion wait must not accidentally become an issue-only wait.
+    func = scheduled_gemm(tvm, 128, 768, 192, sms=2)
+    ir, _ = lower_gemm(tvm, func)
+    changed = [op for op in ir.operations if op.name.startswith("TB0_Tile2_TMA_Load") and '_k0' in op.name]
+    for op in changed:
+        op.after_issue += op.after_complete
+        op.after_complete = []
+    try:
+        check_semantics(tvm, func, ir)
+    except AssertionError:
+        pass
+    else:
+        raise RuntimeError("semantic audit accepted issue-only cross-wave store waits")
     def reject(action, label):
         try:
             action()
@@ -64,14 +85,14 @@ def main():
     func = scheduled_gemm(tvm, 128, 256, 128)
     reject(lambda: lower_gemm(tvm, func.with_attr("gtsim.tensor_tiers", ["HBF", "HBM", "HBM"])), "HBF placement")
     for operation in ("tirx.ptx.cp_async_bulk_tensor_g2s_cluster", "tirx.ptx.wgmma_f16_ss",
-                      "tirx.cuda.mbarrier_wait", "tirx.cuda.cta_sync", "tirx.ptx.wgmma_wait_group", "tirx.ptx.setmaxnreg"):
+                      "tirx.cuda.mbarrier_wait", "tirx.cuda.cta_sync", "tirx.ptx.wgmma_wait_group", "tirx.ptx.setmaxnreg",
+                      "tirx.ptx.cp_async_bulk_wait_group", "tirx.ptx.cp_async_bulk_commit_group"):
         bad = func.with_body(replace_calls(tvm, func.body, operation))
         reject(lambda: lower_gemm(tvm, bad), f"missing {operation}")
     reject(lambda: scheduled_gemm(tvm, 128, 256, 128, GemmSchedule(128, 256, 128)), "shared overflow")
     reject(lambda: scheduled_gemm(tvm, 127, 256, 128), "divisibility")
     reject(lambda: scheduled_gemm(tvm, 128, 256, 128, GemmSchedule(128, 64, 64)), "partial warpgroup")
     reject(lambda: scheduled_gemm(tvm, 128, 256, 128, sms=0), "SM count")
-    reject(lambda: scheduled_gemm(tvm, 1024, 1024, 128, sms=2), "multiple waves")
     from smoke import copy_program
     reject(lambda: lower_gemm(tvm, copy_program(tvm)), "generic TIR")
     low_capacity = dict(hardware, register_file_per_sm_bytes=1)
@@ -81,7 +102,10 @@ def main():
                              str(ROOT / "configs/memconf/full-hbf.yaml"), "--describe-config"], capture_output=True)
     if result.returncode == 0:
         raise RuntimeError("accepted HBF topology in preflight")
-    print("Native TVM lowering, graph parity and unsupported-semantics checks passed")
+    bad = scheduled_gemm(tvm, 128, 768, 192, sms=2)
+    reject(lambda: lower_gemm(tvm, bad.with_body(replace_calls(tvm, bad.body, "tirx.ptx.cp_async_bulk_wait_group"))),
+           "missing cross-wave bulk completion wait")
+    print("Native TVM single-wave parity, multi-wave TIR semantics and rejection checks passed")
 
 
 if __name__ == "__main__":

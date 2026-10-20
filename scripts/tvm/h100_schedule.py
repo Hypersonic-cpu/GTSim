@@ -35,8 +35,6 @@ class GemmSchedule:
             raise ValueError("M, N and K must divide BM, BN and BK exactly")
         if (m // self.bm) * (n // self.bn) > 2**31 - 1:
             raise ValueError("output tile count overflows int32")
-        if (m // self.bm) * (n // self.bn) > sms:
-            raise ValueError("automatic lowering currently supports one persistent CTA wave; cross-wave TMA-store completion is unsupported")
         # The ISA selection below uses complete m64n64k16 collectives, a
         # 128-column slice per warpgroup, and 64-column TMA B/C boxes.
         if self.bm % 64 or self.bn % 128 or self.bk % 16:

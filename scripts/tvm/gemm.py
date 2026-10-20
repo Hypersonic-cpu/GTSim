@@ -75,7 +75,7 @@ def translate(tvm, func, hardware, out):
         "ir_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "dag_spec_sha256": hashlib.sha256(json.dumps(graph, separators=(",", ":")).encode()).hexdigest(),
         "tir_sha256": hashlib.sha256(tvm.ir.save_json(func).encode()).hexdigest(), "hardware": hardware,
-        "scope": "one persistent wave, two stages, 12 warps, split=1, original CTA order; HBM only"})
+        "scope": "persistent multi-wave CTAs, two stages, 12 warps, split=1, original CTA order; HBM only"})
     (out / "lowering.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return path, evidence
 

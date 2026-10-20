@@ -48,6 +48,11 @@ def check_gate(path):
         raise ValueError("Phase 3 graph/cycle gate has not passed")
     if not report.get("accuracy_pass") and not report.get("measurement_accuracy_waived"):
         raise ValueError("measurement error needs an explicit --allow-measurement-error validation waiver")
+    persistent = report.get("persistent_cases", [])
+    if not report.get("multiwave_semantics_pass") or not persistent or not all(
+            row.get("semantics_pass") and len(row.get("cycle_samples", [])) >= 2
+            and len(set(row["cycle_samples"])) == 1 for row in persistent):
+        raise ValueError("multi-wave TIR synchronization validation must pass; rerun validate_tvm_gemm.py")
     if report.get("source_sha256") != source_hashes():
         raise ValueError("frontend/core/configuration changed after Phase 3 validation; rerun validate_tvm_gemm.py")
     return report
@@ -66,7 +71,7 @@ def simulate(task):
         return {**row, "status": "complete", "failure_reason": "", "cycles": samples[0], "cycle_samples": samples,
                 "nodes": evidence["nodes"], "ir_path": str(path), "ir_sha256": evidence["ir_sha256"],
                 "dag_spec_sha256": evidence["dag_spec_sha256"], "tir_sha256": evidence["tir_sha256"],
-                "shared_bytes": evidence["shared_bytes"], "register_bytes": evidence["register_bytes"],
+                "shared_bytes": evidence["shared_bytes"], "register_bytes": evidence["register_bytes"], "waves": evidence["waves"],
                 "commands": commands}
     except (OSError, RuntimeError) as error:
         return {**row, "status": "failed", "failure_reason": str(error)}
@@ -155,10 +160,12 @@ def main():
         "source_sha256": source_hashes(), "launcher_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "parameter_sha256": hashlib.sha256(args.params.read_bytes()).hexdigest(),
         "measurement_accuracy_waived": gate["measurement_accuracy_waived"], "measurement_accuracy_pass": gate["accuracy_pass"],
+        "semantics_authority": "TVM TIR; bulk.wait_group(0) followed by CTA barrier between output tiles",
+        "multiwave_semantics_pass": gate["multiwave_semantics_pass"],
         "fixed": FIXED, "repeats": args.repeats, "distinct_valid_dags": distinct, "distinct_tir": distinct_tir,
         "baselines": {"x".join(map(str, key)): value for key, value in baselines.items()}, "rows": rows, "best": best}
     (out / "results.json").write_text(json.dumps(report, indent=2) + "\n")
-    columns = ["case", *FIELDS, "status", "cycles", "baseline_cycles", "speedup", "nodes",
+    columns = ["case", *FIELDS, "status", "cycles", "baseline_cycles", "speedup", "waves", "nodes",
                "ir_path", "ir_sha256", "dag_spec_sha256", "tir_sha256", "failure_reason"]
     with (out / "results.csv").open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=columns, extrasaction="ignore")

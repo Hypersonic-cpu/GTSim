@@ -5,6 +5,8 @@ program makes synchronization, descriptor shapes/layout, offsets and instruction
 selection preconditions, rather than hints that a generic GEMM may ignore.
 """
 
+from functools import cache
+
 from h100_schedule import GemmSchedule, scheduled_gemm
 from tile_ir import Operation, TileIR
 
@@ -20,7 +22,8 @@ def evaluate(tvm, expr, context):
         return context[str(expr.name)]
     binary = {t.Add: lambda a, b: a + b, t.Sub: lambda a, b: a - b,
               t.Mul: lambda a, b: a * b, t.FloorDiv: lambda a, b: a // b,
-              t.FloorMod: lambda a, b: a % b, t.Min: min, t.Max: max}
+              t.FloorMod: lambda a, b: a % b, t.Min: min, t.Max: max,
+              t.LT: lambda a, b: a < b}
     for kind, function in binary.items():
         if isinstance(expr, kind):
             return function(evaluate(tvm, expr.a, context), evaluate(tvm, expr.b, context))
@@ -90,7 +93,8 @@ def recognize(tvm, func):
     stores = [call for call in calls if call.op.name == "tirx.ptx.cp_async_bulk_tensor_s2g"]
     shared_store = next(node for node in nodes if isinstance(node, t.BufferStore) and str(node.buffer.name) == "stage_c")
     extents = {str(node.loop_var.name): int(node.extent) for node in nodes if isinstance(node, t.For)}
-    native_pattern = {"a": loads["map_a"], "b": loads["map_b"], "c": stores[0],
+    wave_loop = next(node for node in nodes if isinstance(node, t.For) and str(node.loop_var.name) == "wave")
+    native_pattern = {"wave_guard": wave_loop.body.condition, "a": loads["map_a"], "b": loads["map_b"], "c": stores[0],
                       "maps": tensor_maps, "store": shared_store, "extents": extents}
     register_calls = [call for call in calls if call.op.name == "tirx.ptx.setmaxnreg"]
     budgets = {call.args[1].value: int(call.args[0]) for call in register_calls}
@@ -126,64 +130,82 @@ def lower_gemm(tvm, func):
 
     for cta in range(evidence["thread_bindings"]["blockIdx.x"]):
         ir.cta(cta, cta, schedule.shared_bytes, schedule.register_bytes)
-        prefix = f"TB{cta}_Tile{cta}"
-        context = {"bx": cta, "wave": 0, "kk": 0, "chunk": 0, "tx": 0, "mh": 0, "nc": 0, "ri": 0}
+        previous_wave_stores = []
+        for wave in range(native["extents"]["wave"]):
+            context = {"bx": cta, "wave": wave, "kk": 0, "chunk": 0, "tx": 0, "mh": 0, "nc": 0, "ri": 0}
+            if not evaluate(tvm, native["wave_guard"], context):
+                continue
+            tile = evaluate(tvm, native["wave_guard"].a, context)
+            prefix = f"TB{cta}_Tile{tile}"
 
-        def output_region(warp, half, n_chunk, register=0, rows=16, columns=64):
-            local = dict(context, tx=warp * 32, mh=half, nc=n_chunk, ri=register)
-            physical_chunk, row, column = [evaluate(tvm, index, local) for index in native["store"].indices]
-            global_row, global_column, _, _ = access("c", dict(local, chunk=physical_chunk))
-            return global_row + row, global_column + column, rows, columns
+            # The matched native output indices are independent of kk. Reuse
+            # each per-tile coordinate evaluation across reduction iterations.
+            @cache
+            def output_region(warp, half, n_chunk, register=0, rows=16, columns=64):
+                local = dict(context, tx=warp * 32, mh=half, nc=n_chunk, ri=register)
+                physical_chunk, row, column = [evaluate(tvm, index, local) for index in native["store"].indices]
+                global_row, global_column, _, _ = access("c", dict(local, chunk=physical_chunk))
+                return global_row + row, global_column + column, rows, columns
 
-        def emit(suffix, operation, warp, tensor, region, complete=(), issue=(), dtype="fp16"):
-            return ir.add(Operation(prefix + suffix, operation, cta, warp, tensor, region,
-                                    dtype, list(complete), list(issue)))
+            def emit(suffix, operation, warp, tensor, region, complete=(), issue=(), dtype="fp16"):
+                return ir.add(Operation(prefix + suffix, operation, cta, warp, tensor, region,
+                                        dtype, list(complete), list(issue)))
 
-        stage_loads, stage_mma = [], []
-        warp_last = [None] * (bn // 32)
-        for stage in range(native["extents"]["kk"]):
-            context["kk"] = stage
-            # mbarrier.empty is signaled after every consumer group's wait0;
-            # reuse waits for the complete stage from two iterations earlier.
-            consumed = stage_mma[stage - 2] if stage >= 2 else []
-            previous_issues = stage_loads[-1] if stage else []
-            loads = [emit(f"_TMA_LoadA_k{stage}", "cp.dram2sram_tma", 8, 0,
-                          access("a", context), consumed, previous_issues)]
-            loads.extend(emit(f"_TMA_LoadB_k{stage}_c{chunk}", "cp.dram2sram_tma", 8, 1,
-                              access("b", dict(context, chunk=chunk)), consumed, previous_issues)
-                         for chunk in range(bn // 64))
-            stage_loads.append(loads)
-            fragments = []
+            stage_loads, stage_mma = [], []
+            warp_last = [None] * (bn // 32)
+            for stage in range(native["extents"]["kk"]):
+                context["kk"] = stage
+                # mbarrier.empty is signaled after every consumer group's wait0;
+                # reuse waits for the complete stage from two iterations earlier.
+                consumed = stage_mma[stage - 2] if stage >= 2 else []
+                if stage == 0:
+                    # The selected TIR ends each tile with bulk.wait_group(0)
+                    # followed by a CTA barrier. Every next-wave thread waits
+                    # for ALL prior TMA output completions, not merely issue.
+                    consumed = previous_wave_stores
+                previous_issues = stage_loads[-1] if stage else []
+                loads = [emit(f"_TMA_LoadA_k{stage}", "cp.dram2sram_tma", 8, 0,
+                              access("a", context), consumed, previous_issues)]
+                loads.extend(emit(f"_TMA_LoadB_k{stage}_c{chunk}", "cp.dram2sram_tma", 8, 1,
+                                  access("b", dict(context, chunk=chunk)), consumed, previous_issues)
+                             for chunk in range(bn // 64))
+                stage_loads.append(loads)
+                fragments = []
+                for warp in range(bn // 32):
+                    for half in range(native["extents"]["mh"]):
+                        for nc in range(native["extents"]["nc"]):
+                            column_chunk = warp // 4 * 2 + nc
+                            for inner_k in range(native["extents"]["ks"]):
+                                predecessors = loads + ([] if warp_last[warp] is None else [warp_last[warp]])
+                                ident = emit(f"_WGMMA_w{cta * 12 + warp}_k{stage}_mh{half}_n{column_chunk}_ks{inner_k}",
+                                    "wgmma.m64n64k16", warp, 2,
+                                    output_region(warp, half, nc),
+                                    predecessors, dtype="fp32")
+                                warp_last[warp] = ident
+                                fragments.append(ident)
+                stage_mma.append(fragments)
+            # A collective m64n64k16 instruction becomes four 16x64 fragments in
+            # canonical per-warp order. The CTA join gates every output store.
+            staged = []
             for warp in range(bn // 32):
-                for half in range(native["extents"]["mh"]):
-                    for nc in range(native["extents"]["nc"]):
-                        column_chunk = warp // 4 * 2 + nc
-                        for inner_k in range(native["extents"]["ks"]):
-                            predecessors = loads + ([] if warp_last[warp] is None else [warp_last[warp]])
-                            ident = emit(f"_WGMMA_w{cta * 12 + warp}_k{stage}_mh{half}_n{column_chunk}_ks{inner_k}",
-                                "wgmma.m64n64k16", warp, 2,
-                                output_region(warp, half, nc),
-                                predecessors, dtype="fp32")
-                            warp_last[warp] = ident
-                            fragments.append(ident)
-            stage_mma.append(fragments)
-        # A collective m64n64k16 instruction becomes four 16x64 fragments in
-        # canonical per-warp order. The CTA join gates every output store.
-        staged = []
-        for warp in range(bn // 32):
-            for half in range(bm // 64):
-                for part in range(8):
-                    staged.append(emit(f"_StSram_w{cta * 12 + warp}_mh{half}_n{part}", "st.reg2sram", warp, 2,
-                        output_region(warp, half, part // 4, (part % 4) * 8, columns=16),
-                        [warp_last[warp]] + stage_mma[-1]))
-        prior = []
-        for chunk in range(bn // 64):
-            ident = emit(f"_TMA_StoreC_c{chunk}", "cp.sram2dram_tma", 8, 2,
-                         access("c", dict(context, chunk=chunk)), staged, prior)
-            prior = [ident]
+                for half in range(bm // 64):
+                    for part in range(8):
+                        staged.append(emit(f"_StSram_w{cta * 12 + warp}_mh{half}_n{part}", "st.reg2sram", warp, 2,
+                            output_region(warp, half, part // 4, (part % 4) * 8, columns=16),
+                            [warp_last[warp]] + stage_mma[-1]))
+            prior = []
+            output = []
+            for chunk in range(bn // 64):
+                ident = emit(f"_TMA_StoreC_c{chunk}", "cp.sram2dram_tma", 8, 2,
+                             access("c", dict(context, chunk=chunk)), staged, prior)
+                prior = [ident]
+                output.append(ident)
+            previous_wave_stores = output
     evidence.update({"dimensions": [m, n, k], "tile": [bm, bn, bk], "sms": sms,
                      "shared_bytes": schedule.shared_bytes, "register_bytes": schedule.register_bytes,
-                     "nodes": len(ir.operations)})
+                     "nodes": len(ir.operations), "waves": native["extents"]["wave"],
+                     "output_tiles": (m // bm) * (n // bn),
+                     "cross_wave_sync": "bulk.wait_group(0) + CTA barrier: all prior output completions gate next tile"})
     work = sum(16 * 64 * 16 for op in ir.operations if op.op == "wgmma.m64n64k16")
     if work != m * n * k:
         raise ValueError("lowered WGMMA fragments do not preserve GEMM arithmetic work")
