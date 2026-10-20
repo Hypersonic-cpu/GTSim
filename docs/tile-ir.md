@@ -4,20 +4,56 @@ This frontend is separate from the v0.1.0 reference builders. It never changes
 hardware timings, scheduling, memory routing, measured targets, or reference
 cycles. TVM is pinned to `4d0ac168c78c1e20bf05a6ec5926760bb1c52b05`.
 
-## Build and Phase 1 smoke
+## Fresh-workspace setup and Phase 1 smoke
+
+Start with a checkout containing this TVM integration implementation. Install
+Git, CMake 3.26+, Ninja 1.11+, Python 3.10 with `venv`/pip support, and a C++23
+compiler plus its platform SDK. The CMake 3.26 minimum comes from the pinned
+TVM-FFI submodule. The commands below use Python 3.10, as in the tested setup.
 
 Run from the repository root. A CUDA device/toolkit and LLVM are unnecessary for
-IR construction and simulation. Build TVM separately; do not install a different
-TVM wheel or use editable installs. Use Python 3.10 or newer.
+this IR-construction/GTSim workflow. Build the pinned TVM compiler from source;
+do not install a different `apache-tvm` wheel or use editable installs.
+Keep the Python environment at `.tvm-venv/` in the repository root; deleting
+the disposable GTSim `build/` directory then preserves all TVM Python packages.
+The separately compiled TVM libraries stay in `build-tvm/`.
 
 ```sh
-git submodule update --init --recursive 3rdparty/glaze 3rdparty/tvm
-python3.10 -m venv build/tvm-venv
-build/tvm-venv/bin/python -m pip install ./3rdparty/tvm/3rdparty/tvm-ffi numpy ml_dtypes typing_extensions
-python3 scripts/tvm/build_tvm.py --jobs 6
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-build/tvm-venv/bin/python scripts/tvm/smoke.py
+# Initialize the recorded submodule commits, including TVM's nested dependencies.
+# The temporary URL rewrite allows GitHub HTTPS access without an SSH key.
+git -c 'url.https://github.com/.insteadOf=git@github.com:' \
+  submodule update --init --recursive 3rdparty/glaze 3rdparty/tvm
+
+# Create the persistent Python environment and install the pinned-source FFI.
+python3.10 -m venv .tvm-venv
+.tvm-venv/bin/python -m pip install --upgrade pip
+.tvm-venv/bin/python -m pip install \
+  ./3rdparty/tvm/3rdparty/tvm-ffi \
+  numpy==2.2.6 ml_dtypes==0.6.0 typing_extensions==4.16.0
+
+# Compile the pinned TVM separately; the helper also writes its build manifest.
+.tvm-venv/bin/python scripts/tvm/build_tvm.py --jobs 4
+
+# Only after TVM setup, configure/build GTSim and run the interface smoke test.
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DGTSIM_TVM_PYTHON="$PWD/.tvm-venv/bin/python"
+cmake --build build --parallel 4
+.tvm-venv/bin/python scripts/tvm/smoke.py
+```
+
+The FFI install builds from TVM's pinned nested submodule; pip installs its
+declared build dependencies in an isolated build environment. The TVM build
+helper verifies commit `4d0ac168c78c1e20bf05a6ec5926760bb1c52b05`, configures
+`USE_LLVM=OFF`, `USE_CUDA=OFF`, `USE_Z3=OFF`, and `USE_RPC=OFF`, and writes
+`build-tvm/gtsim-tvm-build.json`. The frontend loads Python code directly from
+`3rdparty/tvm/python` and verifies the compiled libraries against that manifest.
+No separate system TVM installation or manual `PYTHONPATH` is needed.
+
+After the smoke test, run validation followed by parameter search:
+
+```sh
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
 ```
 
 The smoke constructs an actual TVM TIR program, extracts a single warp's FP16
@@ -143,9 +179,29 @@ automatic validation records the waiver separately and never changes targets.
 
 ## Phase 3 automatic TVM path
 
+To reproduce validation and the parameter search after deleting `build/`, run
+the following from the repository root (the existing `.tvm-venv/` and
+`build-tvm/` are reused):
+
 ```sh
-build/tvm-venv/bin/python scripts/tvm/gemm.py 512 512 512 --run --out-dir validation/results/tvm/generated
-build/tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTSIM_TVM_PYTHON="$PWD/.tvm-venv/bin/python"
+cmake --build build --parallel 4
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
+```
+
+Validation prints all eight comparisons and saves `report.md` / `results.json`
+under `validation/results/tvm/automatic/`. The search prints every candidate and
+its best tested configuration, saving reports under
+`validation/results/tvm/tile-sweep/`. Validation must precede the search because
+the latter verifies its source hashes. `--allow-measurement-error` records the
+authorized accuracy waiver; it does not suppress the reported error.
+
+For a single kernel and an independent rerun of the validation:
+
+```sh
+.tvm-venv/bin/python scripts/tvm/gemm.py 512 512 512 --run --out-dir validation/results/tvm/generated
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
 ```
 
 `h100_schedule.py` constructs scheduled TIR with native tensor-map encoding,
@@ -185,7 +241,7 @@ The output directory contains:
 To lower a saved module independently:
 
 ```sh
-build/tvm-venv/bin/python scripts/tvm/gemm.py --input-tir validation/results/tvm/generated/scheduled.json --run --out-dir validation/results/tvm/reloaded
+.tvm-venv/bin/python scripts/tvm/gemm.py --input-tir validation/results/tvm/generated/scheduled.json --run --out-dir validation/results/tvm/reloaded
 ```
 
 Scope is deliberately bounded: compact rank-2 FP16 A/B/C, two stages, 12 warps,
@@ -201,7 +257,7 @@ they do not establish numerical CUDA correctness or physical H100 performance.
 Optional native-TVM tests can be enabled without adding TVM to the core build:
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTSIM_TVM_PYTHON="$PWD/build/tvm-venv/bin/python"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTSIM_TVM_PYTHON="$PWD/.tvm-venv/bin/python"
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -209,7 +265,7 @@ ctest --test-dir build --output-on-failure
 ## Phase 4 constrained exploration
 
 ```sh
-build/tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
 ```
 
 The CSV selects M/N/K and BM/BN/BK. Supported tile axes are BM={64,128},

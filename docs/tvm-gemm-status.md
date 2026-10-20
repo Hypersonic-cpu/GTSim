@@ -12,7 +12,7 @@ and scope.
 ```sh
 python3 scripts/tvm/build_tvm.py --jobs 6
 cmake --build build --parallel 4
-build/tvm-venv/bin/python scripts/tvm/smoke.py
+.tvm-venv/bin/python scripts/tvm/smoke.py
 ```
 
 The pinned compiler built independently on macOS without LLVM or CUDA runtime
@@ -86,8 +86,8 @@ the error remains recorded and no simulator or target data was changed.
 ## Phase 3: automatic TVM lowering proved for the supported scope
 
 ```sh
-build/tvm-venv/bin/python scripts/tvm/gemm.py 512 512 512 --run
-build/tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
+.tvm-venv/bin/python scripts/tvm/gemm.py 512 512 512 --run
+.tvm-venv/bin/python scripts/tvm/validate_tvm_gemm.py --allow-measurement-error --jobs 4
 ```
 
 All eight cases produce **byte-identical `.gtsir`** to the independent manual
@@ -114,7 +114,7 @@ was performed for generated kernels.
 ## Phase 4: constrained tile exploration executed
 
 ```sh
-build/tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
+.tvm-venv/bin/python scripts/experiments/run_tvm_gemm_sweep.py --params scripts/experiments/tvm_gemm_tiles.csv --jobs 4 --repeats 2
 ```
 
 Every candidate goes through native TVM generation and the common IR runner.

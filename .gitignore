@@ -1,5 +1,6 @@
 build/
 /build-tvm/
+build*/
 cmake-build-*/
 CMakeCache.txt
 CMakeFiles/
@@ -18,3 +19,5 @@ __pycache__/
 validation/results/
 .clangd
 *.local
+.venv
+.*venv
