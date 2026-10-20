@@ -249,6 +249,31 @@ public:
         return register_tensor(std::move(tensor));
     }
 
+    // Device allocations use disjoint apertures in the global cache address
+    // space. Keep allocate_tensor's legacy layout for existing reference builders.
+    static constexpr std::uint64_t kHBFAddressBase = 1ULL << 60;
+
+    const TensorMetadata& allocate_device_tensor(int id, std::string name,
+                                                  std::vector<std::uint64_t> shape,
+                                                  std::vector<std::uint64_t> strides,
+                                                  DataType dtype, MemoryTier tier) {
+        if (tier != MemoryTier::HBM && tier != MemoryTier::HBF)
+            throw std::invalid_argument("unknown tensor device");
+        auto& next = next_device_address_[tier == MemoryTier::HBM ? 0 : 1];
+        const std::uint64_t base = align_up(next, kAddressAlignment);
+        TensorMetadata tensor{id, std::move(name), base, std::move(shape),
+                              std::move(strides), dtype, tier};
+        const auto size = std::max<std::uint64_t>(tensor.byte_size(), 1);
+        const auto limit = tier == MemoryTier::HBM ? kHBFAddressBase
+                                                  : std::numeric_limits<std::uint64_t>::max();
+        if (base >= limit || size > limit - base)
+            throw std::overflow_error("tensor exceeds device address aperture");
+        const auto end = align_up(base + size, kAddressAlignment);
+        const auto& result = register_tensor(std::move(tensor));
+        next = end;
+        return result;
+    }
+
     const TensorMetadata& register_tensor(TensorMetadata tensor) {
         const auto existing = tensors_.find(tensor.id);
         if (existing != tensors_.end()) {
@@ -308,6 +333,7 @@ public:
 private:
     std::unordered_map<int, TensorMetadata> tensors_;
     std::uint64_t next_global_address_;
+    std::uint64_t next_device_address_[2]{kFirstGlobalAddress, kHBFAddressBase};
 
     static std::uint64_t align_up(std::uint64_t value, std::uint64_t alignment) {
         const std::uint64_t remainder = value % alignment;

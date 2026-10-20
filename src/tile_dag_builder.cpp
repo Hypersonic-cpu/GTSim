@@ -8,8 +8,6 @@
 
 namespace GTSim {
 std::string describe_tile_ir_hardware(const SimulatorConfig& config) {
-    if (config.memory.topology != MemoryTopology::FullHBM)
-        throw std::invalid_argument("Tile IR requires FullHBM topology");
     std::ostringstream output;
     output << "{\"num_sms\":" << config.num_sms
            << ",\"shared_memory_per_cta_bytes\":" << config.shared_memory_per_cta_bytes
@@ -17,25 +15,26 @@ std::string describe_tile_ir_hardware(const SimulatorConfig& config) {
            << ",\"register_file_per_sm_bytes\":" << config.register_file_per_sm_bytes
            << ",\"max_warps_per_sm\":" << config.max_warps_per_sm
            << ",\"max_concurrent_blocks_per_sm\":" << config.max_concurrent_blocks_per_sm
-           << ",\"topology\":\"FullHBM\"}";
+           << ",\"topology\":\"" << memory_topology_name(config.memory.topology) << "\"}";
     return output.str();
 }
 
 std::unique_ptr<DAG> materialize_tile_ir(const TileIR& ir, const SimulatorConfig& config) {
-    if (config.memory.topology != MemoryTopology::FullHBM)
-        throw std::invalid_argument("Tile IR requires FullHBM topology");
     if (ir.tensors.empty() || ir.ctas.empty() || ir.operations.empty())
         throw std::invalid_argument("Tile IR requires tensors, CTAs, and operations");
     auto dag = std::make_unique<DAG>();
     std::unordered_set<std::string> names;
     for (const auto& t : ir.tensors) {
-        if (t.tier != MemoryTier::HBM || t.id < 0 || t.name.empty() || !names.insert(t.name).second || t.shape.size() != 2 ||
+        if (t.id < 0 || t.name.empty() || !names.insert(t.name).second || t.shape.size() != 2 ||
             t.strides.size() != 2 || t.shape[0] == 0 || t.shape[1] == 0 ||
             t.strides[1] != 1 || t.strides[0] < t.shape[1] ||
             t.strides[0] > std::numeric_limits<int>::max() ||
             (t.dtype != DataType::FP16 && t.dtype != DataType::FP32))
             throw std::invalid_argument("unsupported tensor metadata");
-        dag->tensor_registry.allocate_tensor(t.id, t.name, t.shape, t.strides, t.dtype, t.tier);
+        if ((config.memory.topology == MemoryTopology::FullHBM && t.tier == MemoryTier::HBF) ||
+            (config.memory.topology == MemoryTopology::FullHBF && t.tier == MemoryTier::HBM))
+            throw std::invalid_argument("tensor device is unavailable in selected topology");
+        dag->tensor_registry.allocate_device_tensor(t.id, t.name, t.shape, t.strides, t.dtype, t.tier);
     }
     std::unordered_map<int, TileIRCTA> ctas;
     for (const auto& c : ir.ctas) {

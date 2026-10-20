@@ -51,7 +51,7 @@ class GemmSchedule:
             raise ValueError("hardware cannot admit a 12-warp CTA")
 
 
-def scheduled_gemm(tvm, m, n, k, schedule=GemmSchedule(), sms=132):
+def scheduled_gemm(tvm, m, n, k, schedule=GemmSchedule(), sms=132, tensor_tiers=("HBM", "HBM", "HBM")):
     """Construct native TVM IR, with symbolic CTA/warp/tile access expressions.
 
     No Tile IR nodes, edges, simulator calls, or manual fixture are involved.
@@ -62,15 +62,17 @@ def scheduled_gemm(tvm, m, n, k, schedule=GemmSchedule(), sms=132):
     from tvm.backend.cuda.ptx import PTXNamespace
 
     schedule.validate(m, n, k, sms)
+    if len(tensor_tiers) != 3 or any(tier not in ("HBM", "HBF") for tier in tensor_tiers):
+        raise ValueError("declare one HBM/HBF address space per A, B, C tensor")
     t = tvm.tirx
     ptx = PTXNamespace()
     bm, bn, bk = schedule.bm, schedule.bn, schedule.bk
     rows, columns = m // bm, n // bn
     grid = min(sms, rows * columns)
     stages_k = k // bk
-    a = t.decl_buffer((m, k), "float16", name="A")
-    b = t.decl_buffer((k, n), "float16", name="B")
-    c = t.decl_buffer((m, n), "float16", name="C")
+    a = t.decl_buffer((m, k), "float16", name="A", scope="global." + tensor_tiers[0].lower())
+    b = t.decl_buffer((k, n), "float16", name="B", scope="global." + tensor_tiers[1].lower())
+    c = t.decl_buffer((m, n), "float16", name="C", scope="global." + tensor_tiers[2].lower())
     sa = t.decl_buffer((2, bm, bk), "float16", scope="shared", name="stage_a", data_alignment=128)
     sb = t.decl_buffer((2, bn // 64, bk, 64), "float16", scope="shared", name="stage_b", data_alignment=128)
     sc = t.decl_buffer((bn // 64, bm, 64), "float16", scope="shared", name="stage_c", data_alignment=128)
@@ -185,7 +187,7 @@ def scheduled_gemm(tvm, m, n, k, schedule=GemmSchedule(), sms=132):
     target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a", "max_num_threads": 1024, "thread_warp_size": 32})
     for key, value in {"global_symbol": "gemm", "target": target,
                        "gtsim.schedule": "h100_persistent_v1", "gtsim.sms": sms,
-                       "gtsim.tensor_tiers": ["HBM", "HBM", "HBM"],
+                       "gtsim.tensor_tiers": list(tensor_tiers),
                        "gtsim.register_overhead_per_thread": 32}.items():
         func = func.with_attr(key, value)
     # The generator reuses convenient symbolic loop variables in disjoint

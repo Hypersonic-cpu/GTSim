@@ -82,6 +82,9 @@ if(BUILD_TESTING)
               --build-dir ${CMAKE_CURRENT_BINARY_DIR} --verify)
   endif()
   if(GTSIM_TVM_PYTHON)
+    add_test(NAME tvm_tensor_placement
+      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_placement.py
+              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
     add_test(NAME tvm_gemm_frontend
       COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_gemm.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR})

@@ -1,5 +1,6 @@
 #include "arch_conf.h"
 #include "tile_ir.h"
+#include "memory.h"
 #include <functional>
 #include <iostream>
 #include <sstream>
@@ -50,7 +51,7 @@ int main(int argc, char** argv) {
         non_hbm.memory.topology = MemoryTopology::FullHBF;
         reject([&] { materialize_tile_ir(ir, non_hbm); }, "HBF topology");
         for (const auto& text : {"gtsim.tile_ir 2", "gtsim.tile_ir 1\nunknown",
-                               "gtsim.tile_ir 1\ntensor id=0 name=A shape=[1,32] strides=[32,1] dtype=fp16 tier=HBF",
+                               "gtsim.tile_ir 1\ntensor id=0 name=A shape=[1,32] strides=[32,1] dtype=fp16 tier=INVALID",
                                "gtsim.tile_ir 1\ntensor id=0 name=A shape=[1,32,] strides=[32,1] dtype=fp16 tier=HBM",
                                "gtsim.tile_ir 1\n%0 = mma name=x"}) {
             reject([&] { std::istringstream s(text); parse_tile_ir(s); }, "schema");
@@ -72,6 +73,51 @@ int main(int argc, char** argv) {
                 if (leaders.size() == static_cast<std::size_t>(op.warp)) leaders.push_back(op.id);
             }
         require(leaders.size() == 4, "GEMM collective fixture");
+        auto hybrid = gemm;
+        hybrid.tensors[1].tier = MemoryTier::HBF;
+        auto colocated = config;
+        colocated.memory.topology = MemoryTopology::CoLocated;
+        auto hybrid_dag = materialize_tile_ir(hybrid, colocated);
+        const auto& b_tensor = hybrid_dag->tensor_registry.at(1);
+        require(b_tensor.global_base_address == TensorRegistry::kHBFAddressBase, "HBF aperture");
+        require(hybrid_dag->tensor_registry.at(0).global_base_address < TensorRegistry::kHBFAddressBase &&
+                hybrid_dag->tensor_registry.at(2).global_base_address < TensorRegistry::kHBFAddressBase,
+                "HBM aperture");
+        auto baseline_dag = materialize_tile_ir(gemm, colocated);
+        for (std::size_t i = 0; i < hybrid_dag->nodes.size(); ++i) {
+            const auto* a = baseline_dag->nodes[i];
+            const auto* b = hybrid_dag->nodes[i];
+            require(a->name == b->name && a->op == b->op && a->matrix_id == b->matrix_id &&
+                    a->warp_id == b->warp_id && a->sm_id == b->sm_id &&
+                    a->depends_on == b->depends_on && a->issue_depends_on == b->issue_depends_on,
+                    "placement changed computational DAG");
+        }
+        // Use a materialized TMA node's actual address through L2 and the
+        // existing CoLocated controllers, with the documented default latency.
+        MemorySystem memory(0, 128, 0, 4096, 128, 64, true,
+                            colocated.memory, colocated.core_frequency_mhz,
+                            hybrid_dag->tensor_registry);
+        const auto found = std::find_if(hybrid_dag->nodes.begin(), hybrid_dag->nodes.end(), [](const auto* n) {
+            return n->matrix_id == 1 && n->op == "cp.dram2sram_tma";
+        });
+        require(found != hybrid_dag->nodes.end(), "B TMA node");
+        const auto keys = compute_dram_subop_lines(**found, b_tensor, 64, 0, 128);
+        require(!keys.empty(), "B TMA cache lines");
+        for (const auto& key : keys) {
+            require(hybrid_dag->tensor_registry.resolve_tier(key.global_line_addr) == MemoryTier::HBF,
+                    "TMA address resolves to HBF");
+        }
+        require(memory.l2()->enqueue_transaction_key(0, keys.front(), false), "TMA line enqueue");
+        int completed_cycle = -1;
+        for (int cycle = 0; cycle < 20000; ++cycle) {
+            if (!memory.step(cycle).empty()) { completed_cycle = cycle; break; }
+        }
+        const auto stats = memory.statistics(std::max(0, completed_cycle));
+        require(completed_cycle >= colocated.memory.hbf.read_latency_cycles &&
+                stats.hbf.completed_requests == 1 && stats.hbf.read_bytes == 128 &&
+                stats.hbm.request_count == 0 && stats.gpu_to_hbf.reverse_bytes == 128 &&
+                stats.gpu_to_hbm.reverse_bytes == 0, "B bypassed HBF controller/link/latency");
+        reject([&] { materialize_tile_ir(hybrid, config); }, "silent FullHBM remap");
         auto bad = gemm;
         bad.operations[leaders[3]].op = "st.reg2sram";
         bad.operations[leaders[3]].dtype = DataType::FP16;

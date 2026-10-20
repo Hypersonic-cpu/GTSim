@@ -1,0 +1,25 @@
+# Stack allocation: 1 HBF, 4 HBM. Derived from colocated-3F2M.yaml.
+# Decimal GB/s; linear scaling by stack count. Per-stack HBM: 620/310 GB/s.
+# Per-stack HBF: 524.288/27.96 GB/s. Per-stack UCIe: 1536 GB/s.
+# Latencies and queue capacities remain unchanged (1980 MHz; HBF 4 us / 75 us).
+topology: CoLocated
+
+hbm:
+  read_bw_GBps: 2480
+  write_max_bw_GBps: 1240
+  read_latency_cycles: 270
+  write_latency_cycles: 270
+
+hbf:
+  read_bw_GBps: 524.288
+  write_bw_GBps: 27.96
+  read_latency_cycles: 7920
+  write_latency_cycles: 148500
+
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_GBps: 6144
+    latency_cycles: 10
+  gpu_to_hbf:
+    bandwidth_GBps: 1536
+    latency_cycles: 10

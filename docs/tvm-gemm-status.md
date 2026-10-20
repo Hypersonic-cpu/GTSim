@@ -1,5 +1,8 @@
 # TVM GEMM integration: execution record
 
+Current branch extension: see [HBM/HBF placement evaluation](tvm-hbf-placement.md).
+The execution record below describes the earlier FullHBM work.
+
 Implementation baseline: branch `tvm`, GTSim `ba50ffc`, pinned TVM
 `4d0ac168c78c1e20bf05a6ec5926760bb1c52b05`. No rebase, vendor changes, simulator
 timing/scheduling/memory changes, calibration changes, or reference updates.
