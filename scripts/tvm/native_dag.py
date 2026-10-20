@@ -19,14 +19,19 @@ def lower_native(tvm, func, hardware, inputs=None):
     t=tvm.tirx
     if not func.attrs or func.attrs.get('gtsim.compiler')!='hopper_intrinsics_v1':
         raise ValueError('missing supported compiler buffer-layout ABI')
-    if len(func.params)!=3 or any(str(p.dtype)!='float16' or len(p.shape)!=2 for p in func.params):
+    copying=func.attrs.get('gtsim.kernel_role')=='tier_copy'
+    if len(func.params)!=(2 if copying else 3) or any(str(p.dtype)!='float16' or len(p.shape)!=2 for p in func.params):
         raise ValueError('only rank-2 FP16 GEMM buffers are supported')
-    if any(p.layout is not None for p in func.params):
+    if any((p.strides and tuple(map(int,p.strides))!=(int(p.shape[1]),1)) or int(p.elem_offset)!=0 for p in func.params):
         raise ValueError('only contiguous tensor-map source layouts are supported')
-    a,b,c=func.params
-    m,k=map(int,a.shape); kb,n=map(int,b.shape)
-    if k!=kb or tuple(map(int,c.shape))!=(m,n):
-        raise ValueError('inconsistent GEMM tensor dimensions')
+    if copying:
+        a,b=func.params;m,n=map(int,a.shape);k=0
+        if tuple(map(int,b.shape))!=(m,n):raise ValueError('tier-copy shape mismatch')
+    else:
+        a,b,c=func.params
+        m,k=map(int,a.shape); kb,n=map(int,b.shape)
+        if k!=kb or tuple(map(int,c.shape))!=(m,n):
+            raise ValueError('inconsistent GEMM tensor dimensions')
     block=next(node for node in nodes(func.body,t.For) if node.thread_binding is not None and node.thread_binding.thread_tag=='blockIdx.x')
     grid=int(block.extent)
     shared_buffers={node.buffer for node in nodes(block.body,t.AllocBuffer) if node.buffer.scope()=='shared'}
@@ -46,7 +51,7 @@ def lower_native(tvm, func, hardware, inputs=None):
             if (str(attrs.descriptor_dtype),int(attrs.rank),int(attrs.interleave),int(attrs.l2_promotion),int(attrs.oob_fill),int(attrs.force_cu_dtype))!=('float16',2,0,0,0,-1):
                 raise ValueError('unsupported tensor-map encoding attributes')
             maps[descriptor]=(tensor,int(call.args[6]),int(call.args[5]),int(call.attrs['swizzle']))
-    if len(maps)!=3:
+    if len(maps)!=len(func.params):
         raise ValueError('expected input/output tensor maps')
 
     # Compile bounded index expressions once, so graph expansion does not
@@ -224,7 +229,12 @@ def lower_native(tvm, func, hardware, inputs=None):
     program=compile_stmt(block.body)
     ir=TileIR()
     for i,p in enumerate(func.params):
-        shape=tuple(map(int,p.shape));ir.tensor(i,str(p.name),shape,(shape[1],1))
+        scope=p.scope()
+        if scope not in ('global','global.hbm','global.hbf'):raise ValueError('unsupported tensor device scope')
+        tier='HBF' if scope=='global.hbf' else 'HBM'
+        if (tier=='HBF' and hardware['topology']=='FullHBM') or (tier=='HBM' and hardware['topology']=='FullHBF'):
+            raise ValueError('tensor device is unavailable in selected topology')
+        shape=tuple(map(int,p.shape));ir.tensor(i,str(p.name),shape,(shape[1],1),tier=tier)
     arithmetic=defaultdict(int);staged_coverage=set();stored_coverage=set()
     numerical_output=np.empty((m,n),dtype='float16') if inputs is not None else None
     input_a,input_b=(np.asarray(x,dtype='float32') for x in inputs) if inputs is not None else (None,None)
@@ -324,7 +334,7 @@ def lower_native(tvm, func, hardware, inputs=None):
             if kind=='load':
                 dst,descriptor,xy,key=payload;tensor,rows,cols,swizzle=maps[descriptor]
                 region=(xy[1],xy[0],rows,cols);validate_region(tensor,region)
-                if tensor not in (0,1):raise ValueError('TMA input is not A/B')
+                if tensor not in ((0,) if copying else (0,1)):raise ValueError('TMA input is not A/B')
                 if dst in shared_state and not known(actor,shared_state[dst]['consumers']):
                     raise ValueError('shared input buffer overwritten before its consumers complete')
                 ident=emit(actor,'cp.dram2sram_tma',tensor,region)
@@ -404,6 +414,19 @@ def lower_native(tvm, func, hardware, inputs=None):
                 actor['pending_scalar'].append(ident);stage_nodes.append((ident,region,buffer,local));return True
             if kind=='store':
                 src,descriptor,xy=payload;tensor,rows,cols,swizzle=maps[descriptor]
+                if copying:
+                    region=(xy[1],xy[0],rows,cols);validate_region(tensor,region)
+                    state=shared_state.get(src)
+                    if tensor!=1 or swizzle!=0 or state is None or state['tensor']!=0 or state['region']!=region:
+                        raise ValueError('tier-copy store does not preserve the loaded source region')
+                    if not known(actor,[state['id']]) or not actor['proxy_known'] & (1<<(state['id']-base)):
+                        raise ValueError('tier-copy store lacks TMA completion/proxy synchronization')
+                    required={(row,col) for row in range(region[0],region[0]+rows,16) for col in range(region[1],region[1]+cols,16)}
+                    if required.intersection(stored_coverage):raise ValueError('overlapping tier-copy destinations')
+                    stored_coverage.update(required)
+                    ident=emit(actor,'cp.sram2dram_tma',tensor,region)
+                    actor['pending_bulk'].append(ident);output_reads[src[0]].append(ident)
+                    return True
                 if tensor!=2 or swizzle!=0:raise ValueError('unsupported output TMA layout')
                 region=(xy[1],xy[0],rows,cols);validate_region(2,region)
                 required={(row,col) for row in range(region[0],region[0]+rows,16) for col in range(region[1],region[1]+cols,16)}
@@ -454,10 +477,10 @@ def lower_native(tvm, func, hardware, inputs=None):
     if shared>min(hardware['shared_memory_per_cta_bytes'],hardware['shared_memory_per_sm_bytes']) or max_registers>hardware['register_file_per_sm_bytes']:
         raise ValueError('actual kernel resource use exceeds hardware limits')
     expected={(row,col) for row in range(0,m,16) for col in range(0,n,16)}
-    if staged_coverage!=expected or stored_coverage!=expected:
+    if (not copying and staged_coverage!=expected) or stored_coverage!=expected:
         raise ValueError('native output regions do not cover C exactly once')
     full_mask=(1<<(k//16))-1
-    if len(arithmetic)!=(m//16)*(n//64) or any(mask!=full_mask for mask in arithmetic.values()):
+    if not copying and (len(arithmetic)!=(m//16)*(n//64) or any(mask!=full_mask for mask in arithmetic.values())):
         raise ValueError('native WGMMA work does not preserve the complete GEMM reduction')
     evidence=dict(nodes=len(ir.operations),dimensions=[m,n,k],shared_bytes=shared,register_bytes=max_registers,
                    grid=grid,native_semantics_pass=True,multiply_accumulates=m*n*k,**statistics)

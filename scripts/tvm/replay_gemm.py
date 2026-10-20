@@ -15,10 +15,11 @@ def replay(search_dir, build_dir, out_dir, candidate=None):
     tvm = load_tvm()
     from gemm import ARCH, MEMORY, cycles, hardware_config, run_simulation, source_hashes
     from hopper_compiler import lower_hopper
-    from native_dag import lower_native
+    from tier_memory import lower_module
 
     search_dir, out_dir = Path(search_dir), Path(out_dir)
     results = json.loads((search_dir / 'results.json').read_text())
+    memory=Path(results.get('memory_config',MEMORY))
     history = json.loads((search_dir / 'search-history.json').read_text())
     row = results['best'] if candidate is None else next(
         row for row in history if row['candidate'] == candidate)
@@ -26,7 +27,7 @@ def replay(search_dir, build_dir, out_dir, candidate=None):
         raise ValueError('the selected candidate did not complete simulation')
     if results['source_sha256'] != source_hashes():
         raise ValueError('frontend sources differ from the recorded search')
-    for path, key in ((ARCH, 'architecture_sha256'), (MEMORY, 'memory_sha256')):
+    for path, key in ((ARCH, 'architecture_sha256'), (memory, 'memory_sha256')):
         if hashlib.sha256(path.read_bytes()).hexdigest() != results[key]:
             raise ValueError(f'simulation configuration changed: {path}')
     directory = search_dir / f"candidate-{row['candidate']:04d}"
@@ -39,7 +40,7 @@ def replay(search_dir, build_dir, out_dir, candidate=None):
         json.loads((directory / 'trace.json').read_text()), schedule)
     tvm.ir.assert_structural_equal(
         schedule.mod, tvm.ir.load_json((directory / 'scheduled.json').read_text()))
-    hardware = hardware_config(build_dir)
+    hardware = hardware_config(build_dir,memory=memory)
     if hardware != results['hardware']:
         raise ValueError('hardware description differs from the recorded search')
     native, _, _ = lower_hopper(tvm, schedule.mod, hardware)
@@ -49,7 +50,7 @@ def replay(search_dir, build_dir, out_dir, candidate=None):
     rng = np.random.default_rng(0)
     a = rng.integers(-2, 3, (m, k)).astype('float16')
     b = rng.integers(-2, 3, (k, n)).astype('float16')
-    ir, evidence = lower_native(tvm, native['main'], hardware, inputs=(a, b))
+    ir, evidence = lower_module(tvm, native, hardware, inputs=(a, b))
     golden = (a.astype('int32') @ b.astype('int32')).astype('float16')
     actual = evidence['numerical_output']
     if not np.isfinite(actual).all():
@@ -60,7 +61,7 @@ def replay(search_dir, build_dir, out_dir, candidate=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / 'kernel.gtsir'
     ir.write(path)
-    command = run_simulation(build_dir, ARCH, MEMORY, path, out_dir / 'simulation.log')
+    command = run_simulation(build_dir, ARCH, memory, path, out_dir / 'simulation.log')
     count = cycles((out_dir / 'simulation.log').read_text())
     if count != row['cycles']:
         raise ValueError('replayed simulation cycles differ')

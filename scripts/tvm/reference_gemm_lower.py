@@ -51,13 +51,14 @@ def recognize(tvm, func):
         raise ValueError("expected a three-buffer Hopper PrimFunc")
     if not func.attrs or func.attrs.get("gtsim.schedule") != "h100_persistent_v1":
         raise ValueError("unsupported TVM schedule; expected explicit h100_persistent_v1")
-    if list(func.attrs.get("gtsim.tensor_tiers", [])) != ["HBM"] * 3:
-        raise ValueError("all TVM tensor tiers must be explicitly HBM")
-    for buffer in func.params:
+    tiers = list(func.attrs.get("gtsim.tensor_tiers", []))
+    if len(tiers) != 3 or any(tier not in ("HBM", "HBF") for tier in tiers):
+        raise ValueError("explicit HBM/HBF tensor devices are required")
+    for buffer, tier in zip(func.params, tiers):
         if not t.is_buffer_var(buffer) or len(buffer.shape) != 2 or str(buffer.dtype) != "float16":
             raise ValueError("only three rank-2 FP16 buffers are supported")
-        if buffer.scope() != "global" or buffer.strides or int(buffer.elem_offset) != 0:
-            raise ValueError("only compact global buffers at offset zero are supported")
+        if buffer.scope() != "global." + tier.lower() or buffer.strides or int(buffer.elem_offset) != 0:
+            raise ValueError("compact buffers must declare matching global.hbm/global.hbf address spaces at offset zero")
     a, b, c = func.params
     m, k = [int(x) for x in a.shape]
     if tuple(int(x) for x in b.shape)[0] != k:
@@ -75,7 +76,7 @@ def recognize(tvm, func):
     schedule = GemmSchedule(int(sa.shape[1]), int(sb.shape[1]) * 64, int(sa.shape[2]))
     sms = int(func.attrs["gtsim.sms"])
     schedule.validate(m, n, k, sms)
-    expected = scheduled_gemm(tvm, m, n, k, schedule, sms)
+    expected = scheduled_gemm(tvm, m, n, k, schedule, sms, tiers)
     try:
         tvm.ir.assert_structural_equal(func, expected)
     except ValueError as error:
@@ -105,7 +106,7 @@ def recognize(tvm, func):
         raise ValueError("native setmaxnreg requirements differ from resource metadata")
     return m, n, k, schedule, sms, {"native_operations": native, "thread_bindings": bindings,
         "shared_shapes": {key: [int(x) for x in allocations[key].shape] for key in ("stage_a", "stage_b", "stage_c")},
-        "schedule": "h100_persistent_v1", "tensor_tiers": ["HBM"] * 3,
+        "schedule": "h100_persistent_v1", "tensor_tiers": tiers,
         "register_budgets_per_thread": budgets,
         "synchronization": "two-stage full/empty mbarriers; WGMMA commit/wait; CTA output join; TMA store issue order",
         "tvm_verified": ["ConvertSSA", "verify_ssa", "verify_well_formed"]}, native_pattern
@@ -119,7 +120,7 @@ def lower_reference_gemm(tvm, func):
     # BufferLoads or a call to the manual/reference graph implementation.
     ir = TileIR()
     for ident, (name, shape) in enumerate((("A", (m, k)), ("B", (k, n)), ("C", (m, n)))):
-        ir.tensor(ident, name, shape, (shape[1], 1))
+        ir.tensor(ident, name, shape, (shape[1], 1), tier=evidence["tensor_tiers"][ident])
     def access(tensor, context):
         # TMA 2-D coordinates and box dimensions are in inner/outer order.
         call, descriptor = native[tensor], native["maps"]["map_" + tensor]

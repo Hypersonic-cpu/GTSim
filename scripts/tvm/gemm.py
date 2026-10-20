@@ -25,7 +25,7 @@ def cycles(text):
 
 def source_hashes():
     patterns = ("scripts/tvm/*.py", "include/*.h", "src/*.cpp", "workloads/gemm/*.cpp",
-                "configs/v0.1.0/h100-sxm.yaml", "configs/memconf/full-hbm.yaml")
+                "configs/v0.1.0/h100-sxm.yaml", "configs/memconf/*.yaml")
     return {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for pattern in patterns for path in sorted(ROOT.glob(pattern))}
 
@@ -39,11 +39,11 @@ def hardware_config(build, architecture=ARCH, memory=MEMORY):
     return json.loads(result.stdout)
 
 
-def generate(tvm, dimensions, schedule, hardware, out):
+def generate(tvm, dimensions, schedule, hardware, out, tensor_tiers=("HBM", "HBM", "HBM")):
     schedule.validate(*dimensions, hardware["num_sms"], hardware)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    func = scheduled_gemm(tvm, *dimensions, schedule, hardware["num_sms"])
+    func = scheduled_gemm(tvm, *dimensions, schedule, hardware["num_sms"], tensor_tiers)
     # Save the native TVM boundary and consume a deserialized copy: the lowerer
     # cannot obtain a secretly precomputed Tile IR from the generator.
     serialized = tvm.ir.save_json(tvm.IRModule({"gemm": func}))
@@ -60,6 +60,10 @@ def generate(tvm, dimensions, schedule, hardware, out):
 
 def translate(tvm, func, hardware, out):
     ir, evidence = lower_gemm(tvm, func)
+    topology = hardware["topology"]
+    unavailable = {"FullHBM": "HBF", "FullHBF": "HBM"}.get(topology)
+    if unavailable in evidence["tensor_tiers"]:
+        raise ValueError(f"{topology} cannot honor explicit {unavailable} placement")
     schedule = GemmSchedule(*evidence["tile"])
     if evidence["sms"] != hardware["num_sms"]:
         raise ValueError("TIR SM mapping does not match selected hardware")
@@ -75,7 +79,7 @@ def translate(tvm, func, hardware, out):
         "ir_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "dag_spec_sha256": hashlib.sha256(json.dumps(graph, separators=(",", ":")).encode()).hexdigest(),
         "tir_sha256": hashlib.sha256(tvm.ir.save_json(func).encode()).hexdigest(), "hardware": hardware,
-        "scope": "persistent multi-wave CTAs, two stages, 12 warps, split=1, original CTA order; HBM only"})
+        "scope": "persistent multi-wave CTAs, two stages, 12 warps, split=1, original CTA order; explicit HBM/HBF devices"})
     (out / "lowering.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return path, evidence
 
@@ -90,6 +94,22 @@ def run_simulation(build, architecture, memory, path, log):
     return command
 
 
+def inspect_graph(build, memory, path, architecture=ARCH):
+    return json.loads(subprocess.check_output([str(build / "gtsim_gemm_ir"), str(architecture),
+                       "--memory-config", str(memory), str(path), "--inspect"], text=True))
+
+
+def memory_statistics(log):
+    result = {}
+    for device, requests, reads, writes, read_bytes, write_bytes, latency in re.findall(
+            r"(HBM|HBF) requests: (\d+) \(read (\d+), write (\d+)\), bytes: read (\d+), write (\d+), average latency: ([\d.]+)", log):
+        result[device] = dict(zip(("requests", "reads", "writes", "read_bytes", "write_bytes", "latency"),
+                                 map(float, (requests, reads, writes, read_bytes, write_bytes, latency))))
+    if len(result) != 2:
+        raise AssertionError("missing per-device simulation statistics")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dimensions", type=int, nargs="*", metavar="M N K")
@@ -101,12 +121,16 @@ def main():
     parser.add_argument("--architecture", type=Path, default=ARCH)
     parser.add_argument("--memory-config", type=Path, default=MEMORY)
     parser.add_argument("--out-dir", type=Path, default=ROOT / "validation/results/tvm/generated")
+    parser.add_argument("--placement", choices=("baseline", "hybrid"),
+                        help="generated tensor placement; imported TIR declares its own devices")
     parser.add_argument("--run", action="store_true")
     args = parser.parse_args()
     if args.input_tir is None and len(args.dimensions) != 3:
         parser.error("provide M N K, or --input-tir module.json")
     if args.input_tir is not None and args.dimensions:
         parser.error("dimensions must come from the input TIR when --input-tir is used")
+    if args.input_tir is not None and args.placement is not None:
+        parser.error("--placement applies to generation; imported TIR declares its own devices")
     try:
         hardware = hardware_config(args.build_dir, args.architecture, args.memory_config)
         tvm = load_tvm()
@@ -117,7 +141,7 @@ def main():
             func = next(iter(module.functions.values()))
             path, evidence = translate(tvm, func, hardware, args.out_dir)
         else:
-            path, evidence = generate(tvm, args.dimensions, GemmSchedule(args.bm, args.bn, args.bk), hardware, args.out_dir)
+            path, evidence = generate(tvm, args.dimensions, GemmSchedule(args.bm, args.bn, args.bk), hardware, args.out_dir, ("HBM", "HBF" if args.placement == "hybrid" else "HBM", "HBM"))
         if args.run:
             command = run_simulation(args.build_dir, args.architecture, args.memory_config, path, args.out_dir / "simulation.log")
             evidence["simulation_command"] = command

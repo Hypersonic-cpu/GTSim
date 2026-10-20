@@ -27,8 +27,8 @@ class TileIR:
         self.ctas = []
         self.operations = []
 
-    def tensor(self, ident, name, shape, strides, dtype="fp16"):
-        self.tensors.append((ident, name, shape, strides, dtype))
+    def tensor(self, ident, name, shape, strides, dtype="fp16", tier="HBM"):
+        self.tensors.append((ident, name, shape, strides, dtype, tier))
 
     def cta(self, ident, sm, shared, registers):
         self.ctas.append((ident, sm, shared, registers))
@@ -40,9 +40,9 @@ class TileIR:
 
     def text(self):
         lines = ["gtsim.tile_ir 1"]
-        for ident, name, shape, strides, dtype in self.tensors:
+        for ident, name, shape, strides, dtype, tier in self.tensors:
             lines.append(f"tensor id={ident} name={name} shape={vector(shape)} "
-                         f"strides={vector(strides)} dtype={dtype} tier=HBM")
+                         f"strides={vector(strides)} dtype={dtype} tier={tier}")
         for ident, sm, shared, registers in self.ctas:
             lines.append(f"cta id={ident} sm={sm} warps=12 shared={shared} registers={registers}")
         for ident, op in enumerate(self.operations):

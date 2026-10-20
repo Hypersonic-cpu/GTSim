@@ -5,6 +5,9 @@ FP16 output, on the existing H100 FullHBM configuration. This experimental
 frontend is separate from the v0.1.0 release scope. Simulator timing, hardware
 profiles, reference cycles, and pinned TVM sources are unchanged.
 
+The merged [heterogeneous-memory extension](tvm-memory-auto-schedule.md) also
+supports device-scoped B placement and charged HBF-to-HBM prefetch kernels.
+
 ## Setup and execution
 
 For a fresh workspace, first follow the complete
@@ -90,7 +93,8 @@ including barrier storage. Unsupported layouts or operations fail explicitly.
 These are compiler/backend support bounds, not a claim to explore every H100
 implementation. The initial implementation stages both inputs and the output
 through shared memory; it does not search arbitrary memory scopes or partial
-async-group waits. Only FullHBM is supported.
+async-group waits. The memory extension supports FullHBM and hybrid profiles;
+FullHBF cannot satisfy the required HBM placement of A and C.
 
 Every successfully lowered candidate must cover every C element once, execute
 each required reduction fragment once, stay within access/resource bounds,

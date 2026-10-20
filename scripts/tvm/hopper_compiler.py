@@ -31,6 +31,7 @@ def lower_hopper(tvm, mod, hardware):
         return mapper.default_mutate(block)
 
     persistent = int(next(node for node in nodes(mod,t.For) if node.thread_binding is not None and node.thread_binding.thread_tag=='blockIdx.x').annotations.get('gtsim.persistent',0))
+    prefetch = int(next(node for node in nodes(mod,t.For) if node.thread_binding is not None and node.thread_binding.thread_tag=='blockIdx.x').annotations.get('gtsim.prefetch',0))
     mod = mutate(mod,tvm.s_tir.SBlock,tensor_region)
     stages = [tvm.s_tir.transform.PlanAndUpdateBufferAllocationLocation(),
               tvm.s_tir.transform.ConvertBlocksToOpaque(),tvm.s_tir.transform.CompactBufferAllocation(),
@@ -246,4 +247,7 @@ def lower_hopper(tvm, mod, hardware):
         raise ValueError('native Hopper IR verification failed')
     evidence=dict(bm=bm,bn=bn,bk=bk,stages=depth,groups=groups,persistent=persistent,
                   shared_bytes=shared,register_bytes=registers,grid=grid,output_tiles=count)
+    from tier_memory import place_module
+    result,placement=place_module(tvm,result,hardware,prefetch,bk)
+    evidence.update(placement)
     return result,pipeline_mod,evidence

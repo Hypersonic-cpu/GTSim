@@ -82,9 +82,11 @@ TileIR parse_tile_ir(std::istream& input) {
                 header = true;
             } else if (kind == "tensor") {
                 auto f = fields(stream, {"id", "name", "shape", "strides", "dtype", "tier"});
-                if (f.at("tier") != "HBM") throw std::invalid_argument("only HBM tensors are supported");
+                if (f.at("tier") != "HBM" && f.at("tier") != "HBF")
+                    throw std::invalid_argument("tensor device must be HBM or HBF");
                 ir.tensors.push_back({integer(f.at("id")), f.at("name"), dimensions(f.at("shape")),
-                                      dimensions(f.at("strides")), dtype(f.at("dtype"))});
+                                      dimensions(f.at("strides")), dtype(f.at("dtype")),
+                                      f.at("tier") == "HBM" ? MemoryTier::HBM : MemoryTier::HBF});
             } else if (kind == "cta") {
                 auto f = fields(stream, {"id", "sm", "warps", "shared", "registers"});
                 ir.ctas.push_back({integer(f.at("id")), integer(f.at("sm")),

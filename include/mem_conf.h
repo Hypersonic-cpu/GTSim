@@ -2,6 +2,7 @@
 #define MEM_CONF_H
 
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 
 namespace GTSim {
@@ -14,6 +15,7 @@ struct HBMConfig {
     int read_latency_cycles{270};
     int write_latency_cycles{270};
     int queue_capacity{65536};
+    std::uint64_t capacity_bytes{}; // Zero means unspecified by this abstract profile.
 };
 
 struct HBFConfig {
@@ -22,6 +24,7 @@ struct HBFConfig {
     int read_latency_cycles{7920};
     int write_latency_cycles{148500};
     int queue_capacity{65536};
+    std::uint64_t capacity_bytes{};
 };
 
 struct D2DLinkConfig {

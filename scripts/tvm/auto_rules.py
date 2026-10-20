@@ -23,12 +23,22 @@ def design_space(tvm, dimensions, hardware, group_count=None):
         max_n_per_group=min(max_n_per_group,256//group_count,n//group_count)
     min_bn=(group_count or 1)*64
     max_depth=min(k//16,(shared-2*64*min_bn)//(2*16*(64+min_bn)+32))
-    return {'bm': divisors(m,64,max_m),
+    space = {'bm': divisors(m,64,max_m),
             'n_per_group': divisors(n,64,max_n_per_group),
             'bk': divisors(k,16,min(k,128//2,shared//(2*(64+64)))),
             'groups': [group_count] if group_count is not None else list(range(1,max_groups+1)),
             'pipeline_delay': list(range(max_depth)),
             'persistent': [0,1]}
+    if hardware['topology'] != 'FullHBM':
+        strategies=[]
+        for prefetch in (0,1):
+            try:validate_placement(dimensions,hardware,prefetch)
+            except ValueError:continue
+            strategies.append(prefetch)
+        if not strategies:
+            raise ValueError('no memory strategy can satisfy the required device placement/capacity')
+        space['prefetch'] = strategies
+    return space
 
 
 def apply_rule(tvm, sch, dimensions, hardware, decisions=None, group_count=None):
@@ -38,7 +48,7 @@ def apply_rule(tvm, sch, dimensions, hardware, decisions=None, group_count=None)
     for key, values in space.items():
         if not values:
             raise ValueError(f'no legal ISA factors for {key}')
-        decision = None if decisions is None else values.index(decisions[key])
+        decision = None if decisions is None else values.index(decisions.get(key,0))
         weights=[1/(value+1)**2 for value in values] if key=='pipeline_delay' else [1.0]*len(values)
         choices[key] = sch.sample_categorical(values, [value/sum(weights) for value in weights], decision=decision)
     blocks=sch.get_child_blocks(sch.get_sblock('root'))
@@ -59,6 +69,8 @@ def apply_rule(tvm, sch, dimensions, hardware, decisions=None, group_count=None)
     sch.bind(jg,'threadIdx.y')
     block = sch.fuse(io,jo); sch.bind(block,'blockIdx.x')
     sch.annotate(block,'gtsim.persistent',choices['persistent'])
+    if 'prefetch' in choices:
+        sch.annotate(block,'gtsim.prefetch',choices['prefetch'])
     sch.decompose_reduction(b,ko)
     mi,ii = sch.split(ii,factors=[None,64])
     nj,ji = sch.split(ji,factors=[None,64])
@@ -75,7 +87,7 @@ def apply_rule(tvm, sch, dimensions, hardware, decisions=None, group_count=None)
 
 
 def trace_choices(trace):
-    keys = ('bm','n_per_group','bk','groups','pipeline_delay','persistent')
+    keys = ('bm','n_per_group','bk','groups','pipeline_delay','persistent','prefetch')
     insts = [inst for inst in trace.insts if inst.kind.name=='SampleCategorical']
     return {key:int(inst.attrs[0][int(trace.decisions[inst])]) for key,inst in zip(keys,insts)}
 
@@ -85,6 +97,7 @@ def validate_choices(choices, dimensions, hardware):
     bm,bk,groups = (choices[key] for key in ('bm','bk','groups'))
     per_group = choices['n_per_group']; bn = groups*per_group
     stages = choices['pipeline_delay']+1
+    validate_placement(dimensions,hardware,choices.get('prefetch',0))
     if m%bm or n%bn or k%bk or stages>k//bk:
         raise ValueError('nondivisible tile or pipeline deeper than reduction')
     if bn>256:
@@ -99,3 +112,20 @@ def validate_choices(choices, dimensions, hardware):
     if registers>hardware['register_file_per_sm_bytes'] or hardware['max_warps_per_sm']<12:
         raise ValueError('register/warp footprint exceeds hardware capacity')
     return dict(choices,bn=bn,stages=stages,shared_bytes=shared,register_bytes=registers)
+
+
+def validate_placement(dimensions, hardware, prefetch=0):
+    m,n,k=dimensions
+    topology=hardware['topology']
+    if topology not in ('FullHBM','CoLocated','Cascaded'):
+        raise ValueError('GEMM placement requires an available HBM device for A and C')
+    if prefetch and topology=='FullHBM':
+        raise ValueError('FullHBM has no HBF prefetch source')
+    sizes={'HBM':2*(m*k+m*n),'HBF':2*k*n}
+    if topology=='FullHBM':sizes={'HBM':sum(sizes.values()),'HBF':0}
+    elif prefetch:sizes['HBM']+=2*k*n
+    for tier,size in sizes.items():
+        capacity=hardware.get(tier.lower()+'_capacity_bytes',0)
+        if capacity and size>capacity:
+            raise ValueError(f'{tier} allocation exceeds configured capacity')
+    return sizes

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import random
 import traceback
+import shutil
+import time
 
 import numpy as np
 import tvm
@@ -14,28 +16,38 @@ from tvm.ir.utils import derived_object
 
 from auto_ir import trace_json
 from auto_rules import apply_rule, design_space, trace_choices, validate_choices
-from gemm import ARCH, MEMORY, cycles, run_simulation
+from gemm import ARCH, MEMORY, cycles, memory_statistics, run_simulation
 from hopper_compiler import lower_hopper
-from lower_gemm import lower_gemm
+from tier_memory import lower_module
 
 
 def write_json(path,data):
     Path(path).write_text(json.dumps(data,indent=2)+'\n')
 
 
-def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
+def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4,memory=MEMORY,resume=False):
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
-    if (out/'database_tuning_record.json').exists():
-        raise ValueError('use a new output directory for a reproducible fresh search')
+    previous=[]
+    if (out/'search-history.json').exists():
+        if not resume:raise ValueError('use a new output directory, or --resume')
+        previous=json.loads((out/'search-history.json').read_text())
+        archive=out/'resume-archives'/str(time.time_ns());archive.mkdir(parents=True)
+        for pattern in ('database_*.json','cost-model.json','search-history.json'):
+            for path in out.glob(pattern):shutil.move(str(path),archive/path.name)
     frequency_lines=[line.split(':',1)[1] for line in ARCH.read_text().splitlines() if line.startswith('core_frequency_mhz:')]
     hz=float(frequency_lines[0])*1e6
     history=[];observations=[];updates=[];build_counter=[0];pruning={}
     space=design_space(tvm,dimensions,hardware)
+    strategies=space.get('prefetch',[0])
+    # Balance a small native-search warmup before fitting. Otherwise early
+    # regression on one observation can exclude its other memory strategy.
+    # MetaSchedule still generates and mutates all kernel factors.
+    strategy_warmup=min(4,trials//(2*len(strategies))) if len(strategies)>1 else 0
 
     def features(choices):
         bm,bn,bk,depth,groups,persistent=(choices['bm'],choices['n_per_group']*choices['groups'],choices['bk'],
                                         choices['pipeline_delay']+1,choices['groups'],choices['persistent'])
-        raw=np.array([np.log2(bm)/8,np.log2(bn)/8,np.log2(bk)/6,depth/8,groups/2,persistent],dtype='float64')
+        raw=np.array([np.log2(bm)/8,np.log2(bn)/8,np.log2(bk)/6,depth/8,groups/2,persistent,choices.get('prefetch',0)],dtype='float64')
         return np.r_[1,raw,raw*raw,[raw[i]*raw[j] for i in range(len(raw)) for j in range(i)]]
 
     @derived_object
@@ -55,6 +67,12 @@ def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
             updates.append(dict(round=len(updates),observations=len(observations),accepted=accepted))
             self.save(str(out/'cost-model.json'))
         def predict(self,context,candidates):
+            if strategy_warmup:
+                counts={strategy:sum(row['choices'].get('prefetch',0)==strategy for row in observations)
+                        for strategy in strategies}
+                if min(counts.values())<strategy_warmup:
+                    return np.array([1.0/(1+counts[trace_choices(candidate.sch.trace).get('prefetch',0)])
+                                     for candidate in candidates],dtype='float64')
             x=np.array([features(trace_choices(candidate.sch.trace)) for candidate in candidates])
             if not observations:
                 # Native evolutionary search samples an initial population;
@@ -100,7 +118,16 @@ def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
             result=[]
             for item in inputs:
                 ident=build_counter[0];build_counter[0]+=1
-                directory=out/f'candidate-{ident:04d}';directory.mkdir()
+                directory=out/f'candidate-{ident:04d}'
+                scheduled=tvm.ir.save_json(item.mod)
+                cached=next((row for row in previous if row['candidate']==ident and row['status']=='complete'),None)
+                if cached is not None and (directory/'scheduled.json').read_text()==scheduled:
+                    row=dict(cached,training_samples_before=len(observations),round=len(updates),reused=True)
+                    history.append(row);result.append(ms.builder.BuilderResult(str(directory),None));continue
+                if directory.exists():
+                    archive=out/'resume-archives'/str(time.time_ns());archive.mkdir(parents=True)
+                    shutil.move(str(directory),archive/directory.name)
+                directory.mkdir()
                 (directory/'scheduled.json').write_text(tvm.ir.save_json(item.mod))
                 (directory/'scheduled.py').write_text(item.mod.script())
                 row=dict(candidate=ident,directory=str(directory),training_samples_before=len(observations),round=len(updates))
@@ -117,7 +144,7 @@ def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
                         lowered=compiler_pass(lowered)
                     (directory/'lowered-tvm.py').write_text(lowered.script())
                     native=tvm.ir.load_json(serialized)
-                    ir,evidence=lower_gemm(tvm,native['main'],hardware)
+                    ir,evidence=lower_module(tvm,native,hardware)
                     path=directory/'kernel.gtsir';ir.write(path)
                     metadata.update(evidence)
                     metadata.update(tir_sha256=hashlib.sha256(serialized.encode()).hexdigest(),
@@ -139,10 +166,13 @@ def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
             def evaluate(item):
                 directory=Path(item.artifact_path)
                 row=next(row for row in history if row['directory']==str(directory))
+                if row.get('reused'):
+                    return ms.runner.RunnerResult([row['cycles']/hz],None)
                 try:
-                    command=run_simulation(build,ARCH,MEMORY,directory/'kernel.gtsir',directory/'simulation.log')
+                    command=run_simulation(build,ARCH,memory,directory/'kernel.gtsir',directory/'simulation.log')
                     count=cycles((directory/'simulation.log').read_text())
-                    row.update(status='complete',cycles=count,command=command)
+                    row.update(status='complete',cycles=count,command=command,
+                               memory_statistics=memory_statistics((directory/'simulation.log').read_text()))
                     return ms.runner.RunnerResult([count/hz],None)
                 except Exception as error:
                     row.update(status='run_failed',error=str(error))
@@ -186,6 +216,12 @@ def search(mod,dimensions,hardware,build,out,trials=32,seed=0,jobs=4):
     model.save(str(out/'cost-model.json'))
     write_json(out/'postproc-pruning.json',pruning)
     complete=[row for row in history if row['status']=='complete']
+    coverage={strategy:sum(row['choices'].get('prefetch',0)==strategy for row in complete)
+              for strategy in strategies}
+    write_json(out/'memory-strategy-coverage.json',dict(legal_strategies=strategies,
+               minimum_per_strategy=strategy_warmup,completed=coverage))
+    if any(count<strategy_warmup for count in coverage.values()):
+        raise RuntimeError('native search did not cover every legal memory strategy')
     if len(complete)<2 or len({row['tir_sha256'] for row in complete})<2:
         raise RuntimeError('search did not produce multiple distinct successfully simulated kernels')
     if len(updates)<2 or not any(row['training_samples_before'] for row in complete):

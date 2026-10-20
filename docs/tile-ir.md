@@ -98,15 +98,19 @@ or missing fields fail. Names are nonempty tokens without whitespace or `#`.
 Integers are nonnegative signed 32-bit values, with positive dimensions and tile
 extents. Lists contain comma-separated integers without spaces. IDs refer to
 objects, never GPU addresses. `TensorRegistry` assigns synthetic, nonoverlapping
-addresses in tensor declaration order.
+addresses in tensor declaration order within each device aperture: HBM starts
+at `2^32`, HBF at `2^60`. Allocations are 4 KiB aligned; devices never alias
+in the shared L2 address space. Reference builders retain their legacy allocator.
 
 Tensors have rank two, `fp16` or `fp32` dtype, element strides `[leading_dim,1]`
-with `leading_dim >= columns`, and **HBM** placement. CTAs require a valid SM,
+with `leading_dim >= columns`, and explicit **HBM** or **HBF** placement. CTAs require a valid SM,
 12 warps, nonnegative shared bytes and positive register bytes. Footprints must
 fit the supplied hardware limits. Warp identities are local `[0,12)`; their DAG
 identity is `cta_id * 12 + local_warp`. All nodes of a CTA use its declared SM.
-Only `FullHBM` topology is accepted, even when a non-HBM topology could route an
-HBM allocation. This check precedes Simulator construction.
+All existing topologies are accepted when they contain every declared device.
+FullHBM rejects HBF placement and FullHBF rejects HBM placement before Simulator
+construction. CoLocated and Cascaded preserve both devices; the existing memory
+system supplies their controllers, link routing, contention and latency.
 
 | Operation | Pipeline | Region / dtype |
 |---|---|---|
@@ -164,7 +168,7 @@ The test oracle includes the **untouched** reference builder only in its test
 translation unit. It compares every operation, tensor shape/stride/address,
 access region, CTA/SM/warp mapping, resource footprint, and issue/completion
 dependency list. The sole expected metadata difference is A/B tier: the
-reference tags them HBF and FullHBM routes them to HBM; the frontend requires
+reference tags them HBF and FullHBM routes them to HBM; the original frontend required
 explicit HBM tags.
 
 ```sh
@@ -249,7 +253,8 @@ To lower a saved module independently:
 ```
 
 Scope is deliberately bounded: compact rank-2 FP16 A/B/C, two stages, 12 warps,
-split=1, original order, FullHBM, and persistent CTAs with one or more output
+split=1, original order, explicitly declared HBM/HBF devices on a compatible
+topology, and persistent CTAs with one or more output
 tiles each. The lowerer expands the native `wave` loop and evaluates its guard
 and TMA coordinates for each CTA, including an incomplete final wave. CTA/SM
 and warp assignments and per-CTA resources remain fixed across its tiles.
@@ -275,7 +280,7 @@ mapping and incomplete final waves. Eight historical single-wave cases retain
 exact manual/builder graph and cycle parity. Altered waits/barriers are rejected,
 and a deliberately weakened cross-wave graph fails the semantic audit.
 
-Arbitrary scheduled TIR, generic GEMM, alternate layouts/synchronization, HBF,
+Arbitrary scheduled TIR, generic GEMM, alternate layouts/synchronization,
 partial tiles and incomplete warpgroups remain unsupported. These checks verify
 compiler representation and GTSim behavior; they do not execute a numerical
 CUDA kernel or measure physical H100 performance.
@@ -340,3 +345,28 @@ folder and recompute both validation and the fixed baseline with the new fronten
   --out-dir validation/results/tvm/tile-sweep-2048x2048x512-multiwave \
   --jobs 4 --repeats 2
 ```
+
+
+## Explicit heterogeneous placement
+
+The native generator accepts `tensor_tiers=("HBM", "HBF", "HBM")` and declares
+A/B/C with `global.hbm` / `global.hbf` TVM buffer scopes. The lowerer validates
+that these address spaces match `gtsim.tensor_tiers`, including after native
+TVM JSON serialization, and exports each `.gtsir` tensor's `tier`. A node's
+`matrix_id` references that immutable registry allocation; no duplicated device
+label on an operation can diverge from its address. L2 derives the request tier
+from the allocated address and the existing MemorySystem routes to HBMModel or
+HBFModel. Shared buffers, TMA, WGMMA and barriers are identical across placements.
+
+```sh
+.tvm-venv/bin/python scripts/tvm/gemm.py 512 512 512 \
+  --placement hybrid --memory-config configs/memconf/colocated-3F2M.yaml \
+  --out-dir validation/results/tvm/hybrid --run
+.tvm-venv/bin/python scripts/experiments/run_tvm_placement.py
+```
+
+Use `--placement baseline` for A/B/C in HBM on the **same** CoLocated profile.
+For imported `--input-tir`, the TIR's declared spaces are authoritative.
+`gtsim_gemm_ir ... kernel.gtsir --inspect` exports the actual registry bases,
+CTA resources and materialized DAG, without simulation. See
+[tvm-hbf-placement.md](tvm-hbf-placement.md) for results and assumptions.

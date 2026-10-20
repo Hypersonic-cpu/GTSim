@@ -2,6 +2,7 @@
 """Focused native-TVM boundary, parity and rejection checks (opt-in CTest)."""
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -83,7 +84,7 @@ def main():
             return
         raise RuntimeError(f"accepted unsupported {label}")
     func = scheduled_gemm(tvm, 128, 256, 128)
-    reject(lambda: lower_gemm(tvm, func.with_attr("gtsim.tensor_tiers", ["HBF", "HBM", "HBM"])), "HBF placement")
+    reject(lambda: lower_gemm(tvm, func.with_attr("gtsim.tensor_tiers", ["HBF", "HBM", "HBM"])), "tier/scope mismatch")
     for operation in ("tirx.ptx.cp_async_bulk_tensor_g2s_cluster", "tirx.ptx.wgmma_f16_ss",
                       "tirx.cuda.mbarrier_wait", "tirx.cuda.cta_sync", "tirx.ptx.wgmma_wait_group", "tirx.ptx.setmaxnreg",
                       "tirx.ptx.cp_async_bulk_wait_group", "tirx.ptx.cp_async_bulk_commit_group"):
@@ -100,8 +101,10 @@ def main():
     result = subprocess.run([str(args.build_dir.resolve() / "gtsim_gemm_ir"),
                              str(ROOT / "configs/v0.1.0/h100-sxm.yaml"), "--memory-config",
                              str(ROOT / "configs/memconf/full-hbf.yaml"), "--describe-config"], capture_output=True)
-    if result.returncode == 0:
-        raise RuntimeError("accepted HBF topology in preflight")
+    if result.returncode != 0:
+        raise RuntimeError("HBF topology hardware query failed")
+    if json.loads(result.stdout)["topology"] != "FullHBF":
+        raise RuntimeError("hardware query lost topology identity")
     bad = scheduled_gemm(tvm, 128, 768, 192, sms=2)
     reject(lambda: lower_gemm(tvm, bad.with_body(replace_calls(tvm, bad.body, "tirx.ptx.cp_async_bulk_wait_group"))),
            "missing cross-wave bulk completion wait")
