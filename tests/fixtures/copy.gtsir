@@ -1,0 +1,7 @@
+# A single warp copies a row. The remaining CTA warps are idle.
+gtsim.tile_ir 1
+tensor id=0 name=A shape=[1,32] strides=[32,1] dtype=fp16 tier=HBM
+tensor id=1 name=B shape=[1,32] strides=[32,1] dtype=fp16 tier=HBM
+cta id=0 sm=0 warps=12 shared=0 registers=1536
+%0 = ld.dram2reg name=load cta=0 warp=0 tensor=0 dtype=fp16 tile=[0,0,1,32] after_issue=[] after_complete=[]
+%1 = st.reg2dram name=store cta=0 warp=0 tensor=1 dtype=fp16 tile=[0,0,1,32] after_issue=[] after_complete=[0]

@@ -1,0 +1,5 @@
+{
+  "name": "tvm_gemm",
+  "cmd": "./build/tvm-venv/bin/python scripts/tvm/gemm.py ${m} ${n} ${k} --bm ${bm} --bn ${bn} --bk ${bk} --run --out-dir validation/results/tvm/batch-${m}-${n}-${k}-b${bm}-${bn}-${bk}",
+  "outfmt": "_${m}-${n}-${k}_b${bm}-${bn}-${bk}"
+}
