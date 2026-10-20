@@ -58,6 +58,10 @@ It reports MAPE and Pearson correlation and writes the per-case report to
 `validation/results/`. The v0.1.0 result snapshot is in
 [`validation/v0.1.0.md`](validation/v0.1.0.md).
 
+The separate experimental [TVM automatic scheduling frontend](docs/tvm-auto-schedule.md)
+accepts computation-only FP16 GEMM and uses native MetaSchedule with GTSim
+performance feedback. See its guide for pinned TVM setup and reproducible search.
+
 ## License
 
 The repository is distributed under the MIT license.

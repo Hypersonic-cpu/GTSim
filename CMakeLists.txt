@@ -85,6 +85,9 @@ if(BUILD_TESTING)
     add_test(NAME tvm_gemm_frontend
       COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_gemm.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME tvm_auto_schedule
+      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_auto_schedule.py
+              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
   endif()
 endif()
 

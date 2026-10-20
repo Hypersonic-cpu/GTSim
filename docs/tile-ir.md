@@ -4,6 +4,10 @@ This frontend is separate from the v0.1.0 reference builders. It never changes
 hardware timings, scheduling, memory routing, measured targets, or reference
 cycles. TVM is pinned to `4d0ac168c78c1e20bf05a6ec5926760bb1c52b05`.
 
+For computation-only GEMM and native MetaSchedule performance feedback, see
+[the automatic scheduling guide](tvm-auto-schedule.md). The Phase 2/3 and CSV
+sections below describe the retained manually scheduled reference path.
+
 ## Fresh-workspace setup and Phase 1 smoke
 
 Start with a checkout containing this TVM integration implementation. Install
@@ -177,7 +181,7 @@ accuracy gate stops the original plan. The user subsequently waived that stop
 condition explicitly. The original Phase 2 report remains a failure; the
 automatic validation records the waiver separately and never changes targets.
 
-## Phase 3 automatic TVM path
+## Phase 3 reference schedule generation
 
 To reproduce validation and the parameter search after deleting `build/`, run
 the following from the repository root (the existing `.tvm-venv/` and
@@ -219,7 +223,7 @@ The generation command also executes `StmtSimplify`, `FlattenBuffer` and
 `LowerIntrin`, saving a post-lowering snapshot. Extraction uses the earlier
 scheduled module, serialized and deserialized with native TVM JSON APIs.
 
-`lower_gemm.py` is a strict, versioned schedule recognizer, not a general TIR
+`reference_gemm_lower.py` is a strict, versioned schedule recognizer, not a general TIR
 compiler: it matches the **entire** supported scheduled AST, including every
 intrinsic, operand, layout, binding and synchronization operation. It then
 evaluates the actual native TMA coordinate expressions and tensor-map boxes,
