@@ -1,6 +1,7 @@
 #include "hbm_address.h"
 #include "memory_clock.h"
 #include <array>
+#include <vector>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -44,6 +45,22 @@ int main() {
         try { decode_h100_hbm_address(80ULL << 30); }
         catch (const std::out_of_range&) { rejected = true; }
         require(rejected, "out of range address was silently truncated");
+
+        for (int stacks : {2, 4, 5}) {
+            std::vector<int> distribution(stacks * 16);
+            const auto capacity = static_cast<std::uint64_t>(stacks) * (16ULL << 30);
+            for (std::uint64_t address = 0; address < 128ULL * distribution.size() * 16; address += 128) {
+                const auto decoded = decode_h100_hbm_address(address, stacks);
+                require(encode_h100_hbm_address(decoded, stacks) == address, "scaled topology mapping alias");
+                ++distribution.at(decoded.channel);
+            }
+            for (auto count : distribution) require(count == distribution[0], "scaled channel imbalance");
+            for (int i = 0; i < 10000; ++i) {
+                const auto address = random() % capacity;
+                require(encode_h100_hbm_address(decode_h100_hbm_address(address, stacks), stacks) == address,
+                        "scaled capacity mapping alias");
+            }
+        }
 
         const MemoryClock exact(1000, 500);
         require(exact.ticks_at(0) == 0 && exact.ticks_at(1) == 2 &&

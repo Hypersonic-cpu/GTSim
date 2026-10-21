@@ -1,4 +1,5 @@
 #include "arch_conf.h"
+#include "../common/placement.h"
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -8,8 +9,11 @@
 
 using namespace GTSim;
 
-DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
-    DAG* dag = new DAG();
+DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024, WorkloadMemoryOptions memory = {}) {
+    if (memory.placement == TensorPlacementProfile::FA3QInHBF)
+        throw std::invalid_argument("FA3 Q placement is not a GEMM placement");
+    auto dag = std::make_unique<DAG>();
+    dag->tensor_registry = TensorRegistry(memory.layout);
     int node_id = 0;
 
     constexpr int TensorID_A { 0 };
@@ -18,11 +22,12 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
     dag->tensor_registry.allocate_tensor(TensorID_A, "A", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(K)},
                                  {static_cast<std::uint64_t>(K), 1}, DataType::FP16,
-                                 MemoryTier::HBF);
+                                 MemoryTier::HBM);
     dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
                                            static_cast<std::uint64_t>(N)},
                                  {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
-                                 MemoryTier::HBF);
+                                 memory.placement == TensorPlacementProfile::GEMMBInHBF ? MemoryTier::HBF : MemoryTier::HBM,
+                                 true, true);
     dag->tensor_registry.allocate_tensor(TensorID_C, "C", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(N)},
                                  {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
@@ -293,9 +298,10 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024) {
         }
     }
 
-    return dag;
+    return dag.release();
 }
 
+#ifndef GTSIM_WORKLOAD_LIBRARY
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: gtsim_gemm <architecture.yaml> [M N K] "
@@ -333,12 +339,14 @@ int main(int argc, char* argv[]) {
 
     std::cout << "=== H100 GEMM ===\n\n";
 
-    std::unique_ptr<DAG> dag(build_gemm_h100(M, N, K));
-    std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
-
-    config.silence_mode = true;
-
     try {
+        const auto memory = workload_memory_options(config);
+        std::unique_ptr<DAG> dag(build_gemm_h100(M, N, K, memory));
+        print_workload_memory(dag->tensor_registry, memory.placement);
+        std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
+
+        config.silence_mode = true;
+
         Simulator simulator(dag.get(), config);
         return simulator.run(100000000, true) ? 0 : 1;
     } catch (const std::exception& error) {
@@ -346,3 +354,5 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
+
+#endif

@@ -1,4 +1,5 @@
 #include "simulator.h"
+#include "hbf_address.h"
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
@@ -97,8 +98,10 @@ void Simulator::print_configuration(bool verbose) {
     } else {
         *output_stream << "HBM backend: ramulator2; timing profile: "
                        << config.memory.hbm.ramulator.config_file << "\n";
-        *output_stream << "HBM topology: 5 stacks, 10 logical MC groups, "
-                          "80 physical channels, 160 pseudochannels\n";
+        const int stacks = config.memory.hbm.ramulator.stacks;
+        *output_stream << "HBM topology: " << stacks << " stacks, " << stacks * 2
+                       << " logical MC groups, " << stacks * 16 << " physical channels, "
+                       << stacks * 32 << " pseudochannels\n";
     }
     *output_stream << "HBF read/write bandwidth: "
                    << config.memory.hbf.read_bw_GBps << "/"
@@ -106,6 +109,19 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "HBF read/write latency: "
                    << config.memory.hbf.read_latency_cycles << "/"
                    << config.memory.hbf.write_latency_cycles << " cycles\n";
+    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+        const auto& c = config.memory.hbf.controller;
+        *output_stream << "HBF backend: bank_plane; profile "
+                       << (c.geometry == HBFGeometryProfile::OCPReference ? "ocp_reference" : "hbflex_research")
+                       << "; stacks " << c.stacks << "; Host Channels " << c.stacks * 16
+                       << "; Banks " << c.stacks * 16 * c.banks_per_channel
+                       << "; Planes " << c.stacks * 512 << "; buffers/Bank 2; sense engines/Bank 1\n";
+        *output_stream << "HBF per-stack target read/write GB/s: " << c.read_target_GBps_per_stack
+                       << "/" << c.write_target_GBps_per_stack << "; array read/program ceilings: "
+                       << hbf_array_read_ceiling_GBps(c) << "/" << hbf_array_write_ceiling_GBps(c)
+                       << "; UCIe ceiling: " << c.ucie_ceiling_GBps_per_stack
+                       << "; SRAM latency hiding: disabled; page caches: initially empty\n";
+    }
     const auto print_link_config = [&](const char* name,
                                        const D2DLinkConfig& link) {
         *output_stream << name << " link: " << link.bandwidth_GBps
@@ -185,6 +201,56 @@ void Simulator::print_statistics(bool verbose) {
                        << "; row hit/miss/conflict " << backend.row_hits << "/"
                        << backend.row_misses << "/" << backend.row_conflicts
                        << "; channel burst min/max " << *min_channel << "/" << *max_channel << "\n";
+    }
+    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+        const auto hbf = simulated_gpu->memory_system->hbf_backend_statistics();
+        *output_stream << "HBF detailed JSON: {";
+        bool first = true;
+        const auto field = [&](const char* name) {
+            if (!first) *output_stream << ",";
+            first = false;
+            *output_stream << "\"" << name << "\":";
+        };
+        const auto scalar = [&](const char* name, auto value) { field(name); *output_stream << value; };
+        const auto array = [&](const char* name, const auto& values) {
+            field(name); *output_stream << "[";
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                if (i) *output_stream << ",";
+                *output_stream << values[i];
+            }
+            *output_stream << "]";
+        };
+        scalar("accepted_requests", hbf.accepted_requests);
+        scalar("completed_requests", hbf.completed_requests);
+        scalar("failed_requests", hbf.failed_requests);
+        scalar("host_read_bytes", hbf.host_read_bytes);
+        scalar("host_write_bytes", hbf.host_write_bytes);
+        scalar("sensed_bytes", hbf.sensed_bytes);
+        scalar("senses", hbf.senses);
+        scalar("programs", hbf.programs);
+        scalar("erases", hbf.erases);
+        scalar("cache_hits", hbf.cache_hits);
+        scalar("cache_misses", hbf.cache_misses);
+        scalar("cache_evictions", hbf.cache_evictions);
+        scalar("queue_stalls", hbf.queue_stalls);
+        scalar("bank_wait_ps", hbf.bank_wait_ps);
+        scalar("transfer_wait_ps", hbf.transfer_wait_ps);
+        scalar("events_processed", hbf.events_processed);
+        scalar("elapsed_ps", hbf.elapsed_ps);
+        array("stack_read_bytes", hbf.stack_read_bytes);
+        array("channel_read_bytes", hbf.channel_read_bytes);
+        array("bank_reads", hbf.bank_reads);
+        array("plane_reads", hbf.plane_reads);
+        array("stack_busy_ps", hbf.stack_busy_ps);
+        array("channel_read_busy_ps", hbf.channel_read_busy_ps);
+        array("channel_write_busy_ps", hbf.channel_write_busy_ps);
+        array("bank_busy_ps", hbf.bank_busy_ps);
+        array("plane_sense_busy_ps", hbf.plane_sense_busy_ps);
+        array("plane_program_busy_ps", hbf.plane_program_busy_ps);
+        array("plane_erase_busy_ps", hbf.plane_erase_busy_ps);
+        array("die_transfer_busy_ps", hbf.die_transfer_busy_ps);
+        array("ecc_busy_ps", hbf.ecc_busy_ps);
+        *output_stream << "}\n";
     }
     const auto print_link_stats = [&](const char* name,
                                       const D2DLinkStatistics& stats) {

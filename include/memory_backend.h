@@ -3,6 +3,7 @@
 
 #include "dag_node.h"
 #include "mem_conf.h"
+#include <hbfine/types.hpp>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -17,6 +18,7 @@ struct MemoryRoutingHint {
     int l2_slice{-1};
     int logical_mc_group{-1};
     int physical_channel{-1};
+    std::int64_t axi_id{-1};
 };
 
 struct MemRequest {
@@ -35,7 +37,10 @@ struct MemResponse {
     bool completed;
     int size_bytes{};
     MemoryOperation operation{MemoryOperation::Read};
+    int error_code{}; // zero on success; backend-specific diagnostic on failure
 };
+
+using HBFBackendStatistics = hbfine::Statistics;
 
 struct MemoryBackendStatistics {
     std::uint64_t accepted_requests{};
@@ -65,10 +70,14 @@ public:
     virtual std::vector<MemResponse> step(int now) = 0;
     virtual std::size_t pending_requests() const = 0;
     virtual MemoryBackendStatistics backend_statistics() const { return {}; }
+    virtual HBFBackendStatistics hbf_statistics() const { return {}; }
+    virtual void preload_region(std::uint64_t, std::uint64_t, bool) {}
 };
 
 std::unique_ptr<MemoryBackend> make_hbm_backend(const HBMConfig& config,
                                               double core_frequency_mhz);
+std::unique_ptr<MemoryBackend> make_hbf_backend(const HBFConfig& config,
+                                              double core_frequency_mhz, std::uint64_t base_address);
 
 } // namespace GTSim
 

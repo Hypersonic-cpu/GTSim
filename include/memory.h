@@ -597,9 +597,11 @@ public:
         if (key.global_line_addr % static_cast<std::uint64_t>(line_size_bytes) != 0) {
             throw std::invalid_argument("L2 transaction address is not cache-line aligned");
         }
+        const auto tier = tensors.resolve_tier(key.global_line_addr);
+        tensors.validate_access(key.global_line_addr, line_size_bytes, tier, is_write);
         const L2Access access{node_id, key, line_size_bytes,
                               is_write ? MemoryOperation::Write : MemoryOperation::Read,
-                              tensors.resolve_tier(key.global_line_addr)};
+                              tier};
         if (is_write) {
             l2_queue_write.push_back(access);
         } else {
@@ -694,12 +696,13 @@ public:
     }
 
     void handle_response(const MemResponse& response, int current_cycle) {
+        if (!response.completed) {
+            throw std::runtime_error("memory backend failed request " + std::to_string(response.request_id) +
+                                     " with error " + std::to_string(response.error_code));
+        }
         const auto request_it = backend_request_to_line.find(response.request_id);
         if (request_it == backend_request_to_line.end()) {
             return;  // A writeback has no L2 waiter.
-        }
-        if (!response.completed) {
-            throw std::runtime_error("memory backend reported a failed request");
         }
 
         const CacheLineKey key = request_it->second;
@@ -1040,7 +1043,7 @@ private:
 using DRAMModel = HBMModel;
 
 // HBF controller with independent read and write service queues and bandwidths.
-class HBFModel {
+class HBFModel : public MemoryBackend {
 public:
     HBFModel(const HBFConfig& config, double core_frequency_mhz)
         : read_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
@@ -1051,7 +1054,7 @@ public:
           write_latency_cycles_(config.write_latency_cycles),
           queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
 
-    bool try_submit(const MemRequest& request, int now) {
+    bool try_submit(const MemRequest& request, int now) override {
         if (queued_requests() >= queue_capacity_) {
             return false;
         }
@@ -1068,13 +1071,15 @@ public:
         return true;
     }
 
+    std::size_t pending_requests() const override { return queued_requests(); }
+
     void submit(const MemRequest& request, int now) {
         if (!try_submit(request, now)) {
             throw std::runtime_error("HBF request queue is full");
         }
     }
 
-    std::vector<MemResponse> step(int now) {
+    std::vector<MemResponse> step(int now) override {
         std::vector<MemResponse> completed;
         service_queue(read_requests_, read_bandwidth_bytes_per_cycle_,
                       read_fractional_credit_, now, completed);
@@ -1264,6 +1269,10 @@ public:
                                         l2_write_bandwidth_bytes_per_cycle,
                                         l2_queue_depth, bypass_cache, tensors)) {
         validate_memory_system_config(memory_config_);
+        if (memory_config_.address_layout.enabled &&
+            tensors_.address_layout() != memory_config_.address_layout) {
+            throw std::invalid_argument("memory devices and TensorRegistry require identical explicit address layouts");
+        }
         if (!std::isfinite(core_frequency_mhz) || core_frequency_mhz <= 0.0) {
             throw std::invalid_argument("core frequency must be positive");
         }
@@ -1273,6 +1282,18 @@ public:
             case MemoryTopology::CoLocated: build_co_located(core_frequency_mhz); break;
             case MemoryTopology::Cascaded: build_cascaded(core_frequency_mhz); break;
             default: throw std::invalid_argument("unsupported memory topology");
+        }
+        if (tensors_.address_layout().enabled) {
+            if ((memory_config_.topology == MemoryTopology::FullHBM && tensors_.contains_tier(MemoryTier::HBF)) ||
+                (memory_config_.topology == MemoryTopology::FullHBF && tensors_.contains_tier(MemoryTier::HBM)))
+                throw std::invalid_argument("segmented allocations require a compatible explicit placement profile");
+            for (const auto& [id, tensor] : tensors_.entries()) {
+                (void)id;
+                if (hbf_ && tensor.initial_memory_tier == MemoryTier::HBF && tensor.preloaded) {
+                    const auto bytes = (tensor.byte_size() + 4095) / 4096 * 4096;
+                    hbf_->preload_region(tensor.global_base_address, bytes, tensor.read_only);
+                }
+            }
         }
         report_placement_override();
     }
@@ -1311,11 +1332,16 @@ public:
 
     bool idle() const {
         return l2_->idle() && request_routes_.empty() &&
-               (!hbm_ || hbm_->pending_requests() == 0);
+               (!hbm_ || hbm_->pending_requests() == 0) &&
+               (!hbf_ || hbf_->pending_requests() == 0);
     }
 
     MemoryBackendStatistics hbm_backend_statistics() const {
         return hbm_ ? hbm_->backend_statistics() : MemoryBackendStatistics{};
+    }
+
+    HBFBackendStatistics hbf_backend_statistics() const {
+        return hbf_ ? hbf_->hbf_statistics() : HBFBackendStatistics{};
     }
 
     MemorySystemStatistics statistics(int current_cycle) const {
@@ -1349,7 +1375,7 @@ private:
     const TensorRegistry& tensors_;
     std::unique_ptr<L2Cache> l2_;
     std::unique_ptr<MemoryBackend> hbm_;
-    std::unique_ptr<HBFModel> hbf_;
+    std::unique_ptr<MemoryBackend> hbf_;
     std::unique_ptr<D2DLink> gpu_to_hbm_;
     std::unique_ptr<D2DLink> gpu_to_hbf_;
     std::unique_ptr<D2DLink> hbm_to_hbf_;
@@ -1374,8 +1400,8 @@ private:
     }
 
     void build_full_hbf(double core_frequency_mhz) {
-        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
-                                          core_frequency_mhz);
+        hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
+                                tensors_.address_layout().hbf_base);
         gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
                                                  core_frequency_mhz);
     }
@@ -1383,8 +1409,8 @@ private:
     void build_co_located(double core_frequency_mhz) {
         hbm_ = make_hbm_backend(memory_config_.hbm,
                                  core_frequency_mhz);
-        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
-                                          core_frequency_mhz);
+        hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
+                                tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
                                                  core_frequency_mhz);
         gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
@@ -1394,8 +1420,8 @@ private:
     void build_cascaded(double core_frequency_mhz) {
         hbm_ = make_hbm_backend(memory_config_.hbm,
                                  core_frequency_mhz);
-        hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
-                                          core_frequency_mhz);
+        hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
+                                tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
                                                  core_frequency_mhz);
         hbm_to_hbf_ = std::make_unique<D2DLink>(memory_config_.hbm_to_hbf,
@@ -1429,6 +1455,8 @@ private:
     }
 
     void route_request(const MemRequest& request, int current_cycle) {
+        tensors_.validate_access(request.global_addr, request.size_bytes, request.tier,
+                                 request.operation != MemoryOperation::Read);
         const MemoryTier tier = effective_tier(request.tier);
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id, RequestRoute{tier, current_cycle});

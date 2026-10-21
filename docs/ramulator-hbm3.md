@@ -1,8 +1,8 @@
 # Optional Ramulator2 HBM3 backend
 
 The H100 GEMM and FA3 reference builders can select a timing-only Ramulator2
-HBM backend. The default remains `naive`; HBF and the shared L2/MSHR model are
-unchanged. There are no modeled L2 slices, partitions, or slice contention.
+HBM backend. The default remains `naive`; the shared L2/MSHR model is
+unchanged. The separate [HBFine adapter](hbf-controller.md) supplies optional HBF timing. There are no modeled L2 slices, partitions, or slice contention.
 
 ## Build and run
 
@@ -30,7 +30,11 @@ Ramulator Python DSL with `python3 scripts/ramulator/export_h100.py`; this does
 not compile or load Python bindings. Config paths resolve relative to their
 containing GTSim YAML file. An unavailable compiled backend, malformed profile,
 unsupported topology, transaction size, or out-of-capacity address fails
-explicitly. This initial adapter supports FullHBM on H100 SXM only.
+explicitly. The adapter supports FullHBM and CoLocated H100-derived profiles with 1–5 HBM stacks.
+The default five-stack profile is unchanged; optional two/four-stack profiles
+are generated with `--stacks 2` or `--stacks 4` using the same per-stack timing.
+Use the corresponding `configs/memconf/*_ramulator_patch.yaml` after a mixed
+profile. These hypothetical reduced-stack systems have no measured H100 target.
 
 ## Topology and mapping evidence
 

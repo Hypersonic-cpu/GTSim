@@ -26,7 +26,7 @@ public:
           frontend_(Ramulator::Factory::create_frontend(config_)),
           memory_(Ramulator::Factory::create_memory_system(config_)),
           clock_(core_frequency_mhz, static_cast<int>(std::lround(memory_->get_tCK() * 1000))),
-          pending_(80) {
+          pending_(config.ramulator.stacks * 16), stacks_(config.ramulator.stacks) {
         const auto controllers = config_["memory_system"]["controllers"];
         if (controllers.size() != pending_.size() || memory_->get_tx_bytes() != 32 ||
             config_["memory_system"]["channel_mapper"]["impl"].as<std::string>() !=
@@ -68,8 +68,8 @@ public:
             throw std::invalid_argument("unsupported DRAM memory operation");
         }
         if (request.size_bytes <= 0 || request.size_bytes % 32 || request.global_addr % 32 ||
-            request.global_addr >= (80ULL << 30) ||
-            static_cast<std::uint64_t>(request.size_bytes) > (80ULL << 30) - request.global_addr) {
+            request.global_addr >= (static_cast<std::uint64_t>(stacks_) * (16ULL << 30)) ||
+            static_cast<std::uint64_t>(request.size_bytes) > (static_cast<std::uint64_t>(stacks_) * (16ULL << 30)) - request.global_addr) {
             throw std::invalid_argument("HBM3 requires aligned, in-range 32B-multiple requests");
         }
         // MemorySystem chooses the physical device. Preserve the original tier
@@ -82,7 +82,7 @@ public:
         parents_.emplace(request.request_id, Parent{request, request.size_bytes / 32});
         for (int offset = 0; offset < request.size_bytes; offset += 32) {
             const auto address = request.global_addr + static_cast<std::uint64_t>(offset);
-            const auto decoded = decode_h100_hbm_address(address);
+            const auto decoded = decode_h100_hbm_address(address, stacks_);
             pending_[decoded.channel].push_back(
                 Burst{next_token_++, request.request_id, address, clock_.first_edge_at_or_after(now),
                       request.operation != MemoryOperation::Read});
@@ -158,6 +158,7 @@ private:
     std::uint64_t next_token_{};
     MemoryBackendStatistics stats_;
     std::vector<std::deque<Burst>> pending_;
+    int stacks_;
     std::unordered_map<std::uint64_t, Parent> parents_;
     std::unordered_map<std::uint64_t, Burst> inflight_;
     std::unordered_set<std::uint64_t> writing_addresses_;
@@ -173,7 +174,7 @@ private:
                 // Serialize same-address requests until write data has arrived
                 // so acknowledgements and forwarded reads cannot retire early.
                 if (writing_addresses_.contains(burst.address)) break;
-                const auto address = decode_h100_hbm_address(burst.address);
+                const auto address = decode_h100_hbm_address(burst.address, stacks_);
                 Ramulator::Request request(
                     static_cast<Ramulator::Addr_t>(burst.address),
                     burst.write ? Ramulator::Request::Type::Write : Ramulator::Request::Type::Read,

@@ -1,0 +1,58 @@
+# Five-stack H100 package. HBFlex targets; no H200 HBM3e parameters.
+# OCP Host Channel and Bank semantics; the Bank/Plane assignment is assumed.
+# Sense engines: 512/stack; two page buffers per Bank do not add engines.
+topology: CoLocated
+hbm:
+  backend: naive
+  model_channels: true
+  stacks: 2
+  channels_per_stack: 16
+  read_bw_GBps: 1240
+  write_max_bw_GBps: 620
+  read_latency_cycles: 270
+  write_latency_cycles: 270
+hbf:
+  backend: bank_plane
+  read_bw_GBps: 1464
+  write_bw_GBps: 81.6
+  read_latency_cycles: 7920
+  write_latency_cycles: 148500
+  controller:
+    geometry: hbflex_research
+    stacks: 3
+    host_channels_per_stack: 16
+    virtual_axi_ports_per_channel: 1
+    dies_per_stack: 16
+    planes_per_die: 32
+    banks_per_channel: 32
+    planes_per_bank: 1
+    blocks_per_plane: 512
+    pages_per_block: 512
+    page_bytes: 4096
+    page_buffers_per_bank: 2
+    host_stripe_bytes: 4096
+    read_target_GBps_per_stack: 488
+    write_target_GBps_per_stack: 27.2
+    ucie_ceiling_GBps_per_stack: 1536
+    sense_latency_us: 4
+    program_latency_us: 75
+    allow_program: false
+    erase_latency_us: 0
+    write_timeout_us: 0
+    base_die_sram_bytes_per_stack: 40000000
+    core_transfer_GBps_per_die: 0
+    ecc_GBps_per_stack: 0
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_GBps: 3072
+    latency_cycles: 10
+  gpu_to_hbf:
+    bandwidth_GBps: 4608
+    latency_cycles: 10
+address_layout:
+  enabled: true
+  hbm_base: 0
+  hbm_capacity_bytes: 34359738368
+  hbf_base: 34359738368
+  hbf_capacity_bytes: 1649267441664
+  hbm_allocation_offset: 0

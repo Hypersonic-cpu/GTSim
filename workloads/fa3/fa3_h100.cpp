@@ -1,4 +1,5 @@
 #include "arch_conf.h"
+#include "../common/placement.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -12,8 +13,13 @@ DAG* build_fa3_h100(int seq_q = 128,
                      int seq_kv = 128,
                      int num_heads_q = 1,
                      int num_heads_kv = 1,
-                     int batch = 1) {
-    DAG* dag = new DAG();
+                     int batch = 1, WorkloadMemoryOptions memory = {}) {
+    if (memory.placement == TensorPlacementProfile::GEMMBInHBF)
+        throw std::invalid_argument("GEMM B placement is not an FA3 placement");
+    if (batch <= 0 || num_heads_q <= 0 || num_heads_kv <= 0 || num_heads_q % num_heads_kv)
+        throw std::invalid_argument("invalid batch or GQA head counts");
+    auto dag = std::make_unique<DAG>();
+    dag->tensor_registry = TensorRegistry(memory.layout);
     int node_id = 0;
 
     const int num_sms = 132;
@@ -51,7 +57,8 @@ DAG* build_fa3_h100(int seq_q = 128,
                 matrix_base_q, "Q_b" + std::to_string(b) + "_h" + std::to_string(h),
                 {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
                 {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP16,
-                MemoryTier::HBM);
+                memory.placement == TensorPlacementProfile::FA3QInHBF ? MemoryTier::HBF : MemoryTier::HBM,
+                true, true);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_q + 3,
                 "O_b" + std::to_string(b) + "_h" + std::to_string(h),
@@ -60,7 +67,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                 MemoryTier::HBM);
         }
         for (int h = 0; h < num_heads_kv; ++h) {
-            const int matrix_base_kv = (b * num_heads_kv + h) * 4;
+            const int matrix_base_kv = batch * num_heads_q * 4 + (b * num_heads_kv + h) * 2;
             const std::vector<std::uint64_t> kv_shape{
                 static_cast<std::uint64_t>(head_dim), static_cast<std::uint64_t>(seq_kv)};
             const std::vector<std::uint64_t> kv_strides{
@@ -68,11 +75,11 @@ DAG* build_fa3_h100(int seq_q = 128,
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 1,
                 "K_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM, true, true);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 2,
                 "V_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
+                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBM, true, true);
         }
     }
 
@@ -89,7 +96,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                 int loader_warp = warp_base + 8;
                 int kv_head = (group_size > 0) ? (h / group_size) : h;
                 int matrix_base_q = (b * num_heads_q + h) * 4;
-                int matrix_base_kv = (b * num_heads_kv + kv_head) * 4;
+                int matrix_base_kv = batch * num_heads_q * 4 + (b * num_heads_kv + kv_head) * 2;
                 int sm_id = (num_sms > 0) ? (tb_id % num_sms) : 0;
 
                 int q_rows_0 = std::min(64, q_rows);
@@ -529,9 +536,10 @@ DAG* build_fa3_h100(int seq_q = 128,
         }
     }
 
-    return dag;
+    return dag.release();
 }
 
+#ifndef GTSIM_WORKLOAD_LIBRARY
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: gtsim_fa3 <architecture.yaml> "
@@ -577,13 +585,15 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "=== H100 FA3 ===\n\n";
-    std::unique_ptr<DAG> dag(build_fa3_h100(seq_q, seq_kv, num_heads_q, num_heads_kv, batch));
-    std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
-
-    config.silence_mode = true;
-    config.workload_type = WorkloadType::FA3;
-
     try {
+        const auto memory = workload_memory_options(config);
+        std::unique_ptr<DAG> dag(build_fa3_h100(seq_q, seq_kv, num_heads_q, num_heads_kv, batch, memory));
+        print_workload_memory(dag->tensor_registry, memory.placement);
+        std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
+
+        config.silence_mode = true;
+        config.workload_type = WorkloadType::FA3;
+
         Simulator simulator(dag.get(), config);
         return simulator.run(100000000, true) ? 0 : 1;
     } catch (const std::exception& error) {
@@ -591,3 +601,5 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
+
+#endif
