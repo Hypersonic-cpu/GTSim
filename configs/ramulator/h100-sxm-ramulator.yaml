@@ -1,0 +1,14 @@
+# HBM3 timing backend; all omitted compute/L2 settings come from h100-sxm.yaml.
+# Profile paths are relative to this file. See docs/ramulator-hbm3.md for evidence
+# and the conservative downclock assumption behind the generated timing profile.
+topology: FullHBM
+hbm:
+  backend: ramulator2
+  queue_capacity: 65536
+  ramulator:
+    config_file: h100_hbm3.yaml
+    stacks: 5
+    logical_mc_groups_per_stack: 2
+    channels_per_stack: 16
+    pseudochannels_per_channel: 2
+    interleave_bytes: 128

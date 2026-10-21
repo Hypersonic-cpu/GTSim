@@ -3,10 +3,21 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace GTSim {
 
 enum class MemoryTopology { FullHBM, FullHBF, CoLocated, Cascaded };
+enum class HBMBackend { Naive, Ramulator2 };
+
+struct RamulatorHBMConfig {
+    std::string config_file;
+    int stacks{5};
+    int logical_mc_groups_per_stack{2};
+    int channels_per_stack{16};
+    int pseudochannels_per_channel{2};
+    int interleave_bytes{128};
+};
 
 struct HBMConfig {
     double read_bw_GBps{3100.0};
@@ -14,6 +25,8 @@ struct HBMConfig {
     int read_latency_cycles{270};
     int write_latency_cycles{270};
     int queue_capacity{65536};
+    HBMBackend backend{HBMBackend::Naive};
+    RamulatorHBMConfig ramulator{};
 };
 
 struct HBFConfig {
@@ -75,6 +88,17 @@ inline void validate_memory_system_config(const MemorySystemConfig& config) {
         !valid_latency(config.hbm.write_latency_cycles) ||
         !valid_capacity(config.hbm.queue_capacity)) {
         throw std::invalid_argument("invalid HBM memory configuration");
+    }
+    if (config.hbm.backend == HBMBackend::Ramulator2) {
+        const auto& ram = config.hbm.ramulator;
+        if (config.topology != MemoryTopology::FullHBM || ram.config_file.empty() ||
+            ram.stacks != 5 || ram.logical_mc_groups_per_stack != 2 ||
+            ram.channels_per_stack != 16 || ram.pseudochannels_per_channel != 2 ||
+            ram.interleave_bytes != 128) {
+            throw std::invalid_argument(
+                "Ramulator2 currently requires FullHBM and the H100 5-stack, "
+                "10-group, 80-channel, 160-pseudochannel topology with 128B interleave");
+        }
     }
     if (!valid_tier_bandwidth(config.hbf.read_bw_GBps, hbf_active) ||
         !valid_tier_bandwidth(config.hbf.write_bw_GBps, hbf_active) ||

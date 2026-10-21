@@ -89,12 +89,17 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "Core frequency: " << config.core_frequency_mhz << " MHz\n";
     *output_stream << "Memory topology: "
                    << memory_topology_name(config.memory.topology) << "\n";
-    *output_stream << "HBM read bandwidth: " << config.memory.hbm.read_bw_GBps
-                   << " GB/s, write max: "
-                   << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
-    *output_stream << "HBM read/write latency: "
-                   << config.memory.hbm.read_latency_cycles << "/"
-                   << config.memory.hbm.write_latency_cycles << " cycles\n";
+    if (config.memory.hbm.backend == HBMBackend::Naive) {
+        *output_stream << "HBM backend: naive; read bandwidth: " << config.memory.hbm.read_bw_GBps
+                       << " GB/s, write max: " << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
+        *output_stream << "HBM read/write latency: " << config.memory.hbm.read_latency_cycles
+                       << "/" << config.memory.hbm.write_latency_cycles << " cycles\n";
+    } else {
+        *output_stream << "HBM backend: ramulator2; timing profile: "
+                       << config.memory.hbm.ramulator.config_file << "\n";
+        *output_stream << "HBM topology: 5 stacks, 10 logical MC groups, "
+                          "80 physical channels, 160 pseudochannels\n";
+    }
     *output_stream << "HBF read/write bandwidth: "
                    << config.memory.hbf.read_bw_GBps << "/"
                    << config.memory.hbf.write_bw_GBps << " GB/s\n";
@@ -160,6 +165,27 @@ void Simulator::print_statistics(bool verbose) {
     *output_stream << "Off-chip memory statistics:\n";
     print_tier_stats("  HBM", memory_stats.hbm);
     print_tier_stats("  HBF", memory_stats.hbf);
+    const auto backend = simulated_gpu->memory_system->hbm_backend_statistics();
+    if (config.memory.hbm.backend == HBMBackend::Ramulator2) {
+        const auto channels_used = std::count_if(backend.channel_transactions.begin(),
+                                                backend.channel_transactions.end(),
+                                                [](auto count) { return count > 0; });
+        *output_stream << "Ramulator HBM3 parents: " << backend.accepted_requests
+                       << "/" << backend.completed_requests << " accepted/completed; bursts: "
+                       << backend.submitted_transactions << "/" << backend.completed_transactions
+                       << "; bytes: " << backend.transaction_bytes << "; admission retries: "
+                       << backend.admission_retries << "; DRAM ticks: " << backend.dram_ticks
+                       << "; channels used: " << channels_used << "/"
+                       << backend.channel_transactions.size() << "\n";
+        const auto [min_channel, max_channel] = std::minmax_element(
+            backend.channel_transactions.begin(), backend.channel_transactions.end());
+        *output_stream << "Ramulator controllers: read/write accepted " << backend.controller_reads
+                       << "/" << backend.controller_writes << ", served "
+                       << backend.controller_served_reads << "/" << backend.controller_served_writes
+                       << "; row hit/miss/conflict " << backend.row_hits << "/"
+                       << backend.row_misses << "/" << backend.row_conflicts
+                       << "; channel burst min/max " << *min_channel << "/" << *max_channel << "\n";
+    }
     const auto print_link_stats = [&](const char* name,
                                       const D2DLinkStatistics& stats) {
         *output_stream << "  " << name << " transferred bytes: GPU->memory "
@@ -195,6 +221,18 @@ bool Simulator::run(int max_cycles, bool verbose) {
         }
 
         if (completed_node_count == dag->nodes.size()) {
+            // Kernel timing remains the last DAG completion cycle. Drain issued
+            // traffic separately, including dirty eviction writebacks, without
+            // adding an implicit L2 flush or changing reference kernel cycles.
+            int drain_cycle = cycle;
+            while (!simulated_gpu->memory_system->idle() && drain_cycle < max_cycles) {
+                simulated_gpu->memory_system->step(++drain_cycle);
+            }
+            if (!simulated_gpu->memory_system->idle()) {
+                *output_stream << "Memory drain timed out at cycle " << drain_cycle << "\n";
+                return false;
+            }
+            *output_stream << "Memory drained at cycle: " << drain_cycle << "\n";
             print_statistics(verbose);
             print_results();
             return true;

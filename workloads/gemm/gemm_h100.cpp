@@ -1,6 +1,7 @@
 #include "arch_conf.h"
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -332,14 +333,16 @@ int main(int argc, char* argv[]) {
 
     std::cout << "=== H100 GEMM ===\n\n";
 
-    DAG* dag = build_gemm_h100(M, N, K);
+    std::unique_ptr<DAG> dag(build_gemm_h100(M, N, K));
     std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
 
     config.silence_mode = true;
 
-    Simulator simulator(dag, config);
-    simulator.run(100000000, true);
-
-    delete dag;
-    return 0;
+    try {
+        Simulator simulator(dag.get(), config);
+        return simulator.run(100000000, true) ? 0 : 1;
+    } catch (const std::exception& error) {
+        std::cerr << "Simulation error: " << error.what() << '\n';
+        return 1;
+    }
 }

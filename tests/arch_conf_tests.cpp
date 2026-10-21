@@ -222,6 +222,13 @@ d2dlink:
         require_throws([&] { GTSim::ArchConfYamlReader(unknown_memory.path()).parse(patched); },
                        "unknown memory field was accepted");
 
+        TemporaryYaml invalid_backend("hbm:\n  backend: typo\n");
+        require_throws([&] { GTSim::ArchConfYamlReader(invalid_backend.path()).parse(patched); },
+                       "unknown HBM backend was accepted");
+        TemporaryYaml incomplete_ramulator("topology: FullHBM\nhbm:\n  backend: ramulator2\n");
+        require_throws([&] { GTSim::ArchConfYamlReader(incomplete_ramulator.path()).parse(patched); },
+                       "Ramulator without an explicit timing profile was accepted");
+
         TemporaryYaml malformed("l2: [\n");
         require_throws([&] { GTSim::ArchConfYamlReader(malformed.path()).parse(patched); },
                        "malformed YAML was accepted");

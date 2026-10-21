@@ -39,6 +39,10 @@ profile starts from the simulator's shared H100 defaults; YAML values override
 matching fields, omitted values retain those defaults, and unknown fields are
 reported as configuration errors.
 
+An optional [Ramulator2 HBM3 backend](docs/ramulator-hbm3.md) models H100 SXM
+DRAM channels, queues, refresh, and command timing. Enable it with
+`-DGTSIM_ENABLE_RAMULATOR2=ON`; the default memory backend remains naive.
+
 Run the smoke tests with `ctest --test-dir build --output-on-failure`. The
 checked reference outputs are in
 [`configs/v0.1.0/references.json`](configs/v0.1.0/references.json). To

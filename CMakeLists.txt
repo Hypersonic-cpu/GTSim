@@ -16,10 +16,16 @@ add_library(gtsim_core STATIC
   src/subpartition.cpp
   src/sm.cpp
   src/gpu.cpp
+  src/memory_backend.cpp
   src/simulator.cpp)
 target_include_directories(gtsim_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/glaze/include)
+
+option(GTSIM_ENABLE_RAMULATOR2 "Build the optional Ramulator2 HBM3 backend" OFF)
+if(GTSIM_ENABLE_RAMULATOR2)
+  include(cmake/Ramulator2.cmake)
+endif()
 
 add_executable(gtsim_gemm workloads/gemm/gemm_h100.cpp)
 target_link_libraries(gtsim_gemm PRIVATE gtsim_core)
@@ -52,6 +58,21 @@ if(BUILD_TESTING)
   add_executable(completion_queue_tests tests/completion_queue_tests.cpp)
   target_link_libraries(completion_queue_tests PRIVATE gtsim_core)
   add_test(NAME completion_queue_semantics COMMAND completion_queue_tests)
+  add_executable(hbm_address_tests tests/hbm_address_tests.cpp)
+  target_link_libraries(hbm_address_tests PRIVATE gtsim_core)
+  add_test(NAME hbm_address_and_clock COMMAND hbm_address_tests)
+  if(GTSIM_ENABLE_RAMULATOR2)
+    set(RAMULATOR_H100_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/ramulator/h100-sxm-ramulator.yaml)
+    add_executable(ramulator_backend_tests tests/ramulator_backend_tests.cpp)
+    target_link_libraries(ramulator_backend_tests PRIVATE gtsim_core)
+    add_test(NAME ramulator_backend_contract COMMAND ramulator_backend_tests ${RAMULATOR_H100_CONFIG})
+    add_test(NAME ramulator_gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG}
+             --memory-config ${RAMULATOR_H100_CONFIG} 128 256 64)
+    add_test(NAME ramulator_fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG}
+             --memory-config ${RAMULATOR_H100_CONFIG} 1 1 1 128 128)
+    set_tests_properties(ramulator_backend_contract ramulator_gemm_smoke ramulator_fa3_smoke
+                         PROPERTIES TIMEOUT 180)
+  endif()
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     add_test(NAME workload_profile_boundary

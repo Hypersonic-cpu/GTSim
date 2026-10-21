@@ -3,6 +3,7 @@
 
 #include "dag_node.h"
 #include "mem_conf.h"
+#include "memory_backend.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -400,35 +401,12 @@ struct CacheLineKeyHash {
     }
 };
 
-enum class MemoryOperation : std::uint8_t {
-    Read,
-    Write,
-    Writeback
-};
-
 struct L2Access {
     int node_id;
     CacheLineKey line;
     int size_bytes;
     MemoryOperation operation;
     MemoryTier tier;
-};
-
-struct MemRequest {
-    std::uint64_t request_id;
-    std::uint64_t global_addr;
-    int size_bytes;
-    MemoryOperation operation;
-    MemoryTier tier;
-};
-
-struct MemResponse {
-    std::uint64_t request_id;
-    std::uint64_t global_addr;
-    MemoryTier tier;
-    bool completed;
-    int size_bytes{};
-    MemoryOperation operation{MemoryOperation::Read};
 };
 
 inline int compute_dram_subops(const DAGNode& node, int access_granularity_bytes) {
@@ -704,6 +682,11 @@ public:
         return completed;
     }
 
+    bool idle() const {
+        return l2_queue_read.empty() && l2_queue_write.empty() &&
+               mshr.empty() && backend_requests.empty() && completion_queue.empty();
+    }
+
     std::vector<MemRequest> take_backend_requests() {
         std::vector<MemRequest> requests;
         requests.swap(backend_requests);
@@ -901,7 +884,7 @@ struct MemorySystemStatistics {
 
 // HBM controller with a shared read/write data path and an additional write
 // throughput ceiling. Bandwidth is expressed in bytes per GPU core cycle.
-class HBMModel {
+class HBMModel : public MemoryBackend {
 public:
     HBMModel(const HBMConfig& config, double core_frequency_mhz)
         : total_bandwidth_bytes_per_cycle_(bytes_per_cycle_from_GBps(
@@ -911,6 +894,8 @@ public:
           read_latency_cycles_(config.read_latency_cycles),
           write_latency_cycles_(config.write_latency_cycles),
           queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
+
+    std::size_t pending_requests() const override { return queued_requests(); }
 
     // Compatibility constructor for code that used the previous DRAMModel API.
     HBMModel(int bandwidth_bytes_per_cycle, int latency_cycles,
@@ -926,7 +911,7 @@ public:
           write_latency_cycles_(latency_cycles),
           queue_capacity_(65536) {}
 
-    bool try_submit(const MemRequest& request, int now) {
+    bool try_submit(const MemRequest& request, int now) override {
         if (queued_requests() >= queue_capacity_) {
             return false;
         }
@@ -951,7 +936,7 @@ public:
 
     void enqueue(const MemRequest& request, int now) { submit(request, now); }
 
-    std::vector<MemResponse> step(int now) {
+    std::vector<MemResponse> step(int now) override {
         std::vector<MemResponse> completed;
         const bool read_ready = !read_requests_.empty() &&
                                 read_requests_.front().ready_cycle <= now;
@@ -1295,6 +1280,7 @@ public:
     L2Cache* l2() const { return l2_.get(); }
 
     std::vector<int> step(int current_cycle) {
+        last_step_cycle_ = current_cycle;
         std::vector<int> completed = l2_->step(current_cycle);
         collect_l2_requests(current_cycle);
         launch_pending_requests(current_cycle);
@@ -1323,11 +1309,20 @@ public:
         return completed;
     }
 
+    bool idle() const {
+        return l2_->idle() && request_routes_.empty() &&
+               (!hbm_ || hbm_->pending_requests() == 0);
+    }
+
+    MemoryBackendStatistics hbm_backend_statistics() const {
+        return hbm_ ? hbm_->backend_statistics() : MemoryBackendStatistics{};
+    }
+
     MemorySystemStatistics statistics(int current_cycle) const {
         MemorySystemStatistics result;
         result.hbm = hbm_statistics_;
         result.hbf = hbf_statistics_;
-        const int elapsed_cycles = std::max(1, current_cycle + 1);
+        const int elapsed_cycles = std::max(1, std::max(current_cycle, last_step_cycle_) + 1);
         if (gpu_to_hbm_) {
             result.gpu_to_hbm = gpu_to_hbm_->statistics(elapsed_cycles);
             result.has_gpu_to_hbm = true;
@@ -1349,10 +1344,11 @@ private:
         int start_cycle;
     };
 
+    int last_step_cycle_{};
     MemorySystemConfig memory_config_;
     const TensorRegistry& tensors_;
     std::unique_ptr<L2Cache> l2_;
-    std::unique_ptr<HBMModel> hbm_;
+    std::unique_ptr<MemoryBackend> hbm_;
     std::unique_ptr<HBFModel> hbf_;
     std::unique_ptr<D2DLink> gpu_to_hbm_;
     std::unique_ptr<D2DLink> gpu_to_hbf_;
@@ -1371,8 +1367,8 @@ private:
     TierMemoryStatistics hbf_statistics_{};
 
     void build_full_hbm(double core_frequency_mhz) {
-        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
-                                          core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm,
+                                 core_frequency_mhz);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
                                                  core_frequency_mhz);
     }
@@ -1385,8 +1381,8 @@ private:
     }
 
     void build_co_located(double core_frequency_mhz) {
-        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
-                                          core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm,
+                                 core_frequency_mhz);
         hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
                                           core_frequency_mhz);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
@@ -1396,8 +1392,8 @@ private:
     }
 
     void build_cascaded(double core_frequency_mhz) {
-        hbm_ = std::make_unique<HBMModel>(memory_config_.hbm,
-                                          core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm,
+                                 core_frequency_mhz);
         hbf_ = std::make_unique<HBFModel>(memory_config_.hbf,
                                           core_frequency_mhz);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,

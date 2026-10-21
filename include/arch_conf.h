@@ -45,6 +45,11 @@ template <> struct meta<GTSim::MemoryTopology> {
                                               "Cascaded", Cascaded);
 };
 
+template <> struct meta<GTSim::HBMBackend> {
+    using enum GTSim::HBMBackend;
+    static constexpr auto value = enumerate("naive", Naive, "ramulator2", Ramulator2);
+};
+
 } // namespace glz
 
 namespace GTSim {
@@ -136,6 +141,11 @@ public:
         } catch (const std::exception& error) {
             throw std::runtime_error("invalid memory configuration in '" +
                                      filename_.string() + "': " + error.what());
+        }
+        auto& ramulator_file = candidate.memory.hbm.ramulator.config_file;
+        if (!ramulator_file.empty() && std::filesystem::path(ramulator_file).is_relative()) {
+            ramulator_file = (std::filesystem::absolute(filename_).parent_path() /
+                              ramulator_file).lexically_normal().string();
         }
         conf = std::move(candidate);
     }
