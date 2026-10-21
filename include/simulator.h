@@ -4,6 +4,7 @@
 #include "gpu.h"
 #include "dag_node.h"
 #include "mem_conf.h"
+#include <array>
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
@@ -305,20 +306,30 @@ public:
         node_id_to_sp.assign(total_nodes, nullptr);
         node_id_to_sm.assign(total_nodes, -1);
 
+        // Partition once, retaining DAG order within every SM. Unassigned nodes
+        // deliberately retain the existing broadcast-to-all-SMs behavior.
+        std::vector<std::vector<DAGNode*>> nodes_by_sm(simulated_gpu->sms.size());
+        for (auto* node : dag->nodes) {
+            if (node->sm_id == -1) {
+                for (auto& nodes : nodes_by_sm) nodes.push_back(node);
+            } else if (node->sm_id >= 0 &&
+                       node->sm_id < static_cast<int>(nodes_by_sm.size())) {
+                nodes_by_sm[node->sm_id].push_back(node);
+            }
+        }
         for (auto* sm_inst : simulated_gpu->sms) {
+            std::array<std::vector<DAGNode*>, 4> nodes_by_sp;
+            for (auto* node : nodes_by_sm[sm_inst->sm_id]) {
+                const int sp_id = node->warp_id % 4;
+                if (sp_id >= 0) nodes_by_sp[sp_id].push_back(node);
+            }
             for (auto* sp : sm_inst->sps) {
                 // Assign warps to subpartitions: warp_id % 4 == sp.subpartition_id
-                std::vector<DAGNode*> sp_nodes;
-                for (auto* node : dag->nodes) {
-                    if (node->warp_id % 4 == sp->subpartition_id) {
-                        // Assign node to this SM based on sm_id or thread_block_id
-                        if (node->sm_id == -1 || node->sm_id == sm_inst->sm_id) {
-                            sp_nodes.push_back(node);
-                            if (node->id >= 0 && node->id < total_nodes) {
-                                node_id_to_sp[node->id] = sp;
-                                node_id_to_sm[node->id] = sm_inst->sm_id;
-                            }
-                        }
+                const auto& sp_nodes = nodes_by_sp[sp->subpartition_id];
+                for (auto* node : sp_nodes) {
+                    if (node->id >= 0 && node->id < total_nodes) {
+                        node_id_to_sp[node->id] = sp;
+                        node_id_to_sm[node->id] = sm_inst->sm_id;
                     }
                 }
                 sp->sp_scheduler->init_with_nodes(sp_nodes, total_nodes, sp->subpartition_id,
@@ -380,13 +391,7 @@ public:
 
         // Initialize thread block residency scheduler for each SM
         for (auto* sm_inst : simulated_gpu->sms) {
-            std::vector<DAGNode*> sm_nodes;
-            for (auto* node : dag->nodes) {
-                if (node->sm_id == -1 || node->sm_id == sm_inst->sm_id) {
-                    sm_nodes.push_back(node);
-                }
-            }
-            sm_inst->initialize_tb_scheduler(sm_nodes);
+            sm_inst->initialize_tb_scheduler(nodes_by_sm[sm_inst->sm_id]);
         }
 
     }

@@ -515,10 +515,10 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
                 continue;
             }
 
-            std::vector<int> warp_ids(group_size, 0);
-            std::vector<Scheduler*> scheds(group_size, nullptr);
-            std::vector<DAGNode*> nodes(group_size, nullptr);
-            std::vector<Pipeline*> pipes(group_size, nullptr);
+            std::array<int, 4> warp_ids{};
+            std::array<Scheduler*, 4> scheds{};
+            std::array<DAGNode*, 4> nodes{};
+            std::array<Pipeline*, 4> pipes{};
             for (int i = 0; i < group_size; ++i) {
                 int grouped_warp = warp_id + i;
                 warp_ids[i] = grouped_warp;
@@ -603,11 +603,6 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
             }
         }
     } else {
-        // Build priority list: warps sorted by last_issue_cycle (oldest first)
-        std::vector<int> ranked_warps = resident_warps;
-        std::sort(ranked_warps.begin(), ranked_warps.end(),
-                  [this](int a, int b) { return last_issue_cycle[a] < last_issue_cycle[b]; });
-
         // Step 1: GTO - Try the warp that issued last cycle (Greedy part)
         if (last_issued_warp != -1 &&
             last_issued_warp % 4 == subpartition_id &&
@@ -619,6 +614,12 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
                 return {node};
             }
         }
+
+        // Only rank candidates if the greedy path failed. Keep the original
+        // input order and comparator, including their equal-age tie behavior.
+        std::vector<int> ranked_warps = resident_warps;
+        std::sort(ranked_warps.begin(), ranked_warps.end(),
+                  [this](int a, int b) { return last_issue_cycle[a] < last_issue_cycle[b]; });
 
         // Step 2: GTO - Cannot continue from last warp, try other warps in order of staleness
         for (int warp_id : ranked_warps) {

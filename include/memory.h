@@ -75,27 +75,19 @@ public:
     std::vector<int> step(int current_cycle) {
         std::vector<int> completed;
 
-        // Process read queue
-        std::vector<std::tuple<std::vector<int>, int, int>> remaining_reads;
-        for (const auto& [node_ids, bytes_val, complete_cycle] : memory_queue) {
-            if (current_cycle >= complete_cycle) {
+        // Compact in place: retain request order without allocating and copying
+        // every pending request's node-ID vector on every cycle.
+        const auto drain = [&](auto& queue) {
+            queue.erase(std::remove_if(queue.begin(), queue.end(), [&](const auto& entry) {
+                const auto& [node_ids, bytes_val, complete_cycle] = entry;
+                (void)bytes_val;
+                if (current_cycle < complete_cycle) return false;
                 completed.insert(completed.end(), node_ids.begin(), node_ids.end());
-            } else {
-                remaining_reads.push_back({node_ids, bytes_val, complete_cycle});
-            }
-        }
-        memory_queue = std::move(remaining_reads);
-
-        // Process write queue
-        std::vector<std::tuple<std::vector<int>, int, int>> remaining_writes;
-        for (const auto& [node_ids, bytes_val, complete_cycle] : memory_write_queue) {
-            if (current_cycle >= complete_cycle) {
-                completed.insert(completed.end(), node_ids.begin(), node_ids.end());
-            } else {
-                remaining_writes.push_back({node_ids, bytes_val, complete_cycle});
-            }
-        }
-        memory_write_queue = std::move(remaining_writes);
+                return true;
+            }), queue.end());
+        };
+        drain(memory_queue);
+        drain(memory_write_queue);
 
         return completed;
     }
@@ -677,15 +669,12 @@ public:
 
     std::vector<int> step(int current_cycle) {
         std::vector<int> completed;
-        std::vector<std::pair<int, int>> remaining_completions;
-        for (const auto& [node_id, complete_cycle] : completion_queue) {
-            if (current_cycle >= complete_cycle) {
-                completed.push_back(node_id);
-            } else {
-                remaining_completions.push_back({node_id, complete_cycle});
-            }
+        // Both hit and response paths append at the current cycle plus the
+        // same fixed L2 latency. Completion times are therefore nondecreasing.
+        while (!completion_queue.empty() && completion_queue.front().second <= current_cycle) {
+            completed.push_back(completion_queue.front().first);
+            completion_queue.pop_front();
         }
-        completion_queue = std::move(remaining_completions);
 
         const int total_budget_tx = l2_bandwidth_bytes_per_cycle / line_size_bytes;
         int write_budget_tx = l2_write_bandwidth_bytes_per_cycle / line_size_bytes;
@@ -767,7 +756,7 @@ private:
     std::unordered_map<std::uint64_t, CacheLineKey> backend_request_to_line;
     std::deque<L2Access> l2_queue_read;
     std::deque<L2Access> l2_queue_write;
-    std::vector<std::pair<int, int>> completion_queue;
+    std::deque<std::pair<int, int>> completion_queue;
     std::vector<MemRequest> backend_requests;
     std::uint64_t next_request_id{1};
 
