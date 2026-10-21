@@ -1,3 +1,6 @@
 [submodule "3rdparty/glaze"]
 	path = 3rdparty/glaze
 	url = https://github.com/stephenberry/glaze.git
+[submodule "3rdparty/ramulator2"]
+	path = 3rdparty/ramulator2
+	url = git@github.com:CMU-SAFARI/ramulator2.git
