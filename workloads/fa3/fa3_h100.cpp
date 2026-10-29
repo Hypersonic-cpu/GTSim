@@ -13,16 +13,20 @@ DAG* build_fa3_h100(int seq_q = 128,
                      int seq_kv = 128,
                      int num_heads_q = 1,
                      int num_heads_kv = 1,
-                     int batch = 1, const KernelOptions& options = {},
+                     int batch = 1, const KernelOptions& input_options = {},
                      const SimulatorConfig& hardware = make_h100_sxm_config()) {
-    options.validate(true, seq_q, 128, seq_kv, hardware);
+    KernelOptions options = input_options;
+    // A single live query uses one padded m64 Tensor Core consumer group.
+    // Global memory accesses remain restricted to the live query row.
+    if (seq_q == 1) options.q_tile = 64;
+    options.validate(true, seq_q, options.head_dim, seq_kv, hardware);
     DAG* dag = new DAG();
     int node_id = 0;
 
     const int num_sms = hardware.num_sms;
     const int q_tile = options.q_tile;
     const int kv_tile = options.kv_tile;
-    const int head_dim = 128;
+    const int head_dim = options.head_dim;
     const int partition_kv = seq_kv / options.split;
     const int num_k = (partition_kv + kv_tile - 1) / kv_tile;
 
@@ -51,7 +55,7 @@ DAG* build_fa3_h100(int seq_q = 128,
             for (int split = 0; split < options.split; ++split) {
                 int id = scratch_base + 2 * (head * options.split + split);
                 dag->tensor_registry.allocate_tensor(id, "PartialO" + std::to_string(id),
-                    {static_cast<std::uint64_t>(seq_q), 128}, {128, 1}, DataType::FP32, MemoryTier::HBM);
+                    {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)}, {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP32, MemoryTier::HBM);
                 dag->tensor_registry.allocate_tensor(id+1, "PartialLSE" + std::to_string(id),
                     {static_cast<std::uint64_t>(seq_q), 1}, {1, 1}, DataType::FP32, MemoryTier::HBM);
             }
@@ -67,13 +71,13 @@ DAG* build_fa3_h100(int seq_q = 128,
             dag->tensor_registry.allocate_tensor(
                 matrix_base_q, "Q_b" + std::to_string(b) + "_h" + std::to_string(h),
                 {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
-                {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP16,
+                {static_cast<std::uint64_t>(head_dim), 1}, options.io_dtype,
                 MemoryTier::HBM);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_q + 3,
                 "O_b" + std::to_string(b) + "_h" + std::to_string(h),
                 {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
-                {static_cast<std::uint64_t>(head_dim), 1}, DataType::FP16,
+                {static_cast<std::uint64_t>(head_dim), 1}, options.io_dtype,
                 MemoryTier::HBM);
         }
         for (int h = 0; h < num_heads_kv; ++h) {
@@ -85,11 +89,11 @@ DAG* build_fa3_h100(int seq_q = 128,
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 1,
                 "K_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
+                kv_shape, kv_strides, options.io_dtype, MemoryTier::HBF);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 2,
                 "V_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, DataType::FP16, MemoryTier::HBF);
+                kv_shape, kv_strides, options.io_dtype, MemoryTier::HBF);
         }
     }
 
@@ -127,20 +131,22 @@ DAG* build_fa3_h100(int seq_q = 128,
                 auto q0 = add_node("TB" + std::to_string(tb_id) + "_Q_Load0_b" +
                                        std::to_string(b) + "_h" + std::to_string(h),
                                    "LD", "cp.dram2sram_tma", loader_warp,
-                                   base_r, 0, q_rows_0, 128, 0);
+                                   base_r, 0, q_rows_0, head_dim, 0);
                 q0->sm_id = sm_id;
                 q0->thread_block_id = tb_id;
                 q0->matrix_id = matrix_base_q + 0;
+                q0->data_type = options.io_dtype;
                 q0->layout = Layout::RowMajor;
                 q0->matrix_leading_dim = head_dim;
 
                 auto q1 = q_rows_1 > 0 ? add_node("TB" + std::to_string(tb_id) + "_Q_Load1_b" +
                                        std::to_string(b) + "_h" + std::to_string(h),
                                    "LD", "cp.dram2sram_tma", loader_warp,
-                                   base_r + 64, 0, q_rows_1, 128, 0) : q0;
+                                   base_r + 64, 0, q_rows_1, head_dim, 0) : q0;
                 q1->sm_id = sm_id;
                 q1->thread_block_id = tb_id;
                 q1->matrix_id = matrix_base_q + 0;
+                q1->data_type = options.io_dtype;
                 q1->layout = Layout::RowMajor;
                 q1->matrix_leading_dim = head_dim;
 
@@ -178,20 +184,22 @@ DAG* build_fa3_h100(int seq_q = 128,
 
                     auto k0 = add_node("TB" + std::to_string(tb_id) + "_K_Load0_k" + std::to_string(k),
                                        "LD", "cp.dram2sram_tma", loader_warp,
-                                       0, k_base + k * kv_tile, 64, kv_cols, 0, k_deps);
+                                       0, k_base + k * kv_tile, head_dim / 2, kv_cols, 0, k_deps);
                     k0->sm_id = sm_id;
                     k0->thread_block_id = tb_id;
                     k0->matrix_id = matrix_base_kv + 1;
-                    k0->layout = Layout::RowMajor;
+                    k0->data_type = options.io_dtype;
+                k0->layout = Layout::RowMajor;
                     k0->matrix_leading_dim = seq_kv;
 
                     auto k1 = add_node("TB" + std::to_string(tb_id) + "_K_Load1_k" + std::to_string(k),
                                        "LD", "cp.dram2sram_tma", loader_warp,
-                                       64, k_base + k * kv_tile, 64, kv_cols, 0, k_deps);
+                                       head_dim / 2, k_base + k * kv_tile, head_dim / 2, kv_cols, 0, k_deps);
                     k1->sm_id = sm_id;
                     k1->thread_block_id = tb_id;
                     k1->matrix_id = matrix_base_kv + 1;
-                    k1->layout = Layout::RowMajor;
+                    k1->data_type = options.io_dtype;
+                k1->layout = Layout::RowMajor;
                     k1->matrix_leading_dim = seq_kv;
 
                     std::vector<int> v_deps;
@@ -203,20 +211,22 @@ DAG* build_fa3_h100(int seq_q = 128,
 
                     auto v0 = add_node("TB" + std::to_string(tb_id) + "_V_Load0_k" + std::to_string(k),
                                        "LD", "cp.dram2sram_tma", loader_warp,
-                                       0, k_base + k * kv_tile, 64, kv_cols, 0, v_deps);
+                                       0, k_base + k * kv_tile, head_dim / 2, kv_cols, 0, v_deps);
                     v0->sm_id = sm_id;
                     v0->thread_block_id = tb_id;
                     v0->matrix_id = matrix_base_kv + 2;
-                    v0->layout = Layout::RowMajor;
+                    v0->data_type = options.io_dtype;
+                v0->layout = Layout::RowMajor;
                     v0->matrix_leading_dim = seq_kv;
 
                     auto v1 = add_node("TB" + std::to_string(tb_id) + "_V_Load1_k" + std::to_string(k),
                                        "LD", "cp.dram2sram_tma", loader_warp,
-                                       64, k_base + k * kv_tile, 64, kv_cols, 0, v_deps);
+                                       head_dim / 2, k_base + k * kv_tile, head_dim / 2, kv_cols, 0, v_deps);
                     v1->sm_id = sm_id;
                     v1->thread_block_id = tb_id;
                     v1->matrix_id = matrix_base_kv + 2;
-                    v1->layout = Layout::RowMajor;
+                    v1->data_type = options.io_dtype;
+                v1->layout = Layout::RowMajor;
                     v1->matrix_leading_dim = seq_kv;
 
                     if (!options.fa3_baseline()) {
@@ -236,7 +246,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                         for (int warp_lane = 0; warp_lane < warps_per_group; ++warp_lane) {
                             int warp_id = warp_base + g * warps_per_group + warp_lane;
 
-                            for (int ki = 0; ki < kv_cols / 8; ++ki) {
+                            for (int ki = 0; ki < kv_cols * head_dim / (64 * 16); ++ki) {
                             std::vector<int> deps = {q0->id, q1->id, k0->id, k1->id};
                             if (last_wgmma_ss_per_warp[g][warp_lane] != -1) {
                                 deps.push_back(last_wgmma_ss_per_warp[g][warp_lane]);
@@ -436,7 +446,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                                                            std::to_string(g) + "_w" + std::to_string(warp_id) +
                                                            "_k" + std::to_string(k),
                                                        "SIMD", "acc_o_scale", warp_id,
-                                                       group_row_base, 0, 32, 64, 0, {scores_scale->id});
+                                                       group_row_base, 0, 32, head_dim / 2, 0, {scores_scale->id});
                             if (!options.fa3_baseline() && k > 0)
                                 acc_o_scale->depends_on.push_back(last_wgmma_rs_per_warp[g][warp_lane]);
                             acc_o_scale->sm_id = sm_id;
@@ -452,7 +462,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                             acc_s_cast->thread_block_id = tb_id;
                             score_cast_ids[k][g][warp_lane] = acc_s_cast->id;
 
-                            for (int ki = 0; ki < kv_cols / 8; ++ki) {
+                            for (int ki = 0; ki < kv_cols * head_dim / (64 * 16); ++ki) {
                                 std::vector<int> deps = {v0->id, v1->id, acc_s_cast->id, acc_o_scale->id, logsum->id};
                                 if (last_wgmma_rs_per_warp[g][warp_lane] != -1) {
                                     deps.push_back(last_wgmma_rs_per_warp[g][warp_lane]);
@@ -496,7 +506,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                         auto div_node = add_node("TB" + std::to_string(tb_id) + "_AccO_Div_g" +
                                                  std::to_string(g) + "_w" + std::to_string(warp_id),
                                                  "SFU", "acc_o_div", warp_id,
-                                                 g * 64, 0, 32, 64, 0, div_deps);
+                                                 g * 64, 0, 32, head_dim / 2, 0, div_deps);
                         div_node->sm_id = sm_id;
                         div_node->thread_block_id = tb_id;
                         acc_o_div_ids[g].push_back(div_node->id);
@@ -532,7 +542,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                             store->sm_id = sm_id;
                             store->thread_block_id = tb_id;
                             store->matrix_id = 5;
-                            store->data_type = options.split > 1 ? DataType::FP32 : DataType::FP16;
+                            store->data_type = options.split > 1 ? DataType::FP32 : options.io_dtype;
                             store->layout = Layout::RowMajor;
                             store->matrix_leading_dim = head_dim;
                             store_ids_by_group[g].push_back(store->id);
@@ -552,11 +562,11 @@ DAG* build_fa3_h100(int seq_q = 128,
                 if (out_rows_0 > 0) {
                     auto out0 = add_node("TB" + std::to_string(tb_id) + "_Out_Store_g0", "ST",
                                          "cp.sram2dram_tma", loader_warp,
-                                         base_r, 0, out_rows_0, 128, 0, store_ids_all);
+                                         base_r, 0, out_rows_0, head_dim, 0, store_ids_all);
                     out0->sm_id = sm_id;
                     out0->thread_block_id = tb_id;
                     out0->matrix_id = output_tensor;
-                    out0->data_type = options.split > 1 ? DataType::FP32 : DataType::FP16;
+                    out0->data_type = options.split > 1 ? DataType::FP32 : options.io_dtype;
                     producer_stores[job].push_back(out0->id);
                     out0->layout = Layout::RowMajor;
                     out0->matrix_leading_dim = head_dim;
@@ -565,11 +575,11 @@ DAG* build_fa3_h100(int seq_q = 128,
                 if (out_rows_1 > 0) {
                     auto out1 = add_node("TB" + std::to_string(tb_id) + "_Out_Store_g1", "ST",
                                          "cp.sram2dram_tma", loader_warp,
-                                         base_r + 64, 0, out_rows_1, 128, 0, store_ids_all);
+                                         base_r + 64, 0, out_rows_1, head_dim, 0, store_ids_all);
                     out1->sm_id = sm_id;
                     out1->thread_block_id = tb_id;
                     out1->matrix_id = output_tensor;
-                    out1->data_type = options.split > 1 ? DataType::FP32 : DataType::FP16;
+                    out1->data_type = options.split > 1 ? DataType::FP32 : options.io_dtype;
                     producer_stores[job].push_back(out1->id);
                     out1->layout = Layout::RowMajor;
                     out1->matrix_leading_dim = head_dim;
@@ -579,17 +589,19 @@ DAG* build_fa3_h100(int seq_q = 128,
                     for (int g = 0; g < consumer_groups; ++g) {
                         for (int lane = 0; lane < 4; ++lane) {
                             int warp = warp_base + g * 4 + lane;
+                            int live_rows = std::min(16, q_rows - g * 64 - lane * 16);
+                            if (live_rows <= 0) continue;
                             auto log_l = add_node("TB" + std::to_string(tb_id) + "_PartialLogSum_" + std::to_string(g*4+lane),
-                                "SFU", "split_log_sum", warp, base_r+g*64+lane*16,0,16,1,0,
+                                "SFU", "split_log_sum", warp, base_r+g*64+lane*16,0,live_rows,1,0,
                                 {last_logsum_per_warp[g][lane]});
                             log_l->sm_id = sm_id;
                             log_l->thread_block_id = tb_id;
                             auto lse = add_node(log_l->name + "_AddMax", "SIMD", "split_logsumexp", warp,
-                                base_r+g*64+lane*16,0,16,1,0,{log_l->id,last_logsum_per_warp[g][lane]});
+                                base_r+g*64+lane*16,0,live_rows,1,0,{log_l->id,last_logsum_per_warp[g][lane]});
                             lse->sm_id = sm_id;
                             lse->thread_block_id = tb_id;
                             auto st = add_node(lse->name + "_Store", "ST", "st.reg2dram", warp,
-                                base_r+g*64+lane*16,0,16,1,0,{lse->id});
+                                base_r+g*64+lane*16,0,live_rows,1,0,{lse->id});
                             st->sm_id = sm_id; st->thread_block_id = tb_id;
                             st->matrix_id = output_tensor+1;
                             st->matrix_leading_dim = 1;
@@ -614,7 +626,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                 partials.push_back(id); stats.push_back(id+1);
             }
             append_split_reduce(dag, partials, stats, producer_stores[job], head*4+3,
-                bx*q_tile,0,q_tile,128,128,output_jobs*options.split+job,job%num_sms);
+                bx*q_tile,0,std::min(q_tile, seq_q-bx*q_tile),head_dim,head_dim,output_jobs*options.split+job,job%num_sms, options.io_dtype);
         }
     }
     return dag;
@@ -624,7 +636,7 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: gtsim_fa3 <architecture.yaml> "
                      "[batch heads_q heads_kv sequence_q sequence_kv] "
-                     "[--memory-config memory.yaml]\n";
+                     "[--head-dim 128|256] [--dtype fp16|bf16] [--memory-config memory.yaml]\n";
         return 1;
     }
 

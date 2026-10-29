@@ -10,8 +10,14 @@
 using namespace GTSim;
 
 DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
-                     const KernelOptions& options = {}, const SimulatorConfig& hardware = make_h100_sxm_config()) {
+                     const KernelOptions& input_options = {}, const SimulatorConfig& hardware = make_h100_sxm_config()) {
+    KernelOptions options = input_options;
+    // Single-token decode: global tensors retain one live row, while the
+    // Tensor Core consumer group executes a padded m64 tile.
+    if (M == 1) options.bm = 64;
     options.validate(false, M, N, K, hardware);
+    if ((M != 1 && M % options.bm) || N % options.bn || K % (options.split * options.bk))
+        throw std::invalid_argument("GEMM requires M=1 or complete M tiles, and aligned N/K");
     DAG* dag = new DAG();
     int node_id = 0;
 
@@ -20,22 +26,22 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
     constexpr int TensorID_C { 2 };
     dag->tensor_registry.allocate_tensor(TensorID_A, "A", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(K)},
-                                 {static_cast<std::uint64_t>(K), 1}, DataType::FP16,
+                                 {static_cast<std::uint64_t>(K), 1}, options.io_dtype,
                                  MemoryTier::HBF);
     dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
                                            static_cast<std::uint64_t>(N)},
-                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
+                                 {static_cast<std::uint64_t>(N), 1}, options.io_dtype,
                                  MemoryTier::HBF);
     dag->tensor_registry.allocate_tensor(TensorID_C, "C", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(N)},
-                                 {static_cast<std::uint64_t>(N), 1}, DataType::FP16,
+                                 {static_cast<std::uint64_t>(N), 1}, options.io_dtype,
                                  MemoryTier::HBM);
 
     const int bm_tile = options.bm;
     const int bn_tile = options.bn;
     const int bk_tile = options.bk;
 
-    const int num_tb_m = M / bm_tile;
+    const int num_tb_m = (M + bm_tile - 1) / bm_tile;
     const int num_tb_n = N / bn_tile;
     const int output_tiles = num_tb_m * num_tb_n;
     const int total_tiles = output_tiles * options.split;
@@ -118,6 +124,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
 
             int base_tb_r = tile_m * bm_tile;
             int base_tb_c = tile_n * bn_tile;
+            const int live_rows = std::min(bm_tile, M - base_tb_r);
 
             std::vector<std::vector<int>> wgmma_per_k(tiles_k);
             std::vector<std::vector<int>> tma_all_per_k(tiles_k);
@@ -158,10 +165,11 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                                       std::to_string(tile_id) + "_TMA_LoadA_k" +
                                       std::to_string(k),
                                       "LD", "cp.dram2sram_tma", loader_warp,
-                                      base_tb_r, k_base + k * bk_tile, bm_tile, bk_tile, 0, tma_deps);
+                                      base_tb_r, k_base + k * bk_tile, live_rows, bk_tile, 0, tma_deps);
                 tma_a->sm_id = sm_id;
                 tma_a->thread_block_id = tb_id;
                 tma_a->matrix_id = TensorID_A;
+                tma_a->data_type = options.io_dtype;
                 tma_a->layout = Layout::RowMajor;
                 tma_a->matrix_leading_dim = K;
                 tma_all_per_k[k].push_back(tma_a->id);
@@ -179,6 +187,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                     tma_b->sm_id = sm_id;
                     tma_b->thread_block_id = tb_id;
                     tma_b->matrix_id = TensorID_B;
+                    tma_b->data_type = options.io_dtype;
                     tma_b->layout = Layout::RowMajor;
                     tma_b->matrix_leading_dim = N;
                     tma_b_ids[chunk] = tma_b->id;
@@ -281,7 +290,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                         store->sm_id = sm_id;
                         store->thread_block_id = tb_id;
                         store->matrix_id = output_tensor;
-                        store->data_type = options.split > 1 ? DataType::FP32 : DataType::FP16;
+                        store->data_type = options.split > 1 ? DataType::FP32 : options.io_dtype;
                         store->layout = Layout::RowMajor;
                         store_ids.push_back(store->id);
                     }
@@ -297,11 +306,11 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                                       std::to_string(tile_id) + "_TMA_StoreC_c" +
                                       std::to_string(chunk),
                                       "ST", "cp.sram2dram_tma", loader_warp,
-                                      base_tb_r, off_c, bm_tile, 64, 0, store_ids);
+                                      base_tb_r, off_c, live_rows, 64, 0, store_ids);
                 tma_c->sm_id = sm_id;
                 tma_c->thread_block_id = tb_id;
                 tma_c->matrix_id = output_tensor;
-                tma_c->data_type = options.split > 1 ? DataType::FP32 : DataType::FP16;
+                tma_c->data_type = options.split > 1 ? DataType::FP32 : options.io_dtype;
                 tma_c->layout = Layout::RowMajor;
                 tma_c->matrix_leading_dim = N;
                 if (!tma_store_ids.empty()) {
@@ -341,8 +350,8 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
         for (int i = 0; i < output_tiles; ++i) {
             auto [m,n] = tile_order[i];
             append_split_reduce(dag, partials, {}, producer_stores[i], TensorID_C,
-                m * bm_tile, n * bn_tile, bm_tile, bn_tile, N,
-                grid_x + i, i % sm_num);
+                m * bm_tile, n * bn_tile, std::min(bm_tile, M-m*bm_tile), bn_tile, N,
+                grid_x + i, i % sm_num, options.io_dtype);
         }
     }
     return dag;

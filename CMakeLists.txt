@@ -32,6 +32,9 @@ target_link_libraries(gtsim_gemm_ir PRIVATE gtsim_tile_ir)
 add_executable(gtsim_fa3 workloads/fa3/fa3_h100.cpp)
 target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
 
+add_executable(gtsim_fa2 workloads/fa2/fa2_a100.cpp)
+target_link_libraries(gtsim_fa2 PRIVATE gtsim_core)
+
 include(CTest)
 set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
@@ -40,6 +43,10 @@ if(BUILD_TESTING)
   set(MEMORY_FULL_HBF_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_full_hbf-5F0M.yaml)
   set(MEMORY_CO_LOCATED_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_co_located-3F2M.yaml)
   set(MEMORY_CASCADED_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_cascaded-3F2M.yaml)
+  add_executable(fa2_tests tests/fa2_tests.cpp)
+  target_link_libraries(fa2_tests PRIVATE gtsim_core)
+  add_test(NAME fa2_decode_semantics COMMAND fa2_tests
+           ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/a100-pcie40-simple.yaml)
   add_executable(tile_ir_tests tests/tile_ir_tests.cpp)
   target_link_libraries(tile_ir_tests PRIVATE gtsim_tile_ir)
   add_executable(tile_ir_parity_tests tests/tile_ir_parity_tests.cpp)
@@ -97,7 +104,7 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_fa3
+install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_fa3 gtsim_fa2
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include/gtsim)

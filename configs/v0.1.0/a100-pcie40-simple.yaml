@@ -1,0 +1,31 @@
+name: A100 PCIe 40GB (Simple Model)
+source: NVIDIA A100 product brief and Ampere tuning guide; uncalibrated timing assumptions documented in report
+sm_count: 108
+core_frequency_mhz: 1410
+shared_memory_per_sm_bytes: 167936
+shared_memory_per_cta_bytes: 166912
+register_file_per_sm_bytes: 262144
+max_warps_per_sm: 64
+max_concurrent_blocks_per_sm: 32
+tensor_core_throughput: 128
+tensor_core_latency_cycles: 16
+tensor_core_width: 16
+l2_cache_size_bytes: 41943040
+l2_hit_latency_cycles: 300
+l2_bandwidth_bytes_per_cycle: 1853
+l2_write_bandwidth_bytes_per_cycle: 926
+sram_latency_cycles: 33
+sram_bandwidth_bytes_per_cycle: 128
+startup_delay_cycles: 0
+block_schedule_latency_cycles: 0
+topology: FullHBM
+hbm:
+  read_bw_GBps: 1555
+  write_max_bw_GBps: 777.5
+  read_latency_cycles: 270
+  write_latency_cycles: 270
+  capacity_bytes: 42949672960
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_GBps: 7680
+    latency_cycles: 10

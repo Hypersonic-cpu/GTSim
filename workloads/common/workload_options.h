@@ -10,6 +10,8 @@
 namespace GTSim {
 struct KernelOptions {
     int stages{2};
+    int head_dim{128};
+    DataType io_dtype{DataType::FP16};
     int bm{128};
     int bn{256};
     int bk{64};
@@ -20,9 +22,14 @@ struct KernelOptions {
     std::string order{"original"};
 
     bool parse(const std::string& flag, const std::string& value) {
+        if (flag == "--dtype") {
+            if (value != "fp16" && value != "bf16") throw std::invalid_argument("dtype must be fp16 or bf16");
+            io_dtype = value == "bf16" ? DataType::BF16 : DataType::FP16; return true;
+        }
         if (flag == "--cta-order") { order = value; return true; }
         int* target = nullptr;
-        if (flag == "--stages") target = &stages;
+        if (flag == "--head-dim") target = &head_dim;
+        else if (flag == "--stages") target = &stages;
         else if (flag == "--bm") target = &bm;
         else if (flag == "--bn") target = &bn;
         else if (flag == "--bk") target = &bk;
@@ -48,8 +55,8 @@ struct KernelOptions {
         if (attention) {
             // Q stays live throughout all QK operations. Output reuses input
             // storage after the last PV; probabilities and O live in registers.
-            r.shared_bytes = 2 * q_tile * 128 + stages * 4 * kv_tile * 128;
-            r.register_bytes = 4 * q_tile * (128 + kv_tile) + 12 * 32 * 32 * 4;
+            r.shared_bytes = 2 * q_tile * head_dim + stages * 4 * kv_tile * head_dim;
+            r.register_bytes = 4 * q_tile * (head_dim + kv_tile) + 12 * 32 * 32 * 4;
         } else {
             // Persistent GEMM can overlap next-tile inputs with C staging.
             r.shared_bytes = stages * 2 * bk * (bm + bn) + bm * bn * (split > 1 ? 4 : 2);
@@ -64,9 +71,10 @@ struct KernelOptions {
         if (split != 1 && split != 2 && split != 4 && split != 8) fail("split must be 1, 2, 4, or 8");
         if (group_size <= 0 || rows <= 0 || columns <= 0 || reduction <= 0) fail("dimensions/group size must be positive");
         if (attention) {
+            if (head_dim != 128 && head_dim != 256) fail("FA3 head dimension must be 128 or 256");
             if ((q_tile != 64 && q_tile != 128) ||
                 (kv_tile != 64 && kv_tile != 128 && kv_tile != 256)) fail("unsupported FA3 tile");
-            if (rows % q_tile || reduction % split || (reduction / split) % 64) fail("FA3 dimensions must divide query tiles and split KV lengths must align to 64 elements");
+            if ((rows != 1 && rows % q_tile) || reduction % split || (reduction / split) % 64) fail("FA3 dimensions must divide query tiles and split KV lengths must align to 64 elements");
             if (order != "original" && order != "query-major" && order != "kv-head-grouped") fail("unsupported FA3 CTA order");
         } else {
             // if ((bm != 64 && bm != 128) || (bn != 128 && bn != 256) ||
@@ -82,7 +90,7 @@ struct KernelOptions {
         if (r.warps > hardware.max_warps_per_sm) fail("warp footprint exceeds capacity");
         std::cout << "Kernel options: stages=" << stages << " tile="
                   << (attention ? q_tile : bm) << "x" << (attention ? kv_tile : bn)
-                  << "x" << (attention ? 128 : bk) << " split=" << split << " order=" << order
+                  << "x" << (attention ? head_dim : bk) << " split=" << split << " order=" << order
                   << " shared_bytes=" << r.shared_bytes << " register_bytes=" << r.register_bytes
                   << " resident_CTA_limit=" << std::min({hardware.max_concurrent_blocks_per_sm,
                       hardware.shared_memory_per_sm_bytes / r.shared_bytes,

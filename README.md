@@ -62,6 +62,10 @@ The separate experimental [TVM automatic scheduling frontend](docs/tvm-auto-sche
 accepts computation-only FP16 GEMM and uses native MetaSchedule with GTSim
 performance feedback. See its guide for pinned TVM setup and reproducible search.
 
+The experimental [A100 FA2 decode workload](docs/fa2-decode.md) supports
+single-token BF16 GQA with small batches and split-KV merging using the
+Simple memory model.
+
 ## License
 
 The repository is distributed under the MIT license.

@@ -143,6 +143,22 @@ int main() {
         check_graph(*d,2LL*4*256*256*128);
         require(d->nodes_by_name.at("TB1_Q_Load0_b0_h1")->tile.r_off==0,"CTA order not reflected in TB identity");
     }
+    for (int split : {1, 2, 8}) {
+        KernelOptions o; o.bn=128; o.split=split; o.io_dtype=DataType::BF16;
+        std::unique_ptr<DAG> d(build_gemm_h100(1,256,512,o,hardware));
+        check_graph(*d,64LL*256*512);
+        require(d->nodes_by_name.at("TB0_Tile0_TMA_LoadA_k0")->tile.r == 1,
+                "single-token GEMM must load one live input row");
+    }
+    // Decode uses a masked m64 tile: only one live row is loaded/stored.
+    for (int split : {1, 2, 8}) {
+        KernelOptions o; o.kv_tile=64; o.head_dim=256;
+        o.io_dtype=DataType::BF16; o.split=split;
+        std::unique_ptr<DAG> d(build_fa3_h100(1,512,4,1,1,o,hardware));
+        check_graph(*d,2LL*4*64*512*256);
+        require(d->nodes_by_name.at("TB0_Q_Load0_b0_h0")->tile.r == 1,
+                "decode query must load exactly one row");
+    }
     std::vector<double> logits(32), values(32);
     for(int i=0;i<32;++i) { logits[i]=std::sin(i)*30; values[i]=std::cos(i); }
     for(int split:{1,2,4,8}) {
