@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "client_measurements": {
+    "hostram": {
+      "tpot_ms": 398.8381891568627,
+      "decode_elapsed_ms": 101703.738235,
+      "output_tokens": 256,
+      "intervals": 255,
+      "inter_token_latency_ms": {
+        "count": 255,
+        "mean": 398.83818915686277,
+        "p50": 398.769418,
+        "p95": 405.0643508,
+        "minimum": 358.173559,
+        "maximum": 408.350706
+      },
+      "ttft_s": 13.85708645,
+      "first_text_monotonic_ns": 5465593128488045,
+      "last_text_monotonic_ns": 5465694832226280,
+      "definition": "(last nonempty SSE arrival - first nonempty SSE arrival) / 255",
+      "includes": "All intervening compute, exposed transfers, waits, scheduling and serving latency"
+    },
+    "normal": {
+      "tpot_ms": 37.37578976470588,
+      "decode_elapsed_ms": 9530.82639,
+      "output_tokens": 256,
+      "intervals": 255,
+      "inter_token_latency_ms": {
+        "count": 255,
+        "mean": 37.375789764705885,
+        "p50": 37.677011,
+        "p95": 38.903368400000005,
+        "minimum": 2.311173,
+        "maximum": 42.94702
+      },
+      "ttft_s": 5.695682002,
+      "first_text_monotonic_ns": 5472673871051084,
+      "last_text_monotonic_ns": 5472683401877474,
+      "definition": "(last nonempty SSE arrival - first nonempty SSE arrival) / 255",
+      "includes": "All intervening compute, exposed transfers, waits, scheduling and serving latency"
+    }
+  },
+  "hostram_over_normal_tpot_ratio": 10.671030409462741,
+  "hostram_layer_wall_audit": {
+    "GQA": {
+      "wall_ms": {
+        "count": 2040,
+        "mean": 12.382992525980391,
+        "p50": 12.417442999999999,
+        "p95": 14.5838676,
+        "minimum": 8.379161,
+        "maximum": 16.663535
+      },
+      "busy_ms": {
+        "count": 2040,
+        "mean": 0.5656094647058824,
+        "p50": 0.565063,
+        "p95": 0.5823155,
+        "minimum": 0.546693,
+        "maximum": 0.599335
+      },
+      "non_kernel_ms": {
+        "count": 2040,
+        "mean": 11.81738306127451,
+        "p50": 11.8544135,
+        "p95": 14.01662385,
+        "minimum": 7.802194,
+        "maximum": 16.105129
+      },
+      "entry_gap_ms": {
+        "count": 2040,
+        "mean": 11.776879832843138,
+        "p50": 11.813389,
+        "p95": 13.976123,
+        "minimum": 7.760626,
+        "maximum": 16.067177
+      }
+    },
+    "GDN": {
+      "wall_ms": {
+        "count": 6120,
+        "mean": 11.20526511617647,
+        "p50": 12.0924,
+        "p95": 14.4165376,
+        "minimum": 0.416036,
+        "maximum": 17.595545
+      },
+      "busy_ms": {
+        "count": 6120,
+        "mean": 0.4261117839869281,
+        "p50": 0.427045,
+        "p95": 0.43709359999999997,
+        "minimum": 0.383972,
+        "maximum": 0.45159
+      },
+      "non_kernel_ms": {
+        "count": 6120,
+        "mean": 10.779153332189543,
+        "p50": 11.669051,
+        "p95": 13.988667,
+        "minimum": 0.030817,
+        "maximum": 17.1557
+      },
+      "entry_gap_ms": {
+        "count": 6120,
+        "mean": 10.741711124836602,
+        "p50": 11.6328425,
+        "p95": 13.9507038,
+        "minimum": 0.003936,
+        "maximum": 17.113684
+      }
+    },
+    "all_32_layers_wall_ms": {
+      "count": 255,
+      "mean": 367.9903029960784,
+      "p50": 367.942982,
+      "p95": 371.07301459999996,
+      "minimum": 363.664217,
+      "maximum": 373.492001
+    },
+    "closed_gpu_step_windows": {
+      "count": 254,
+      "period_ms": 398.96971962992126,
+      "layers_wall_ms": 367.9861485905512,
+      "outside_layers_ms": 30.98357103937008,
+      "definition": "Input embedding completion to next input embedding completion",
+      "note": "Separate GPU anchors and 254 samples; not the 255 client token intervals"
+    },
+    "layer_window_definition": "Previous layer MLP down completion to current layer MLP down completion; first layer starts at input embedding completion. Includes entry and internal waits.",
+    "non_kernel_attribution": "Time without a recorded compute kernel, including exposed transfer and host/sync/queue stalls. Kernel CSV alone cannot separate these causes. Overlapped copies are not added twice."
+  },
+  "comparison": {
+    "GQA_layer_ms": {
+      "HostRAM": 12.382992525980391,
+      "normal": null,
+      "hbf": null
+    },
+    "GDN_layer_ms": {
+      "HostRAM": 11.20526511617647,
+      "normal": null,
+      "hbf": null
+    },
+    "decode_step_tpot_ms": {
+      "HostRAM": 398.8381891568627,
+      "normal": 37.37578976470588,
+      "hbf": 127.8093527059764
+    }
+  },
+  "missing": "NoOff per-layer wall trace and full 3M2F serving model; hybrid TPOT is ratio-estimated",
+  "conditions": {
+    "common": "Same request, batch 1, BF16, input 32768, output 256, eager execution",
+    "hostram": "MLP CPU offload + prefetch, 10 GiB KV cache",
+    "normal": "No CPU offload, 5 GiB KV cache",
+    "limitations": "Separate single runs on shared A100; measured ratio is not an isolated PCIe penalty"
+  },
+  "provenance": [
+    {
+      "file": "Qwen3.5-9B-batch1-HostRAM/trace-metrics.json",
+      "bytes": 809,
+      "sha256": "5ffc3d01d9f48c3f0cff6f4eecf8736ebcabc7e408e5677a4bd7ea8dbbbdc1d6"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-HostRAM/trace-events.jsonl",
+      "bytes": 89933,
+      "sha256": "c5bd814617e49c57e4aa537eae3b5e59cbc16c15879170dc3058c15c87b0b20b"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-HostRAM/trace-request.json",
+      "bytes": 187167,
+      "sha256": "a93ee102a481ea26a9e798c86624758e03987fcf2b7fba252b2818dbc69786a4"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-HostRAM/launch-command.sh",
+      "bytes": 1689,
+      "sha256": "11fae8ecf12f4774e0b1d3a5c2d705628290c832610b2c093668d721ad55eb8b"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-HostRAM/trace-kernels.csv",
+      "bytes": 39057813,
+      "sha256": "17c6dd67c010612dc33d07c0f3561a986ac3da7e99aa0d7783847508281aae5d"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-NoOff/trace-metrics.json",
+      "bytes": 808,
+      "sha256": "1abd13e337befcaebe47373a384aa23e4adbaf4579343ea468c074a8b07bcdc8"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-NoOff/trace-events.jsonl",
+      "bytes": 89933,
+      "sha256": "a72789b49c39b0c3c368b49c5707c5eb7e2b05d4c1695b191933da833b6f74f2"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-NoOff/trace-request.json",
+      "bytes": 187167,
+      "sha256": "a93ee102a481ea26a9e798c86624758e03987fcf2b7fba252b2818dbc69786a4"
+    },
+    {
+      "file": "Qwen3.5-9B-batch1-NoOff/launch-command.sh",
+      "bytes": 1521,
+      "sha256": "c888b56f5c29825d888c18fa07431e07a4ef6b710266ae9eb7ef5c7bd2a76aee"
+    },
+    {
+      "file": "covered-components.json",
+      "bytes": 399,
+      "sha256": "8d8f77d073e92ad6937363b6fd5c39142a6e8d7dabb3d701ad80bffe09edea5c"
+    }
+  ],
+  "hybrid_tpot_estimate": {
+    "architecture": "3M2F: 3 HBM + 2 HBF stacks",
+    "method": "ratio calibration to measured NoOff client TPOT",
+    "formula": "TPOT_hybrid_est = TPOT_normal_measured * T_sim_hybrid / T_sim_normal",
+    "normal_simulated_components_ms": 11.88928794326241,
+    "hybrid_simulated_components_ms": 40.65632340425532,
+    "simulated_ratio": 3.419575974463216,
+    "normal_measured_tpot_ms": 37.37578976470588,
+    "calibrated_tpot_ms": 127.8093527059764,
+    "hostram_over_hybrid_estimate": 3.120571231390118,
+    "scope": "8 GQA (projections + MLP + FA2) and 24 GDN (four projections); matched coverage",
+    "assumption": "The complete serving TPOT scales with the covered simulation time ratio",
+    "limitation": "Auxiliary kernels, LM head and host/scheduler overhead are not explicitly simulated; their scaling is assumed. This is a model-based estimate, not measured or full-step simulated TPOT."
+  }
+}
