@@ -69,3 +69,7 @@ HostRAM列只计匹配GPU kernel duration，排除了CPU offload等待，不能�
 
 实测最大RSS约2.30GB，但macOS peak memory footprint为3,772,419,264B。
 按更保守值超过3GB，后续TVM与仿真最多**1个worker**；详见worker-policy.json。
+
+导出命令：`.tvm-venv/bin/python scripts/tvm/export_serve_semantics.py`。
+功能IR及放置清单位于`results/serve-3m2f/semantic-ir/`，状态明确为
+`semantic_export_only_not_optimized`。`search-status.json`的`best_ir`为null。

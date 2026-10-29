@@ -1,0 +1,187 @@
+{
+  "fa2": {
+    "tensors": {
+      "Q": {
+        "shape": [
+          1,
+          16,
+          256
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "K": {
+        "shape": [
+          1,
+          4,
+          32768,
+          256
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "V": {
+        "shape": [
+          1,
+          4,
+          32768,
+          256
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "O": {
+        "shape": [
+          1,
+          16,
+          256
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      }
+    },
+    "status": "semantic_export_only_not_optimized"
+  },
+  "gdn": {
+    "tensors": {
+      "X": {
+        "shape": [
+          1,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "W_qkvz": {
+        "shape": [
+          4096,
+          12288
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_ba": {
+        "shape": [
+          4096,
+          64
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_out": {
+        "shape": [
+          4096,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_gate_up": {
+        "shape": [
+          4096,
+          24576
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_down": {
+        "shape": [
+          12288,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_conv": {
+        "shape": [
+          8192,
+          4
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBF"
+      },
+      "W_input_norm": {
+        "shape": [
+          4096
+        ],
+        "dtype": "float32",
+        "tier": "HBF"
+      },
+      "W_post_norm": {
+        "shape": [
+          4096
+        ],
+        "dtype": "float32",
+        "tier": "HBF"
+      },
+      "W_gated_norm": {
+        "shape": [
+          128
+        ],
+        "dtype": "float32",
+        "tier": "HBF"
+      },
+      "A_log": {
+        "shape": [
+          32
+        ],
+        "dtype": "float32",
+        "tier": "HBF"
+      },
+      "dt_bias": {
+        "shape": [
+          32
+        ],
+        "dtype": "float32",
+        "tier": "HBF"
+      },
+      "ConvState": {
+        "shape": [
+          1,
+          8192,
+          3
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "State": {
+        "shape": [
+          1,
+          32,
+          128,
+          128
+        ],
+        "dtype": "float32",
+        "tier": "HBM"
+      },
+      "Output": {
+        "shape": [
+          1,
+          4096
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      },
+      "NextState": {
+        "shape": [
+          1,
+          32,
+          128,
+          128
+        ],
+        "dtype": "float32",
+        "tier": "HBM"
+      },
+      "NextConvState": {
+        "shape": [
+          1,
+          8192,
+          3
+        ],
+        "dtype": "bfloat16",
+        "tier": "HBM"
+      }
+    },
+    "status": "semantic_export_only_not_optimized"
+  }
+}

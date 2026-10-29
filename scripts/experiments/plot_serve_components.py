@@ -15,3 +15,6 @@ for ax,key,title,scale in zip(axes,['GQA','GDN','decode_component_sum'],['GQA co
 fig.legend([plt.Rectangle((0,0),1,1,color=c) for c in colors],labels,loc='upper center',ncol=3,frameon=False,fontsize=10)
 fig.text(.5,.025,'Matched projections + FA2 only. Excludes auxiliary kernels, host stalls and CPU offload transfers. NOT TPOT.',ha='center',fontsize=10)
 fig.tight_layout(rect=[0,.08,1,.88]);a.output.parent.mkdir(parents=True,exist_ok=True);fig.savefig(a.output,dpi=180);fig.savefig(a.output.with_suffix('.svg'))
+
+svg=a.output.with_suffix(".svg")
+svg.write_text("\n".join(line.rstrip() for line in svg.read_text().splitlines())+"\n")

@@ -1,0 +1,6 @@
+{
+  "status": "not_run_unsupported_lowering",
+  "workers": 1,
+  "reason": "Existing native_dag/compiler accepts Hopper GEMM reduction plus cast, not Ampere FA2 or recurrent/fused GDN. Extend and validate lowering before MetaSchedule feedback.",
+  "best_ir": null
+}
