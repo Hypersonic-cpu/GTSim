@@ -147,6 +147,10 @@ int main() {
         KernelOptions o; o.bn=128; o.split=split; o.io_dtype=DataType::BF16;
         std::unique_ptr<DAG> d(build_gemm_h100(1,256,512,o,hardware));
         check_graph(*d,64LL*256*512);
+        require(d->tensor_registry.at(0).initial_memory_tier == MemoryTier::HBM &&
+                d->tensor_registry.at(1).initial_memory_tier == MemoryTier::HBF &&
+                d->tensor_registry.at(2).initial_memory_tier == MemoryTier::HBM,
+                "decode GEMM activation/weight/output tier mismatch");
         require(d->nodes_by_name.at("TB0_Tile0_TMA_LoadA_k0")->tile.r == 1,
                 "single-token GEMM must load one live input row");
     }

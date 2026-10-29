@@ -27,7 +27,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
     dag->tensor_registry.allocate_tensor(TensorID_A, "A", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(K)},
                                  {static_cast<std::uint64_t>(K), 1}, options.io_dtype,
-                                 MemoryTier::HBF);
+                                 MemoryTier::HBM);
     dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
                                            static_cast<std::uint64_t>(N)},
                                  {static_cast<std::uint64_t>(N), 1}, options.io_dtype,
