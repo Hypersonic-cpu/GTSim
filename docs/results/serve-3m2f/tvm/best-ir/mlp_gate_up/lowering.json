@@ -1,0 +1,48 @@
+{
+  "stages": [
+    {
+      "name": "projection_acc",
+      "output": "projection_acc",
+      "shape": [
+        1,
+        24576
+      ],
+      "tile_n": 128,
+      "tile_k": 128,
+      "warps": 4,
+      "stages": 3,
+      "operations": 152832,
+      "maximum_cta_register_bytes": 114176,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "Output",
+      "output": "Output",
+      "shape": [
+        1,
+        24576
+      ],
+      "tile_n": 128,
+      "tile_k": 1,
+      "warps": 4,
+      "stages": 3,
+      "operations": 3841,
+      "maximum_cta_register_bytes": 13312,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    }
+  ],
+  "nodes": 156673,
+  "ctas": 384,
+  "tensor_tiers": {
+    "X": "HBM",
+    "W_projection": "HBF",
+    "projection_acc": "HBM",
+    "Output": "HBM"
+  },
+  "scope": "Full staged TensorIR; SIMD vector arithmetic, global stage boundaries, register-ring pipeline"
+}

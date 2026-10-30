@@ -1,0 +1,94 @@
+Generated DAG with 75265 nodes
+Starting simulation with 75265 nodes...
+Warp distribution: 255:5 254:5 253:5 252:5 251:5 250:5 249:5 248:5 247:5 246:5 245:5 244:5 243:5 242:5 241:5 240:5 239:5 238:5 237:5 236:5 235:5 234:5 233:5 232:5 231:5 230:5 229:5 228:5 227:5 226:5 225:5 224:5 223:5 222:5 221:5 220:5 219:5 218:5 217:5 216:5 215:5 214:5 213:5 212:5 211:5 210:5 209:5 208:5 207:5 206:5 205:5 204:5 203:5 202:5 201:5 200:5 199:5 198:5 197:5 196:5 195:5 194:5 193:5 192:5 191:5 190:5 189:5 188:5 187:5 186:5 185:5 184:5 183:5 182:5 181:5 180:5 179:5 178:5 177:5 176:5 175:5 174:5 173:5 172:5 171:5 170:5 169:5 168:5 167:5 166:5 165:5 164:5 163:5 162:5 161:5 160:5 159:5 158:5 157:5 156:5 155:5 154:5 153:5 152:5 151:5 150:5 149:5 148:5 147:5 146:5 145:5 144:5 143:5 142:5 141:5 140:5 139:5 138:5 137:5 136:5 135:5 134:5 133:5 132:5 131:5 130:5 129:5 128:6 127:583 126:583 125:583 124:583 123:583 122:583 121:583 120:583 119:583 118:583 117:583 116:583 115:583 114:583 113:583 112:583 111:583 110:583 109:583 108:583 107:583 106:583 105:583 104:583 103:583 102:583 101:583 100:583 99:583 98:583 97:583 96:583 95:583 94:583 93:583 92:583 91:583 90:583 89:583 88:583 87:583 86:583 85:583 84:583 83:583 82:583 81:583 80:583 79:583 78:583 77:583 76:583 75:583 74:583 73:583 72:583 71:583 70:583 69:583 68:583 67:583 66:583 65:583 64:583 63:583 62:583 61:583 60:583 59:583 58:583 57:583 56:583 55:583 54:583 53:583 52:583 51:583 50:583 49:583 48:583 47:583 46:583 45:583 44:583 43:583 42:583 41:583 40:583 39:583 38:583 37:583 36:583 35:583 34:583 33:583 32:583 31:583 30:583 29:583 28:583 27:583 26:583 25:583 24:583 23:583 22:583 21:583 20:583 19:583 18:583 17:583 16:583 15:583 14:583 13:583 12:583 11:583 10:583 9:583 8:583 7:583 6:583 5:583 4:583 3:583 2:583 1:583 0:583
+Total warps in use: 256
+Warps per subpartition: 64 (SP0: warps 0,4,8,12... | SP1: 1,5,9,13... | SP2: 2,6,10,14... | SP3: 3,7,11,15...)
+
+Dynamic Allocation (O2): DISABLED
+Scheduling Policy: Per-Subpartition GTO (Greedy-Then-Oldest)
+  - Each subpartition schedules independently among its 4 warps
+  - Greedy: Continue from last issued warp if possible
+  - Oldest: Pick warp with longest stall time (oldest last_issue_cycle)
+Memory model: T_sum = T_frontend + T_queuing + T_data + T_bank_conflict
+Tensor throughput: 128 ops/inst
+SIMD throughput: 32 ops/inst
+SFU throughput: 32 ops/inst
+LS throughput: 128 bytes/inst
+Tensor width: 16 ops/cycle
+SIMD width: 16 ops/cycle
+SFU width: 4 ops/cycle
+LS width: 128 bytes/cycle
+Number of SMs: 108
+Cluster size: DISABLED
+Max concurrent blocks per SM: 32
+Workload type: GEMM
+SRAM read queue depth: 64
+SRAM write queue depth: 64
+TMEM read queue depth: 64
+TMEM write queue depth: 64
+TMEM read latency: 33 cycles
+TMEM write latency: 33 cycles
+TMEM read bandwidth: 128 bytes/cycle
+TMEM write bandwidth: 128 bytes/cycle
+L2 cache size: 41943040 bytes
+L2 line size: 128 bytes
+L2 hit latency: 300 cycles
+L2 bandwidth: 1853 bytes/cycle
+L2 write bandwidth: 926 bytes/cycle
+L2 queue depth: 65536
+L2 max transactions per cycle per subpartition: 1
+Core frequency: 1410 MHz
+Memory topology: CoLocated
+HBM read bandwidth: 933 GB/s, write max: 466.5 GB/s
+HBM read/write latency: 270/270 cycles
+HBF read/write bandwidth: 524.288/27.96 GB/s
+HBF read/write latency: 5640/105750 cycles
+gpu_to_hbm link: 4608 GB/s, 10 cycles
+gpu_to_hbf link: 768 GB/s, 10 cycles
+
+Progress: cycle 10000
+Progress: cycle 20000
+Progress: cycle 30000
+Progress: cycle 40000
+Progress: cycle 50000
+Progress: cycle 60000
+Progress: cycle 70000
+Progress: cycle 80000
+Progress: cycle 90000
+Progress: cycle 100000
+Progress: cycle 110000
+Progress: cycle 120000
+Progress: cycle 130000
+Progress: cycle 140000
+Progress: cycle 150000
+Progress: cycle 160000
+Progress: cycle 170000
+Progress: cycle 180000
+Progress: cycle 190000
+Progress: cycle 200000
+Progress: cycle 210000
+Progress: cycle 220000
+Progress: cycle 230000
+Progress: cycle 240000
+Progress: cycle 250000
+Progress: cycle 260000
+Progress: cycle 270000
+Progress: cycle 280000
+
+✅ Simulation completed at cycle 286637
+
+Shared Memory Bank Conflict Stats:
+  Total ld.sram2reg with conflicts: 0
+  Total cycles added by conflicts: 0
+Off-chip memory statistics:
+  HBM requests: 512 (read 320, write 192), bytes: read 40960, write 24576, average latency: 294.03 cycles
+  HBF requests: 786432 (read 786432, write 0), bytes: read 100663296, write 0, average latency: 7231.90 cycles
+  gpu_to_hbm transferred bytes: GPU->memory 29696, memory->GPU 44032; utilization: 0.0%/0.0%
+  gpu_to_hbf transferred bytes: GPU->memory 12582912, memory->GPU 100663296; utilization: 8.1%/64.5%
+
+Total cycles: 286637
+Finished: 75265/75265
+Kernel time (last DRAM store issue cycle): 286033
+Kernel time (last output store issue cycle): 286033
+Stage timing: Output first 285392 complete 286637
+Stage timing: projection_acc first 1 complete 285391

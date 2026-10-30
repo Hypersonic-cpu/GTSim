@@ -1,0 +1,386 @@
+[
+  {
+    "candidate": 0,
+    "training_samples_before": 0,
+    "status": "complete",
+    "nodes": 126721,
+    "tir_sha256": "122b332ca51ee2810d3a33e2ca5c8c39ef31e40d8da945e8bd4a724905e394ed",
+    "ir_sha256": "b57529d5a3b4364efa8383dd5a92f0121de1f1f11289dafa81817a8a3dbe4280",
+    "build_wall_seconds": 0.7140071250032634,
+    "cycles": 424865,
+    "us": 301.322695035461,
+    "simulation_wall_seconds": 11.868660292006098,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 299.38
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5721.21
+      }
+    },
+    "maximum_process_memory_bytes": 310247424,
+    "stage_timings": {
+      "Output": {
+        "first": 423582,
+        "complete": 424865
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 423581
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 64,
+      "warps": 4,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 1,
+    "training_samples_before": 1,
+    "status": "complete",
+    "nodes": 124801,
+    "tir_sha256": "c77d53121d1537c8580204faf1762543835b6bb9d37caca5cbcaa5aba7700060",
+    "ir_sha256": "afd6a4747310feda286a8b49a99b280425f35207192f3f83ee39365b9015eb72",
+    "build_wall_seconds": 0.691832333104685,
+    "cycles": 286824,
+    "us": 203.42127659574467,
+    "simulation_wall_seconds": 8.08116170798894,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.18
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5771.38
+      }
+    },
+    "maximum_process_memory_bytes": 357072896,
+    "stage_timings": {
+      "Output": {
+        "first": 285509,
+        "complete": 286824
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 285508
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 32,
+      "warps": 1,
+      "stages": 3,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 2,
+    "training_samples_before": 2,
+    "status": "complete",
+    "nodes": 124801,
+    "tir_sha256": "c8af2b8a54230981e36d2a4fc70482a776ebe1050b390c54c2e0d0b5f72ab2c3",
+    "ir_sha256": "832207e180fa725b0ad1cc318c4dcc1aec1d5ad34d0b3992f3fbec8e84eaf81a",
+    "build_wall_seconds": 0.6882195419166237,
+    "cycles": 420178,
+    "us": 297.9985815602837,
+    "simulation_wall_seconds": 10.553032375057228,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.17
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5715.91
+      }
+    },
+    "maximum_process_memory_bytes": 353845248,
+    "stage_timings": {
+      "Output": {
+        "first": 418863,
+        "complete": 420178
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 418862
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 32,
+      "warps": 1,
+      "stages": 2,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 3,
+    "training_samples_before": 3,
+    "status": "complete",
+    "nodes": 62401,
+    "tir_sha256": "16412e49c2ff5bf3dd0945e0c4d60fe3f9b4e077f65d5cd6450f430391b829b5",
+    "ir_sha256": "d925c0a2c0c9ecf281a58ab0f58955464010b1de3e3aa5d0e5e88a09c4554f6d",
+    "build_wall_seconds": 0.3458805000409484,
+    "cycles": 306761,
+    "us": 217.56099290780142,
+    "simulation_wall_seconds": 6.812205708003603,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.92
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5785.02
+      }
+    },
+    "maximum_process_memory_bytes": 201572352,
+    "stage_timings": {
+      "Output": {
+        "first": 305426,
+        "complete": 306761
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 305425
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 32,
+      "warps": 1,
+      "stages": 3,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 4,
+    "training_samples_before": 4,
+    "status": "complete",
+    "nodes": 62401,
+    "tir_sha256": "8a40671f31e699f237b0ae28f8e2865fab27c05e8a6dbebb7667bcede049ff2e",
+    "ir_sha256": "7d551b23ee2b624204931eff75dbfbc32e210ec8d4a73040e2c83f41cf7923c4",
+    "build_wall_seconds": 0.34278400009498,
+    "cycles": 306761,
+    "us": 217.56099290780142,
+    "simulation_wall_seconds": 6.662752707954496,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.92
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5785.02
+      }
+    },
+    "maximum_process_memory_bytes": 165609472,
+    "stage_timings": {
+      "Output": {
+        "first": 305426,
+        "complete": 306761
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 305425
+      }
+    },
+    "choices": {
+      "output_tile": 256,
+      "reduction_tile": 32,
+      "warps": 2,
+      "stages": 3,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 5,
+    "training_samples_before": 5,
+    "status": "complete",
+    "nodes": 124801,
+    "tir_sha256": "c5f12f49ed9b1c09e2a2b74ddb8f510629f225841fd84f73ba01f8d8ea8a6f52",
+    "ir_sha256": "9afa4d3059985482dffa8c3ea6efa106047d88edf723603cc716d9d6ac927547",
+    "build_wall_seconds": 0.7178818749962375,
+    "cycles": 286824,
+    "us": 203.42127659574467,
+    "simulation_wall_seconds": 7.468687208020128,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.18
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 5771.38
+      }
+    },
+    "maximum_process_memory_bytes": 257409024,
+    "stage_timings": {
+      "Output": {
+        "first": 285509,
+        "complete": 286824
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 285508
+      }
+    },
+    "choices": {
+      "output_tile": 256,
+      "reduction_tile": 32,
+      "warps": 4,
+      "stages": 3,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 6,
+    "training_samples_before": 6,
+    "status": "complete",
+    "nodes": 63361,
+    "tir_sha256": "8a770b5031ca5b73f450d058daf43316ac1ed313f29ca2e713ab831beb61a118",
+    "ir_sha256": "55ee6ffefc2aeae24d2a7b93473dbd4bddef6b937c2be0849fe2e94e6d712ba1",
+    "build_wall_seconds": 0.347100832965225,
+    "cycles": 240590,
+    "us": 170.63120567375887,
+    "simulation_wall_seconds": 6.415688500041142,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 302.18
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 9387.51
+      }
+    },
+    "maximum_process_memory_bytes": 176160768,
+    "stage_timings": {
+      "Output": {
+        "first": 239275,
+        "complete": 240590
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 239274
+      }
+    },
+    "choices": {
+      "output_tile": 256,
+      "reduction_tile": 64,
+      "warps": 4,
+      "stages": 3,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 7,
+    "training_samples_before": 7,
+    "status": "complete",
+    "nodes": 65281,
+    "tir_sha256": "1e820501bb650b385229c1d0cff75d281fe831127d07ebd1434243e5d27fbb55",
+    "ir_sha256": "fd9a42fddf85892012a0c523058dd02a69d8ce471b1c8ef24786201e5debd4fb",
+    "build_wall_seconds": 0.36028883303515613,
+    "cycles": 234537,
+    "us": 166.33829787234043,
+    "simulation_wall_seconds": 8.699440958094783,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 864.0,
+        "reads": 384.0,
+        "writes": 480.0,
+        "read_bytes": 49152.0,
+        "write_bytes": 61440.0,
+        "latency": 299.34
+      },
+      "HBF": {
+        "requests": 655360.0,
+        "reads": 655360.0,
+        "writes": 0.0,
+        "read_bytes": 83886080.0,
+        "write_bytes": 0.0,
+        "latency": 18286.57
+      }
+    },
+    "maximum_process_memory_bytes": 245776384,
+    "stage_timings": {
+      "Output": {
+        "first": 233254,
+        "complete": 234537
+      },
+      "projection_acc": {
+        "first": 1,
+        "complete": 233253
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 3,
+      "inline": 0
+    }
+  }
+]

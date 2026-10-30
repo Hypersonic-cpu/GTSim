@@ -1,0 +1,86 @@
+# from tvm.script import ir as I
+# from tvm.script import tirx as T
+# from tvm.tirx.layout import Axis
+
+@I.ir_module
+class Module:
+    @T.prim_func
+    def combine(PO: T.Buffer((4, 16, 4, 256), "float32"), PL: T.Buffer((4, 16, 4), "float32"), O: T.Buffer((4, 4, 256), "bfloat16")):
+        T.func_attr({"gtsim.compiler": "ampere_online_fa2_combine_v1", "gtsim.semantic_tensor_tiers": "{\"O\": \"HBM\", \"PL\": \"HBM\", \"PO\": \"HBM\"}"})
+        for job in T.thread_binding(4, thread="blockIdx.x"):
+            maximum = T.alloc_local((4,))
+            denom = T.alloc_local((4,))
+            weights = T.alloc_shared((4, 16))
+            acc = T.alloc_local((4, 256))
+            for r in range(4):
+                maximum[r] = T.float32(-1000000000000000019884624838656.0)
+                for s in range(16):
+                    maximum[r] = T.max(maximum[r], PL[job, s, r])
+                denom[r] = T.float32(0.0)
+                for s in range(16):
+                    weights[r, s] = T.exp(PL[job, s, r] - maximum[r])
+                    denom[r] = denom[r] + weights[r, s]
+                for s in range(16):
+                    weights[r, s] = weights[r, s] / denom[r]
+                for d in range(256):
+                    acc[r, d] = T.float32(0.0)
+                for s, d in T.grid(16, 256):
+                    acc[r, d] = acc[r, d] + weights[r, s] * PO[job, s, r, d]
+                for d in range(256):
+                    O[job, r, d] = T.Cast("bfloat16", acc[r, d])
+
+    @T.prim_func
+    def main(Q: T.Buffer((4, 4, 256), "bfloat16"), K: T.Buffer((4, 32768, 256), "bfloat16"), V: T.Buffer((4, 32768, 256), "bfloat16"), PO: T.Buffer((4, 16, 4, 256), "float32"), PL: T.Buffer((4, 16, 4), "float32")):
+        T.func_attr({"gtsim.compiler": "ampere_online_fa2_v1", "gtsim.heads_kv": 4, "gtsim.semantic_tensor_tiers": "{\"K\": \"HBM\", \"PL\": \"HBM\", \"PO\": \"HBM\", \"Q\": \"HBM\", \"V\": \"HBM\"}"})
+        for job in T.thread_binding(4, thread="blockIdx.y"):
+            for part in T.thread_binding(16, thread="blockIdx.x"):
+                Qs = T.alloc_shared((64, 256), "bfloat16")
+                Ks = T.alloc_shared((2, 32, 256), "bfloat16")
+                Vs = T.alloc_shared((2, 32, 256), "bfloat16")
+                score = T.alloc_local((64, 32))
+                P = T.alloc_local((64, 32), "bfloat16")
+                Oacc = T.alloc_local((64, 256))
+                M = T.alloc_local((64,))
+                L = T.alloc_local((64,))
+                old_m = T.alloc_local((64,))
+                alpha = T.alloc_local((64,))
+                tile_max = T.alloc_local((64,))
+                tile_sum = T.alloc_local((64,))
+                for r, d in T.grid(64, 256):
+                    Qs[r, d] = T.if_then_else(r < 4, Q[job, r, d], T.bfloat16(0.0))
+                    Oacc[r, d] = T.float32(0.0)
+                for r in range(64):
+                    M[r] = T.float32(-1000000000000000019884624838656.0)
+                    L[r] = T.float32(0.0)
+                for iteration in range(T.max(0, T.min(1024, part * 64 + 64) - part * 64)):
+                    offset: T.int32 = (T.min(1024, (part + 1) * 64) - 1 - iteration) * 32
+                    slot: T.int32 = iteration % 2
+                    for n, d in T.grid(32, 256):
+                        Ks[slot, n, d] = T.if_then_else(offset + n < 32768, K[job, offset + n, d], T.bfloat16(0.0))
+                        Vs[slot, n, d] = T.if_then_else(offset + n < 32768, V[job, offset + n, d], T.bfloat16(0.0))
+                    for r, n in T.grid(64, 32):
+                        score[r, n] = T.float32(0.0)
+                        for d in range(256):
+                            score[r, n] = score[r, n] + T.Cast("float32", Qs[r, d]) * T.Cast("float32", Ks[slot, n, d])
+                        score[r, n] = T.if_then_else(offset + n < 32768, score[r, n] * T.float32(0.0625), T.float32(-1000000000000000019884624838656.0))
+                    for r in range(64):
+                        tile_max[r] = T.float32(-1000000000000000019884624838656.0)
+                        for n in range(32):
+                            tile_max[r] = T.max(tile_max[r], score[r, n])
+                        old_m[r] = M[r]
+                        M[r] = T.max(M[r], tile_max[r])
+                        alpha[r] = T.exp(old_m[r] - M[r])
+                        tile_sum[r] = T.float32(0.0)
+                        for n in range(32):
+                            score[r, n] = T.exp(score[r, n] - M[r])
+                            tile_sum[r] = tile_sum[r] + score[r, n]
+                            P[r, n] = T.Cast("bfloat16", score[r, n])
+                        L[r] = L[r] * alpha[r] + tile_sum[r]
+                    for r, d in T.grid(64, 256):
+                        Oacc[r, d] = Oacc[r, d] * alpha[r]
+                        for n in range(32):
+                            Oacc[r, d] = Oacc[r, d] + T.Cast("float32", P[r, n]) * T.Cast("float32", Vs[slot, n, d])
+                for r, d in T.grid(4, 256):
+                    PO[job, part, r, d] = T.if_then_else(L[r] > T.float32(0.0), Oacc[r, d] / L[r], T.float32(0.0))
+                for r in range(4):
+                    PL[job, part, r] = T.if_then_else(L[r] > T.float32(0.0), M[r] + T.log(L[r]), T.float32(-1000000000000000019884624838656.0))

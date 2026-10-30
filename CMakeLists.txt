@@ -28,6 +28,8 @@ add_library(gtsim_tile_ir STATIC src/tile_ir_parser.cpp src/tile_dag_builder.cpp
 target_link_libraries(gtsim_tile_ir PUBLIC gtsim_core)
 add_executable(gtsim_gemm_ir workloads/gemm/gemm_ir.cpp)
 target_link_libraries(gtsim_gemm_ir PRIVATE gtsim_tile_ir)
+add_executable(gtsim_serve_ir workloads/serve/serve_ir.cpp)
+target_link_libraries(gtsim_serve_ir PRIVATE gtsim_tile_ir)
 
 add_executable(gtsim_fa3 workloads/fa3/fa3_h100.cpp)
 target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
@@ -47,6 +49,9 @@ if(BUILD_TESTING)
   target_link_libraries(fa2_tests PRIVATE gtsim_core)
   add_test(NAME fa2_decode_semantics COMMAND fa2_tests
            ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/a100-pcie40-simple.yaml)
+  add_executable(serve_ir_tests tests/serve_ir_tests.cpp)
+  target_link_libraries(serve_ir_tests PRIVATE gtsim_tile_ir)
+  add_test(NAME serve_ir_boundary COMMAND serve_ir_tests)
   add_executable(tile_ir_tests tests/tile_ir_tests.cpp)
   target_link_libraries(tile_ir_tests PRIVATE gtsim_tile_ir)
   add_executable(tile_ir_parity_tests tests/tile_ir_parity_tests.cpp)
@@ -89,6 +94,8 @@ if(BUILD_TESTING)
               --build-dir ${CMAKE_CURRENT_BINARY_DIR} --verify)
   endif()
   if(GTSIM_TVM_PYTHON)
+    add_test(NAME tvm_serving_semantics
+      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_serve.py)
     add_test(NAME tvm_tensor_placement
       COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_placement.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR})
@@ -104,7 +111,7 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_fa3 gtsim_fa2
+install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_serve_ir gtsim_fa3 gtsim_fa2
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include/gtsim)

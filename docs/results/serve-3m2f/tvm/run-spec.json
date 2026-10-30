@@ -1,0 +1,101 @@
+{
+  "workers": 1,
+  "previous_simulation_peak_bytes": 3772419264,
+  "policy": "One worker because measured peak exceeds 3GB",
+  "cases": [
+    [
+      "fa2",
+      [
+        "--kind",
+        "fa2",
+        "--trials",
+        "12"
+      ]
+    ],
+    [
+      "gdn_qkvz",
+      [
+        "--kind",
+        "projection",
+        "--n",
+        "12288",
+        "--k",
+        "4096",
+        "--trials",
+        "8"
+      ]
+    ],
+    [
+      "gqa_qkvgate",
+      [
+        "--kind",
+        "projection",
+        "--n",
+        "10240",
+        "--k",
+        "4096",
+        "--trials",
+        "8"
+      ]
+    ],
+    [
+      "output_proj",
+      [
+        "--kind",
+        "projection",
+        "--n",
+        "4096",
+        "--k",
+        "4096",
+        "--trials",
+        "8"
+      ]
+    ],
+    [
+      "mlp_gate_up",
+      [
+        "--kind",
+        "projection",
+        "--n",
+        "24576",
+        "--k",
+        "4096",
+        "--trials",
+        "8"
+      ]
+    ],
+    [
+      "mlp_down",
+      [
+        "--kind",
+        "projection",
+        "--n",
+        "4096",
+        "--k",
+        "12288",
+        "--trials",
+        "8"
+      ]
+    ],
+    [
+      "gdn_full",
+      [
+        "--kind",
+        "gdn",
+        "--trials",
+        "16"
+      ]
+    ]
+  ],
+  "source_sha256": {
+    "scripts/tvm/serve_eval.py": "a5b021af2c4223d82c8e979e6ffcafa3bb6c5c7b559612afa135f9ce68d20a60",
+    "scripts/tvm/serve_fa2.py": "9891ed31961c3ec5bde625d99874119438dddf09facf6b0d45619d0577bf58e7",
+    "scripts/tvm/serve_lower.py": "a3e0f8d990fe72b7dcdcaa6424bb0414685ecc57cfaa918a11d6e77df7841450",
+    "scripts/tvm/serve_memory.py": "592c072c34547a03002adb6cceb256cc40df426f24d0850dc8b27a5cca1b3bb8",
+    "scripts/tvm/serve_rules.py": "d39016322f2203d2a7a1506040820b1d24f3bcd39f5ff6d7c2728a865ef264c4",
+    "scripts/tvm/serve_search.py": "031aee227c258b010b202a47f28fa8012bd759f4ef8e2659969a6c0e6e7fbd1a",
+    "workloads/serve/semantics.py": "48c2b6df19f04a9a916e47492b2c65c07ec0e00dd17de1855bd775f69d33b658",
+    "build/gtsim_serve_ir": "ef1b309c54381d2ade219ca74cf60b093063abba7c86b0957fa546577a30efef",
+    "configs/v0.1.0/a100-pcie40-3m2f-grade1-simple.yaml": "6a19829d63ba8790a36ab4cc61b8d0c78bbdc9d9dbb1f9d2236e281766b3c501"
+  }
+}

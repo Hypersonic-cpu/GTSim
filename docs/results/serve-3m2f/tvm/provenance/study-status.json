@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "baseline",
+    "status": "complete",
+    "command": [
+      "/Users/kong/Documents/Github/GTSim/.tvm-venv/bin/python",
+      "/Users/kong/Documents/Github/GTSim/scripts/experiments/run_serve_3m2f.py",
+      "--out-dir",
+      "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/baseline"
+    ],
+    "returncode": 0,
+    "wall_seconds": 120.452553082956
+  },
+  {
+    "phase": "search",
+    "status": "complete",
+    "command": [
+      "/Users/kong/Documents/Github/GTSim/.tvm-venv/bin/python",
+      "/Users/kong/Documents/Github/GTSim/scripts/experiments/run_serve_searches.py",
+      "--out-dir",
+      "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search"
+    ],
+    "returncode": 0,
+    "wall_seconds": 3543.352776375017
+  }
+]

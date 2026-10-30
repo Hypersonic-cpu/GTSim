@@ -1,0 +1,9 @@
+{
+  "files": {
+    "configs/v0.1.0/a100-pcie40-simple.yaml": "67f40dc2b66319d7f4930283e31070c98cf52eddba732cb1724350ae985adad9",
+    "configs/v0.1.0/a100-pcie40-3m2f-grade1-simple.yaml": "6a19829d63ba8790a36ab4cc61b8d0c78bbdc9d9dbb1f9d2236e281766b3c501",
+    "build/gtsim_fa2": "601adbebdfb55b830b52610a6c03e22359f53a3c919288f18b042f7d101e0ccc",
+    "build/gtsim_gemm": "db76f8b2a2571fbe1a0fa96babc9b775b7540413403c3199345ee11a04170071",
+    "scripts/experiments/run_serve_3m2f.py": "7927fd87eb710da09121005670d63c2120de5e57bf646d69561c2365e42a8492"
+  }
+}

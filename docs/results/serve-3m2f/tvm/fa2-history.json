@@ -1,0 +1,566 @@
+[
+  {
+    "candidate": 0,
+    "training_samples_before": 0,
+    "status": "complete",
+    "nodes": 4346889,
+    "tir_sha256": "9ee3e090f66a48b6eee25409f91a51dda18cf63e09790edd7fa0d81960576555",
+    "ir_sha256": "ed8968b5605add083957ba5b22690e0a1aa44d570cd8942e5fe0b57d285a4173",
+    "build_wall_seconds": 8.587136958027259,
+    "cycles": 252708,
+    "us": 179.22553191489362,
+    "simulation_wall_seconds": 45.85199995909352,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1061128.0,
+        "reads": 1054860.0,
+        "writes": 6268.0,
+        "read_bytes": 135022080.0,
+        "write_bytes": 802304.0,
+        "latency": 3386.37
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 5895328520,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 221362,
+        "complete": 252708
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 221361
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 47,
+      "warps": 4,
+      "stages": 1
+    }
+  },
+  {
+    "candidate": 1,
+    "training_samples_before": 1,
+    "status": "complete",
+    "nodes": 1121185,
+    "tir_sha256": "7f8ea44eddc006ce7dcd34487891d180e1a7fbd1718d86410c60967a1db55127",
+    "ir_sha256": "04816bad9d4c1b51e2906b33347744a97a74db08dbd8e98887472e3084b3fd67",
+    "build_wall_seconds": 2.1090652080019936,
+    "cycles": 222450,
+    "us": 157.7659574468085,
+    "simulation_wall_seconds": 13.253531208029017,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 2655.17
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 1392279552,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 210796,
+        "complete": 222450
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 210795
+      }
+    },
+    "choices": {
+      "kv_tile": 32,
+      "splits": 16,
+      "warps": 1,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 2,
+    "training_samples_before": 2,
+    "status": "complete",
+    "nodes": 2236577,
+    "tir_sha256": "b7be8ad02ccdfc96db7499b28383ce4890de43369b3cc43f75449563f613d751",
+    "ir_sha256": "e185d2b764d2e03f6e33c41147df664dde71ad0f1efa62a3cf6bd98c16899150",
+    "build_wall_seconds": 4.162129083066247,
+    "cycles": 222326,
+    "us": 157.67801418439717,
+    "simulation_wall_seconds": 21.131741082994267,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 2774.91
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 2696448328,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 210672,
+        "complete": 222326
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 210671
+      }
+    },
+    "choices": {
+      "kv_tile": 32,
+      "splits": 16,
+      "warps": 2,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 3,
+    "training_samples_before": 3,
+    "status": "complete",
+    "nodes": 1121185,
+    "tir_sha256": "aad4e4fb91026a745bfbc37cfa93095299413476a29d4e9b6f80928885aa0fc4",
+    "ir_sha256": "65e87a9fb9674ed46a5b7e0d9527646f4ddc5117d84aafbfebf570b6472cadc0",
+    "build_wall_seconds": 2.020119084045291,
+    "cycles": 269672,
+    "us": 191.25673758865247,
+    "simulation_wall_seconds": 13.672921458026394,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 426.81
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 1392328704,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 258018,
+        "complete": 269672
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 258017
+      }
+    },
+    "choices": {
+      "kv_tile": 32,
+      "splits": 16,
+      "warps": 1,
+      "stages": 1
+    }
+  },
+  {
+    "candidate": 4,
+    "training_samples_before": 4,
+    "status": "complete",
+    "nodes": 4467361,
+    "tir_sha256": "fcd3df2d4734f7dfa3dfdd7b37b44c2d803ae13c4e4592c7b0420439226dac1c",
+    "ir_sha256": "c08af6a26f97dc21ba7cb6aebea01b4c0e9f5d846987d424253e99d8d74824fe",
+    "build_wall_seconds": 8.873965499922633,
+    "cycles": 222295,
+    "us": 157.65602836879432,
+    "simulation_wall_seconds": 43.23969824996311,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 2848.46
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 5223993592,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 210641,
+        "complete": 222295
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 210640
+      }
+    },
+    "choices": {
+      "kv_tile": 32,
+      "splits": 16,
+      "warps": 4,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 5,
+    "training_samples_before": 5,
+    "status": "complete",
+    "nodes": 4334241,
+    "tir_sha256": "e73acb581ceb78a3e8fdbecb28511fc9b55952be24708bd95956ff89b7614b76",
+    "ir_sha256": "39c4f8c4bb6f7a2e44e0304f06c6851abadca15735b12cd2c1cde9f380267a2d",
+    "build_wall_seconds": 8.642839042004198,
+    "cycles": 227399,
+    "us": 161.27588652482268,
+    "simulation_wall_seconds": 46.379986708052456,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 5875.04
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 4805496936,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 215745,
+        "complete": 227399
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 215744
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 4,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 6,
+    "training_samples_before": 6,
+    "status": "complete",
+    "nodes": 4473889,
+    "tir_sha256": "745321c94d98584f399f7f56563def3cd70c1af3ac90d10ad58ab81df848d6dc",
+    "ir_sha256": "003d23cfe45ac4e2737cdf9fcb07466339f65b64be6629a3755678839c65066c",
+    "build_wall_seconds": 9.087200624984689,
+    "cycles": 293076,
+    "us": 207.85531914893616,
+    "simulation_wall_seconds": 46.2358379579382,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1057168.0,
+        "reads": 1052880.0,
+        "writes": 4288.0,
+        "read_bytes": 134768640.0,
+        "write_bytes": 548864.0,
+        "latency": 5708.67
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 5804249816,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 271293,
+        "complete": 293076
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 271292
+      }
+    },
+    "choices": {
+      "kv_tile": 32,
+      "splits": 32,
+      "warps": 4,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 7,
+    "training_samples_before": 7,
+    "status": "complete",
+    "nodes": 1086369,
+    "tir_sha256": "2af0a918fb9040235aa8b4a1ab552587e4fdfb2479eda42bf736b9ee265c3357",
+    "ir_sha256": "10e62d073ba6464dae850a10916d78f507516251c35aaa9f16f1bebc75ee0f1e",
+    "build_wall_seconds": 1.9696335829794407,
+    "cycles": 227405,
+    "us": 161.28014184397162,
+    "simulation_wall_seconds": 13.335778041975573,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 5382.29
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 1362984960,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 215751,
+        "complete": 227405
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 215750
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 1,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 8,
+    "training_samples_before": 8,
+    "status": "complete",
+    "nodes": 2168993,
+    "tir_sha256": "c0f31b14a345273e303940a0892f95a65c7ea95a21bbf7b9d8467c629444e76d",
+    "ir_sha256": "a986cb9b22a147735e04502567e94436f440aadaedf9759d95b90f8af4399474",
+    "build_wall_seconds": 3.9730827920138836,
+    "cycles": 227381,
+    "us": 161.2631205673759,
+    "simulation_wall_seconds": 20.776716875028796,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 5702.61
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 2634500376,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 215727,
+        "complete": 227381
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 215726
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 2,
+      "stages": 2
+    }
+  },
+  {
+    "candidate": 9,
+    "training_samples_before": 9,
+    "status": "complete",
+    "nodes": 4334241,
+    "tir_sha256": "3016c8017bfe379efb3aad4ff5cd4a629e746f63c21ffa2d38c1ca3e5b8bdcb4",
+    "ir_sha256": "ca1e58365edab5d074efd18ffe49c4ff1e75ef49defeacd270a3cfcf7c33412f",
+    "build_wall_seconds": 8.248565665911883,
+    "cycles": 234168,
+    "us": 166.07659574468084,
+    "simulation_wall_seconds": 44.82424908305984,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 611.78
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 5122429152,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 222514,
+        "complete": 234168
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 222513
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 4,
+      "stages": 1
+    }
+  },
+  {
+    "candidate": 10,
+    "training_samples_before": 10,
+    "status": "complete",
+    "nodes": 1086369,
+    "tir_sha256": "9870224f362aae4bf1d6f5cbf90e6c53a43d86ac003bee152d1ba357a690612b",
+    "ir_sha256": "2f9a9a441e94432a9b5c2c2ce601dacda1f255c98390af8fb3489611f8a87087",
+    "build_wall_seconds": 2.0262382910586894,
+    "cycles": 255245,
+    "us": 181.02482269503545,
+    "simulation_wall_seconds": 13.796452582930215,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 777.19
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 1363001344,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 243591,
+        "complete": 255245
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 243590
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 1,
+      "stages": 1
+    }
+  },
+  {
+    "candidate": 11,
+    "training_samples_before": 11,
+    "status": "complete",
+    "nodes": 2168993,
+    "tir_sha256": "311e011b5ea7fd5c741de7f7ea645e1e91362757fc56a88a08dfa2ee7cba4282",
+    "ir_sha256": "be3f9712642ef2e86482eaa502822affacf080e5d5085575f11fe56e61ad428d",
+    "build_wall_seconds": 3.983367457985878,
+    "cycles": 240536,
+    "us": 170.59290780141845,
+    "simulation_wall_seconds": 21.724946875008754,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 1052928.0,
+        "reads": 1050752.0,
+        "writes": 2176.0,
+        "read_bytes": 134496256.0,
+        "write_bytes": 278528.0,
+        "latency": 626.46
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "maximum_process_memory_bytes": 2679572784,
+    "stage_timings": {
+      "fa2_combine": {
+        "first": 228882,
+        "complete": 240536
+      },
+      "fa2_main": {
+        "first": 1,
+        "complete": 228881
+      }
+    },
+    "choices": {
+      "kv_tile": 64,
+      "splits": 16,
+      "warps": 2,
+      "stages": 1
+    }
+  }
+]

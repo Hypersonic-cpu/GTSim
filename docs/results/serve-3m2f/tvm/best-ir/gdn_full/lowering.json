@@ -1,0 +1,669 @@
+{
+  "stages": [
+    {
+      "name": "input_norm_sum",
+      "output": "input_norm_sum",
+      "shape": [
+        1
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 135,
+      "maximum_cta_register_bytes": 6404,
+      "arithmetic_ops": {
+        "simd.cast": 1,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "input_norm",
+      "output": "input_norm",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1921,
+      "maximum_cta_register_bytes": 6664,
+      "arithmetic_ops": {
+        "simd.cast": 3,
+        "simd.mul": 1,
+        "sfu.divide": 2,
+        "sfu.sqrt": 1,
+        "simd.add": 2
+      }
+    },
+    {
+      "name": "qkvz_acc",
+      "output": "qkvz_acc",
+      "shape": [
+        1,
+        12288
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 76417,
+      "maximum_cta_register_bytes": 23296,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "qkvz",
+      "output": "qkvz",
+      "shape": [
+        1,
+        12288
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1921,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "conv",
+      "output": "conv",
+      "shape": [
+        1,
+        8192
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 6657,
+      "maximum_cta_register_bytes": 7424,
+      "arithmetic_ops": {
+        "simd.add": 3,
+        "simd.mul": 4,
+        "simd.cast": 8
+      }
+    },
+    {
+      "name": "q_l2",
+      "output": "q_l2",
+      "shape": [
+        1,
+        16
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 17,
+      "maximum_cta_register_bytes": 14400,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "sfu.divide": 1,
+        "simd.add": 1,
+        "sfu.exp": 1,
+        "simd.mul": 1,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "q_norm",
+      "output": "q_norm",
+      "shape": [
+        1,
+        16,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 961,
+      "maximum_cta_register_bytes": 6664,
+      "arithmetic_ops": {
+        "sfu.divide": 3,
+        "simd.cast": 2,
+        "simd.add": 2,
+        "sfu.exp": 1,
+        "simd.mul": 1,
+        "sfu.sqrt": 1
+      }
+    },
+    {
+      "name": "ba_acc",
+      "output": "ba_acc",
+      "shape": [
+        1,
+        64
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 399,
+      "maximum_cta_register_bytes": 23296,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "ba",
+      "output": "ba",
+      "shape": [
+        1,
+        64
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 11,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "decay",
+      "output": "decay",
+      "shape": [
+        1,
+        32
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 22,
+      "maximum_cta_register_bytes": 6464,
+      "arithmetic_ops": {
+        "sfu.exp": 3,
+        "simd.mul": 3,
+        "simd.cast": 3,
+        "simd.add": 3,
+        "simd.identity": 1,
+        "sfu.log": 1,
+        "simd.max": 1
+      }
+    },
+    {
+      "name": "decayed_state",
+      "output": "decayed_state",
+      "shape": [
+        1,
+        32,
+        128,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 98305,
+      "maximum_cta_register_bytes": 6664,
+      "arithmetic_ops": {
+        "simd.mul": 1
+      }
+    },
+    {
+      "name": "k_l2",
+      "output": "k_l2",
+      "shape": [
+        1,
+        16
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 17,
+      "maximum_cta_register_bytes": 14400,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "sfu.divide": 1,
+        "simd.add": 1,
+        "sfu.exp": 1,
+        "simd.mul": 1,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "k_norm",
+      "output": "k_norm",
+      "shape": [
+        1,
+        16,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 897,
+      "maximum_cta_register_bytes": 6664,
+      "arithmetic_ops": {
+        "sfu.divide": 2,
+        "simd.cast": 2,
+        "simd.add": 2,
+        "sfu.exp": 1,
+        "simd.mul": 1,
+        "sfu.sqrt": 1
+      }
+    },
+    {
+      "name": "prediction",
+      "output": "prediction",
+      "shape": [
+        1,
+        32,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1409,
+      "maximum_cta_register_bytes": 40192,
+      "arithmetic_ops": {
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "delta",
+      "output": "delta",
+      "shape": [
+        1,
+        32,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 2433,
+      "maximum_cta_register_bytes": 6916,
+      "arithmetic_ops": {
+        "simd.mul": 3,
+        "sfu.divide": 2,
+        "simd.add": 2,
+        "sfu.exp": 2,
+        "simd.cast": 3,
+        "simd.sub": 1
+      }
+    },
+    {
+      "name": "NextState",
+      "output": "NextState",
+      "shape": [
+        1,
+        32,
+        128,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 131073,
+      "maximum_cta_register_bytes": 6920,
+      "arithmetic_ops": {
+        "simd.add": 1,
+        "simd.mul": 1
+      }
+    },
+    {
+      "name": "attn_acc",
+      "output": "attn_acc",
+      "shape": [
+        1,
+        32,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1409,
+      "maximum_cta_register_bytes": 40192,
+      "arithmetic_ops": {
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "attn",
+      "output": "attn",
+      "shape": [
+        1,
+        32,
+        128
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 641,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "gated_sum",
+      "output": "gated_sum",
+      "shape": [
+        1,
+        32
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 12,
+      "maximum_cta_register_bytes": 14464,
+      "arithmetic_ops": {
+        "simd.cast": 1,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "gated_norm",
+      "output": "gated_norm",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 2689,
+      "maximum_cta_register_bytes": 7560,
+      "arithmetic_ops": {
+        "simd.cast": 4,
+        "sfu.divide": 3,
+        "simd.mul": 3,
+        "sfu.sqrt": 1,
+        "simd.add": 2,
+        "sfu.exp": 1
+      }
+    },
+    {
+      "name": "out_proj_acc",
+      "output": "out_proj_acc",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 25473,
+      "maximum_cta_register_bytes": 23296,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "out_proj",
+      "output": "out_proj",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 641,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "residual",
+      "output": "residual",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1153,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 3,
+        "simd.add": 1
+      }
+    },
+    {
+      "name": "post_norm_sum",
+      "output": "post_norm_sum",
+      "shape": [
+        1
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 136,
+      "maximum_cta_register_bytes": 6404,
+      "arithmetic_ops": {
+        "simd.cast": 1,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "post_norm",
+      "output": "post_norm",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1921,
+      "maximum_cta_register_bytes": 6664,
+      "arithmetic_ops": {
+        "simd.cast": 3,
+        "simd.mul": 1,
+        "sfu.divide": 2,
+        "sfu.sqrt": 1,
+        "simd.add": 2
+      }
+    },
+    {
+      "name": "gate_up_acc",
+      "output": "gate_up_acc",
+      "shape": [
+        1,
+        24576
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 152833,
+      "maximum_cta_register_bytes": 23296,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "gate_up",
+      "output": "gate_up",
+      "shape": [
+        1,
+        24576
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 3841,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "swiglu",
+      "output": "swiglu",
+      "shape": [
+        1,
+        12288
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 4993,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 3,
+        "simd.mul": 2,
+        "sfu.divide": 1,
+        "simd.add": 1,
+        "sfu.exp": 1
+      }
+    },
+    {
+      "name": "down_acc",
+      "output": "down_acc",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 128,
+      "warps": 2,
+      "stages": 1,
+      "operations": 74625,
+      "maximum_cta_register_bytes": 23296,
+      "arithmetic_ops": {
+        "simd.cast": 2,
+        "simd.fma": 1
+      }
+    },
+    {
+      "name": "down",
+      "output": "down",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 641,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 1
+      }
+    },
+    {
+      "name": "Output",
+      "output": "Output",
+      "shape": [
+        1,
+        4096
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 1153,
+      "maximum_cta_register_bytes": 6656,
+      "arithmetic_ops": {
+        "simd.cast": 3,
+        "simd.add": 1
+      }
+    },
+    {
+      "name": "NextConvState",
+      "output": "NextConvState",
+      "shape": [
+        1,
+        8192,
+        4
+      ],
+      "tile_n": 64,
+      "tile_k": 1,
+      "warps": 2,
+      "stages": 1,
+      "operations": 49153,
+      "maximum_cta_register_bytes": 6528,
+      "arithmetic_ops": {
+        "simd.identity": 1
+      }
+    }
+  ],
+  "nodes": 643909,
+  "ctas": 19272,
+  "tensor_tiers": {
+    "X": "HBM",
+    "input_norm_sum": "HBM",
+    "W_input_norm": "HBF",
+    "input_norm": "HBM",
+    "W_qkvz": "HBF",
+    "qkvz_acc": "HBM",
+    "qkvz": "HBM",
+    "ConvState": "HBM",
+    "W_conv": "HBF",
+    "conv": "HBM",
+    "q_l2": "HBM",
+    "q_norm": "HBM",
+    "W_ba": "HBF",
+    "ba_acc": "HBM",
+    "ba": "HBM",
+    "A_log": "HBF",
+    "dt_bias": "HBF",
+    "decay": "HBM",
+    "State": "HBM",
+    "decayed_state": "HBM",
+    "k_l2": "HBM",
+    "k_norm": "HBM",
+    "prediction": "HBM",
+    "delta": "HBM",
+    "NextState": "HBM",
+    "attn_acc": "HBM",
+    "attn": "HBM",
+    "gated_sum": "HBM",
+    "W_gated_norm": "HBF",
+    "gated_norm": "HBM",
+    "W_out": "HBF",
+    "out_proj_acc": "HBM",
+    "out_proj": "HBM",
+    "residual": "HBM",
+    "post_norm_sum": "HBM",
+    "W_post_norm": "HBF",
+    "post_norm": "HBM",
+    "W_gate_up": "HBF",
+    "gate_up_acc": "HBM",
+    "gate_up": "HBM",
+    "swiglu": "HBM",
+    "W_down": "HBF",
+    "down_acc": "HBM",
+    "down": "HBM",
+    "Output": "HBM",
+    "NextConvState": "HBM"
+  },
+  "scope": "Full staged TensorIR; SIMD vector arithmetic, global stage boundaries, register-ring pipeline"
+}

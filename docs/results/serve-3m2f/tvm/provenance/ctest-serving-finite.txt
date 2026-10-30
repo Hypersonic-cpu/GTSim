@@ -1,0 +1,7 @@
+Test project /Users/kong/Documents/Github/GTSim/build
+    Start 15: tvm_serving_semantics
+1/1 Test #15: tvm_serving_semantics ............   Passed   29.39 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =  29.39 sec

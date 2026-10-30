@@ -1,0 +1,119 @@
+{
+  "observations": [
+    {
+      "choices": {
+        "output_tile": 128,
+        "reduction_tile": 64,
+        "warps": 4,
+        "stages": 1,
+        "inline": 0
+      },
+      "seconds": 0.0008840964539007092
+    },
+    {
+      "choices": {
+        "output_tile": 64,
+        "reduction_tile": 32,
+        "warps": 1,
+        "stages": 3,
+        "inline": 0
+      },
+      "seconds": 0.0005872283687943262
+    },
+    {
+      "choices": {
+        "output_tile": 64,
+        "reduction_tile": 32,
+        "warps": 1,
+        "stages": 2,
+        "inline": 0
+      },
+      "seconds": 0.0008775744680851064
+    },
+    {
+      "choices": {
+        "output_tile": 256,
+        "reduction_tile": 32,
+        "warps": 2,
+        "stages": 3,
+        "inline": 0
+      },
+      "seconds": 0.0006265021276595745
+    },
+    {
+      "choices": {
+        "output_tile": 256,
+        "reduction_tile": 64,
+        "warps": 4,
+        "stages": 3,
+        "inline": 0
+      },
+      "seconds": 0.0003191787234042553
+    },
+    {
+      "choices": {
+        "output_tile": 128,
+        "reduction_tile": 128,
+        "warps": 4,
+        "stages": 3,
+        "inline": 0
+      },
+      "seconds": 0.0002032886524822695
+    },
+    {
+      "choices": {
+        "output_tile": 128,
+        "reduction_tile": 128,
+        "warps": 4,
+        "stages": 2,
+        "inline": 0
+      },
+      "seconds": 0.0002483822695035461
+    },
+    {
+      "choices": {
+        "output_tile": 64,
+        "reduction_tile": 128,
+        "warps": 2,
+        "stages": 3,
+        "inline": 0
+      },
+      "seconds": 0.0002032886524822695
+    }
+  ],
+  "updates": [
+    {
+      "round": 0,
+      "observations": 1
+    },
+    {
+      "round": 1,
+      "observations": 2
+    },
+    {
+      "round": 2,
+      "observations": 3
+    },
+    {
+      "round": 3,
+      "observations": 4
+    },
+    {
+      "round": 4,
+      "observations": 5
+    },
+    {
+      "round": 5,
+      "observations": 6
+    },
+    {
+      "round": 6,
+      "observations": 7
+    },
+    {
+      "round": 7,
+      "observations": 8
+    }
+  ],
+  "kind": "ridge_log_simulated_seconds"
+}

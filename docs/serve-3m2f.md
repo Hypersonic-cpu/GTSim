@@ -26,16 +26,16 @@ HBF读写延迟沿用原模型4/75μs，不随堆栈数缩放。
   QKV/O投影权重属于独立GEMM，不应把KV cache当成权重放HBF。
 - GDN语义：卷积状态、递推状态、Q/K/V/Z、门控中间值均应在HBM；
   qkvz/ba/out/MLP/conv/norm及A_log/dt_bias等只读参数应在HBF。
-  当前实测覆盖四个大投影；小ba、conv/norm参数尚未纳入混合内存时序仿真。
+  主TPOT校准保留四个大投影的相同覆盖范围；完整GDN功能图另作TVM搜索，结果另列。
 - 输出/后继输入的tier约定都是HBM。当前是独立kernel进程的冷启动基线，
-  尚未组成共享tensor identity、缓存状态及跨kernel依赖的完整decoder图。
+  主校准尚未组成完整decoder图；新增TVM完整GDN连接图已有共享tensor identity与完成依赖，KV仍按单次FA2独立处理。
 
 Qwen3.5-9B，batch1，BF16，32K，FA2=16Q/4KV、D256、47split；
 GDN QKVZ=4096→12288、out=4096→4096，MLP=4096→24576→12288→4096。
 
 | 单算子 μs | 5M | 3M2F |
 | --- | ---: | ---: |
-| FA2 核心+combine | 118.191 | 173.150 |
+| FA2 核心+combine | 119.158 | 173.621 |
 | GQA QKV+gate投影 | 55.711 | 170.621 |
 | GDN QKVZ投影 | 66.314 | 200.562 |
 | 输出投影 | 38.200 | 163.193 |
@@ -61,7 +61,7 @@ HBF写为0；5M HBF流量为0。详见`results/serve-3m2f/operators.json`。
 | --- | ---: | --- |
 | HostRAM oversubscription | 398.8382 | 客户端逐输出事件，含暴露的传输等待及完整服务路径 |
 | 全 HBM / NoOff | 37.3758 | 客户端逐输出事件，完整服务路径 |
-| 3M2F | 127.8094 | 以全 HBM 实测值校准仿真比值后的估计 |
+| 3M2F | 127.7381 | 以全 HBM 实测值校准仿真比值后的估计 |
 
 两组实测请求内容完全相同：batch1、BF16、32768输入、256输出。
 直接重读各自的256个非空 SSE 事件，核对单调时钟端点及 usage，按
@@ -76,15 +76,15 @@ HostRAM/NoOff实测比为 **10.6710×**，不是通过乘10拟合得出。
 沿用3 HBM + 2 HBF，使用两种配置**相同覆盖范围**的仿真时间比值：
 
 ```text
-T_sim_5M   = 8 × GQA_components_5M   + 24 × GDN_components_5M   = 11.889287943 ms
-T_sim_3M2F = 8 × GQA_components_3M2F + 24 × GDN_components_3M2F = 40.656323404 ms
-ratio = T_sim_3M2F / T_sim_5M = 3.419575974
+T_sim_5M   = 8 × GQA_components_5M   + 24 × GDN_components_5M   = 11.897021277 ms
+T_sim_3M2F = 8 × GQA_components_3M2F + 24 × GDN_components_3M2F = 40.660085106 ms
+ratio = T_sim_3M2F / T_sim_5M = 3.417669361
 TPOT_3M2F_est = TPOT_NoOff_measured × ratio
-              = 37.375789765 × 3.419575974 = 127.809352706 ms/token
+              = 37.375789765 × 3.417669361 = 127.738091529 ms/token
 ```
 
-按该推算，HostRAM/3M2F为 **3.1206×**。40.656ms仍是仿真组件和，
-图中TPOT柱使用校准后的127.809ms。
+按该推算，HostRAM/3M2F为 **3.1223×**。40.660ms仍是仿真组件和，
+图中TPOT柱使用校准后的127.738ms。
 该估计假设完整服务TPOT随当前覆盖组件的仿真比值同比缩放；
 目前GQA覆盖投影、MLP和FA2，GDN覆盖四个大投影，辅助算子、LM head及host调度
 尚未显式仿真，它们的缩放是模型假设。结果标为**校准估计**，不是3M2F真机实测，
@@ -128,19 +128,20 @@ python3 scripts/experiments/plot_serve_wall_time.py \
   --output validation/results/serve-wall-time-audit/comparison.png
 ```
 
-## TVM进展与未完成项
+## TVM serving 编译与搜索
 
-`tvm`已是`serve-sim`祖先，实际执行merge返回Already up to date。
-已加载并校验pinned TVM，FA2/GDN功能TE可导出TensorIR；源码位于
-`workloads/serve/semantics.py`，不固定tile、warp或流水线。
-现有自动搜索后端仅识别一个GEMM reduction与cast输出，使用Hopper WGMMA/TMA；
-其M轴必须是64倍数，因此既不支持decode M=1，也不支持FA2多reduction和GDN状态递推。
-尚未扩展该lowering，未完成MetaSchedule搜索，没有最优IR或优化后的12柱图。
-语义IR不应被标为优化IR，手写C++参数扫描也不应被标为TVM自动优化。
+已在当前分支实现原生MetaSchedule→TensorIR→Ampere/SIMD Tile IR→GTSim反馈路径；
+功能TE入口仍不包含tile/warp/流水线约束。详见[TVM实验记录](serve-tvm.md)。
+`tvm`已是`serve-sim`祖先，本轮没有改动pinned TVM源码。
 
-实测最大RSS约2.30GB，但macOS peak memory footprint为3,772,419,264B。
-按更保守值超过3GB，后续TVM与仿真最多**1个worker**；详见worker-policy.json。
+规格审计发现继承的SIMD width=32对应每SM128个FP32 lane，与GA100的64个不符。
+两份A100配置均已显式设为`simd_throughput=32, simd_width=16`，对应19.49184TFLOPS。
+Tensor Core、HBM/HBF读写速率、延迟和Simple后端保持原研究设定。
+本轮在新目录重测全HBM/3M2F基线；旧配置及结果可从提交391f5f2恢复。
 
-导出命令：`.tvm-venv/bin/python scripts/tvm/export_serve_semantics.py`。
-功能IR及放置清单位于`results/serve-3m2f/semantic-ir/`，状态明确为
-`semantic_export_only_not_optimized`。`search-status.json`的`best_ir`为null。
+最终单次仿真出现7.778GB峰值，继续仅用**1个worker**；不并行运行多个仿真。
+最终实验目录：`validation/results/serve-3m2f/study-a100-fp32/`。
+当前搜索矩阵为FA2十二次、五种真实尺寸投影各八次、完整GDN十六次候选预算。
+功能、融合和状态更新的数值/trace重放验证已通过；完整19项CTest通过。
+68个主候选与7个赢家复测全部完成；TPOT估计127.738→90.347ms（1.41×）。
+[展示摘要](serve-results.md)提供九柱/十二柱图、单算子表和最优IR链接。

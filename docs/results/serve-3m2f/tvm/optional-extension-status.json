@@ -1,0 +1,6 @@
+{
+  "status": "stopped_for_finalization",
+  "completed_search": false,
+  "included_in_results": false,
+  "note": "Optional follow-up exploration stopped after user asked to finalize. Main 68-candidate study and six prefetch ablations are complete."
+}

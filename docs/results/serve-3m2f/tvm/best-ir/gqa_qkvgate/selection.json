@@ -1,0 +1,47 @@
+{
+  "cycles": 234537,
+  "us": 166.33829787234043,
+  "choices": {
+    "output_tile": 128,
+    "reduction_tile": 128,
+    "warps": 4,
+    "stages": 3,
+    "inline": 0
+  },
+  "successful": 8,
+  "attempted": 8,
+  "feedback_updates": 8,
+  "peak_memory_bytes": 357072896,
+  "best_replay_confirmed": true,
+  "tensor_ir_sha256": "1e820501bb650b385229c1d0cff75d281fe831127d07ebd1434243e5d27fbb55",
+  "tile_ir_sha256": "fd9a42fddf85892012a0c523058dd02a69d8ce471b1c8ef24786201e5debd4fb",
+  "memory_statistics": {
+    "HBM": {
+      "requests": 864.0,
+      "reads": 384.0,
+      "writes": 480.0,
+      "read_bytes": 49152.0,
+      "write_bytes": 61440.0,
+      "latency": 299.34
+    },
+    "HBF": {
+      "requests": 655360.0,
+      "reads": 655360.0,
+      "writes": 0.0,
+      "read_bytes": 83886080.0,
+      "write_bytes": 0.0,
+      "latency": 18286.57
+    }
+  },
+  "bandwidth_check": {
+    "device": "HBF",
+    "measured_read_bytes": 83886080.0,
+    "peak_read_GBps": 524.288,
+    "read_time_lower_bound_us": 160.0,
+    "effective_read_GBps": 504.31007815398,
+    "below_bound": false
+  },
+  "first_feasible_us": 301.322695035461,
+  "search_speedup_over_first_feasible": 1.8115052209246303,
+  "fusion_coverage": null
+}

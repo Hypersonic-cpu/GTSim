@@ -143,7 +143,7 @@
     "decode_step_tpot_ms": {
       "HostRAM": 398.8381891568627,
       "normal": 37.37578976470588,
-      "hbf": 127.8093527059764
+      "hbf": 127.73809152891354
     }
   },
   "missing": "NoOff per-layer wall trace and full 3M2F serving model; hybrid TPOT is ratio-estimated",
@@ -201,20 +201,20 @@
     },
     {
       "file": "covered-components.json",
-      "bytes": 399,
-      "sha256": "8d8f77d073e92ad6937363b6fd5c39142a6e8d7dabb3d701ad80bffe09edea5c"
+      "bytes": 400,
+      "sha256": "be87824ea915473b3ded1d60fefb55a6937a87321e297ca370cd8f1dafae74c4"
     }
   ],
   "hybrid_tpot_estimate": {
     "architecture": "3M2F: 3 HBM + 2 HBF stacks",
     "method": "ratio calibration to measured NoOff client TPOT",
     "formula": "TPOT_hybrid_est = TPOT_normal_measured * T_sim_hybrid / T_sim_normal",
-    "normal_simulated_components_ms": 11.88928794326241,
-    "hybrid_simulated_components_ms": 40.65632340425532,
-    "simulated_ratio": 3.419575974463216,
+    "normal_simulated_components_ms": 11.897021276595744,
+    "hybrid_simulated_components_ms": 40.66008510638299,
+    "simulated_ratio": 3.4176693611846347,
     "normal_measured_tpot_ms": 37.37578976470588,
-    "calibrated_tpot_ms": 127.8093527059764,
-    "hostram_over_hybrid_estimate": 3.120571231390118,
+    "calibrated_tpot_ms": 127.73809152891354,
+    "hostram_over_hybrid_estimate": 3.1223121027026273,
     "scope": "8 GQA (projections + MLP + FA2) and 24 GDN (four projections); matched coverage",
     "assumption": "The complete serving TPOT scales with the covered simulation time ratio",
     "limitation": "Auxiliary kernels, LM head and host/scheduler overhead are not explicitly simulated; their scaling is assumed. This is a model-based estimate, not measured or full-step simulated TPOT."

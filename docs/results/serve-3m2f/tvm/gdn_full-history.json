@@ -1,0 +1,2794 @@
+[
+  {
+    "candidate": 0,
+    "training_samples_before": 0,
+    "status": "complete",
+    "nodes": 828891,
+    "tir_sha256": "4ffa33a7e892c3d98b964d1f22bb47056a729fb9c9edb2e8d7fe82f83eea6933",
+    "ir_sha256": "b3c38f9878edcd784a31f75d88f4440ffd7771b2f3984427fd7c40df15d8feb4",
+    "build_wall_seconds": 5.01394362503197,
+    "cycles": 3206070,
+    "us": 2273.808510638298,
+    "simulation_wall_seconds": 144.11089975002687,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91558.0,
+        "reads": 53935.0,
+        "writes": 37623.0,
+        "read_bytes": 6903680.0,
+        "write_bytes": 4815744.0,
+        "latency": 1127.62
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 6641.98
+      }
+    },
+    "maximum_process_memory_bytes": 4161506760,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 3203479,
+        "complete": 3206070
+      },
+      "NextState": {
+        "first": 919754,
+        "complete": 927449
+      },
+      "Output": {
+        "first": 3202192,
+        "complete": 3203478
+      },
+      "attn": {
+        "first": 932696,
+        "complete": 933955
+      },
+      "attn_acc": {
+        "first": 927450,
+        "complete": 932695
+      },
+      "ba": {
+        "first": 892078,
+        "complete": 893302
+      },
+      "ba_acc": {
+        "first": 480834,
+        "complete": 892077
+      },
+      "conv": {
+        "first": 468781,
+        "complete": 475767
+      },
+      "decay": {
+        "first": 893303,
+        "complete": 900122
+      },
+      "decayed_state": {
+        "first": 900123,
+        "complete": 907916
+      },
+      "delta": {
+        "first": 918180,
+        "complete": 919753
+      },
+      "down": {
+        "first": 3200932,
+        "complete": 3202191
+      },
+      "down_acc": {
+        "first": 1964810,
+        "complete": 3200931
+      },
+      "gate_up": {
+        "first": 1961890,
+        "complete": 1963335
+      },
+      "gate_up_acc": {
+        "first": 1407692,
+        "complete": 1961889
+      },
+      "gated_norm": {
+        "first": 936311,
+        "complete": 943244
+      },
+      "gated_sum": {
+        "first": 933956,
+        "complete": 936310
+      },
+      "input_norm": {
+        "first": 40460,
+        "complete": 47272
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 40459
+      },
+      "k_l2": {
+        "first": 907917,
+        "complete": 911459
+      },
+      "k_norm": {
+        "first": 911460,
+        "complete": 912935
+      },
+      "out_proj": {
+        "first": 1357871,
+        "complete": 1359130
+      },
+      "out_proj_acc": {
+        "first": 943245,
+        "complete": 1357870
+      },
+      "post_norm": {
+        "first": 1400879,
+        "complete": 1407691
+      },
+      "post_norm_sum": {
+        "first": 1360418,
+        "complete": 1400878
+      },
+      "prediction": {
+        "first": 912936,
+        "complete": 918179
+      },
+      "q_l2": {
+        "first": 475768,
+        "complete": 479310
+      },
+      "q_norm": {
+        "first": 479311,
+        "complete": 480833
+      },
+      "qkvz": {
+        "first": 467446,
+        "complete": 468780
+      },
+      "qkvz_acc": {
+        "first": 47273,
+        "complete": 467445
+      },
+      "residual": {
+        "first": 1359131,
+        "complete": 1360417
+      },
+      "swiglu": {
+        "first": 1963336,
+        "complete": 1964809
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 32,
+      "warps": 2,
+      "stages": 2,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 1,
+    "training_samples_before": 1,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "8e126b25d9a62a82fe4537f9490ea6d96e703576b5bf12dd26d867aa14636b21",
+    "ir_sha256": "bbcd74cf9d471e265755c770d37cd484aa3a506597624eab103412f3c9e15a7d",
+    "build_wall_seconds": 4.230813958100043,
+    "cycles": 2104151,
+    "us": 1492.3056737588652,
+    "simulation_wall_seconds": 124.37171020894311,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91532.0,
+        "reads": 54194.0,
+        "writes": 37338.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4779264.0,
+        "latency": 1052.32
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4017737136,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101441,
+        "complete": 2104151
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594080
+      },
+      "Output": {
+        "first": 2100162,
+        "complete": 2101440
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598817,
+        "complete": 600062
+      },
+      "attn_acc": {
+        "first": 594081,
+        "complete": 598816
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098916,
+        "complete": 2100161
+      },
+      "down_acc": {
+        "first": 1422768,
+        "complete": 2098915
+      },
+      "gate_up": {
+        "first": 1419952,
+        "complete": 1421321
+      },
+      "gate_up_acc": {
+        "first": 871053,
+        "complete": 1419951
+      },
+      "gated_norm": {
+        "first": 601893,
+        "complete": 608786
+      },
+      "gated_sum": {
+        "first": 600063,
+        "complete": 601892
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840816,
+        "complete": 842061
+      },
+      "out_proj_acc": {
+        "first": 608787,
+        "complete": 840815
+      },
+      "post_norm": {
+        "first": 864267,
+        "complete": 871052
+      },
+      "post_norm_sum": {
+        "first": 843341,
+        "complete": 864266
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842062,
+        "complete": 843340
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421322,
+        "complete": 1422767
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 2
+    }
+  },
+  {
+    "candidate": 2,
+    "training_samples_before": 2,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "2f8dc5bf514d9851c50abfa47b1fe4a221a279c39f63296f96685760dce17c12",
+    "ir_sha256": "bbcd74cf9d471e265755c770d37cd484aa3a506597624eab103412f3c9e15a7d",
+    "build_wall_seconds": 4.1382460000459105,
+    "cycles": 2104151,
+    "us": 1492.3056737588652,
+    "simulation_wall_seconds": 124.26947245793417,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91532.0,
+        "reads": 54194.0,
+        "writes": 37338.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4779264.0,
+        "latency": 1052.32
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4052815328,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101441,
+        "complete": 2104151
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594080
+      },
+      "Output": {
+        "first": 2100162,
+        "complete": 2101440
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598817,
+        "complete": 600062
+      },
+      "attn_acc": {
+        "first": 594081,
+        "complete": 598816
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098916,
+        "complete": 2100161
+      },
+      "down_acc": {
+        "first": 1422768,
+        "complete": 2098915
+      },
+      "gate_up": {
+        "first": 1419952,
+        "complete": 1421321
+      },
+      "gate_up_acc": {
+        "first": 871053,
+        "complete": 1419951
+      },
+      "gated_norm": {
+        "first": 601893,
+        "complete": 608786
+      },
+      "gated_sum": {
+        "first": 600063,
+        "complete": 601892
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840816,
+        "complete": 842061
+      },
+      "out_proj_acc": {
+        "first": 608787,
+        "complete": 840815
+      },
+      "post_norm": {
+        "first": 864267,
+        "complete": 871052
+      },
+      "post_norm_sum": {
+        "first": 843341,
+        "complete": 864266
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842062,
+        "complete": 843340
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421322,
+        "complete": 1422767
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 1
+    }
+  },
+  {
+    "candidate": 3,
+    "training_samples_before": 3,
+    "status": "complete",
+    "nodes": 1330412,
+    "tir_sha256": "9327d5f023e13f1985715af8a237a7e13395e1b0d1f951b894aef05c3fd90000",
+    "ir_sha256": "5cba54c6d826e61690305691097033b2436499dabc028f144588278c4cadef35",
+    "build_wall_seconds": 6.325993790989742,
+    "cycles": 2103834,
+    "us": 1492.0808510638299,
+    "simulation_wall_seconds": 139.96571287501138,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 90500.0,
+        "reads": 53678.0,
+        "writes": 36822.0,
+        "read_bytes": 6870784.0,
+        "write_bytes": 4713216.0,
+        "latency": 856.56
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4951740592,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101119,
+        "complete": 2103834
+      },
+      "NextState": {
+        "first": 577596,
+        "complete": 587178
+      },
+      "Output": {
+        "first": 2099840,
+        "complete": 2101118
+      },
+      "attn": {
+        "first": 598504,
+        "complete": 599749
+      },
+      "attn_acc": {
+        "first": 587179,
+        "complete": 598503
+      },
+      "ba": {
+        "first": 549473,
+        "complete": 550694
+      },
+      "ba_acc": {
+        "first": 328387,
+        "complete": 549472
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decayed_state": {
+        "first": 550695,
+        "complete": 564311
+      },
+      "down": {
+        "first": 2098594,
+        "complete": 2099839
+      },
+      "down_acc": {
+        "first": 1422446,
+        "complete": 2098593
+      },
+      "gate_up": {
+        "first": 1419630,
+        "complete": 1420999
+      },
+      "gate_up_acc": {
+        "first": 870731,
+        "complete": 1419629
+      },
+      "gated_norm": {
+        "first": 601580,
+        "complete": 608464
+      },
+      "gated_sum": {
+        "first": 599750,
+        "complete": 601579
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 564312,
+        "complete": 567370
+      },
+      "out_proj": {
+        "first": 840494,
+        "complete": 841739
+      },
+      "out_proj_acc": {
+        "first": 608465,
+        "complete": 840493
+      },
+      "post_norm": {
+        "first": 863945,
+        "complete": 870730
+      },
+      "post_norm_sum": {
+        "first": 843019,
+        "complete": 863944
+      },
+      "prediction": {
+        "first": 567371,
+        "complete": 577595
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 841740,
+        "complete": 843018
+      },
+      "swiglu": {
+        "first": 1421000,
+        "complete": 1422445
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 1
+    }
+  },
+  {
+    "candidate": 4,
+    "training_samples_before": 4,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "368f2bac458bda4aa043c84903186a34c7104c01cbd70fef2f0960020bc979bf",
+    "ir_sha256": "bbcd74cf9d471e265755c770d37cd484aa3a506597624eab103412f3c9e15a7d",
+    "build_wall_seconds": 4.854515708051622,
+    "cycles": 2104151,
+    "us": 1492.3056737588652,
+    "simulation_wall_seconds": 131.5994204999879,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91532.0,
+        "reads": 54194.0,
+        "writes": 37338.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4779264.0,
+        "latency": 1052.32
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4052848096,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101441,
+        "complete": 2104151
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594080
+      },
+      "Output": {
+        "first": 2100162,
+        "complete": 2101440
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598817,
+        "complete": 600062
+      },
+      "attn_acc": {
+        "first": 594081,
+        "complete": 598816
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098916,
+        "complete": 2100161
+      },
+      "down_acc": {
+        "first": 1422768,
+        "complete": 2098915
+      },
+      "gate_up": {
+        "first": 1419952,
+        "complete": 1421321
+      },
+      "gate_up_acc": {
+        "first": 871053,
+        "complete": 1419951
+      },
+      "gated_norm": {
+        "first": 601893,
+        "complete": 608786
+      },
+      "gated_sum": {
+        "first": 600063,
+        "complete": 601892
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840816,
+        "complete": 842061
+      },
+      "out_proj_acc": {
+        "first": 608787,
+        "complete": 840815
+      },
+      "post_norm": {
+        "first": 864267,
+        "complete": 871052
+      },
+      "post_norm_sum": {
+        "first": 843341,
+        "complete": 864266
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842062,
+        "complete": 843340
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421322,
+        "complete": 1422767
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 5,
+    "training_samples_before": 5,
+    "status": "complete",
+    "nodes": 1330412,
+    "tir_sha256": "5e440e0982dc1d571f6b2e53f21212fd154ef773d75bec4202e6bb52adfac270",
+    "ir_sha256": "5cba54c6d826e61690305691097033b2436499dabc028f144588278c4cadef35",
+    "build_wall_seconds": 6.814464792027138,
+    "cycles": 2103834,
+    "us": 1492.0808510638299,
+    "simulation_wall_seconds": 132.451241458999,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 90500.0,
+        "reads": 53678.0,
+        "writes": 36822.0,
+        "read_bytes": 6870784.0,
+        "write_bytes": 4713216.0,
+        "latency": 856.56
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 5037150408,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101119,
+        "complete": 2103834
+      },
+      "NextState": {
+        "first": 577596,
+        "complete": 587178
+      },
+      "Output": {
+        "first": 2099840,
+        "complete": 2101118
+      },
+      "attn": {
+        "first": 598504,
+        "complete": 599749
+      },
+      "attn_acc": {
+        "first": 587179,
+        "complete": 598503
+      },
+      "ba": {
+        "first": 549473,
+        "complete": 550694
+      },
+      "ba_acc": {
+        "first": 328387,
+        "complete": 549472
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decayed_state": {
+        "first": 550695,
+        "complete": 564311
+      },
+      "down": {
+        "first": 2098594,
+        "complete": 2099839
+      },
+      "down_acc": {
+        "first": 1422446,
+        "complete": 2098593
+      },
+      "gate_up": {
+        "first": 1419630,
+        "complete": 1420999
+      },
+      "gate_up_acc": {
+        "first": 870731,
+        "complete": 1419629
+      },
+      "gated_norm": {
+        "first": 601580,
+        "complete": 608464
+      },
+      "gated_sum": {
+        "first": 599750,
+        "complete": 601579
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 564312,
+        "complete": 567370
+      },
+      "out_proj": {
+        "first": 840494,
+        "complete": 841739
+      },
+      "out_proj_acc": {
+        "first": 608465,
+        "complete": 840493
+      },
+      "post_norm": {
+        "first": 863945,
+        "complete": 870730
+      },
+      "post_norm_sum": {
+        "first": 843019,
+        "complete": 863944
+      },
+      "prediction": {
+        "first": 567371,
+        "complete": 577595
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 841740,
+        "complete": 843018
+      },
+      "swiglu": {
+        "first": 1421000,
+        "complete": 1422445
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 2
+    }
+  },
+  {
+    "candidate": 6,
+    "training_samples_before": 6,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "90537bd789377e80d81f5a2367d3a317eeae242f3d0e33537ebff62590647904",
+    "ir_sha256": "8eebd745f6f88fcb90c84b30a781e461fb78023b5d41b43083a510c7f09c64f2",
+    "build_wall_seconds": 4.249508750042878,
+    "cycles": 2104154,
+    "us": 1492.3078014184398,
+    "simulation_wall_seconds": 140.66994475002866,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91539.0,
+        "reads": 54194.0,
+        "writes": 37345.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4780160.0,
+        "latency": 1056.52
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6783948824,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101435,
+        "complete": 2104154
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594077
+      },
+      "Output": {
+        "first": 2100156,
+        "complete": 2101434
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598813,
+        "complete": 600058
+      },
+      "attn_acc": {
+        "first": 594078,
+        "complete": 598812
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098910,
+        "complete": 2100155
+      },
+      "down_acc": {
+        "first": 1422762,
+        "complete": 2098909
+      },
+      "gate_up": {
+        "first": 1419946,
+        "complete": 1421315
+      },
+      "gate_up_acc": {
+        "first": 871047,
+        "complete": 1419945
+      },
+      "gated_norm": {
+        "first": 601889,
+        "complete": 608780
+      },
+      "gated_sum": {
+        "first": 600059,
+        "complete": 601888
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840810,
+        "complete": 842055
+      },
+      "out_proj_acc": {
+        "first": 608781,
+        "complete": 840809
+      },
+      "post_norm": {
+        "first": 864261,
+        "complete": 871046
+      },
+      "post_norm_sum": {
+        "first": 843335,
+        "complete": 864260
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842056,
+        "complete": 843334
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421316,
+        "complete": 1422761
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 2
+    }
+  },
+  {
+    "candidate": 7,
+    "training_samples_before": 7,
+    "status": "complete",
+    "nodes": 643909,
+    "tir_sha256": "a5b4339e65455bff0160649644fa83d700e70d17b259116fa13d9b5828777a24",
+    "ir_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+    "build_wall_seconds": 5.0964152090018615,
+    "cycles": 2095130,
+    "us": 1485.9078014184397,
+    "simulation_wall_seconds": 133.3268964580493,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91020.0,
+        "reads": 53935.0,
+        "writes": 37085.0,
+        "read_bytes": 6903680.0,
+        "write_bytes": 4746880.0,
+        "latency": 1060.98
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6774462536,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2092411,
+        "complete": 2095130
+      },
+      "NextState": {
+        "first": 577432,
+        "complete": 585060
+      },
+      "Output": {
+        "first": 2091132,
+        "complete": 2092410
+      },
+      "attn": {
+        "first": 589796,
+        "complete": 591041
+      },
+      "attn_acc": {
+        "first": 585061,
+        "complete": 589795
+      },
+      "ba": {
+        "first": 550946,
+        "complete": 552167
+      },
+      "ba_acc": {
+        "first": 329860,
+        "complete": 550945
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decay": {
+        "first": 552168,
+        "complete": 558987
+      },
+      "decayed_state": {
+        "first": 558988,
+        "complete": 566709
+      },
+      "delta": {
+        "first": 575915,
+        "complete": 577431
+      },
+      "down": {
+        "first": 2089886,
+        "complete": 2091131
+      },
+      "down_acc": {
+        "first": 1413738,
+        "complete": 2089885
+      },
+      "gate_up": {
+        "first": 1410922,
+        "complete": 1412291
+      },
+      "gate_up_acc": {
+        "first": 862023,
+        "complete": 1410921
+      },
+      "gated_norm": {
+        "first": 592872,
+        "complete": 599756
+      },
+      "gated_sum": {
+        "first": 591042,
+        "complete": 592871
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 566710,
+        "complete": 569768
+      },
+      "k_norm": {
+        "first": 569769,
+        "complete": 571202
+      },
+      "out_proj": {
+        "first": 831786,
+        "complete": 833031
+      },
+      "out_proj_acc": {
+        "first": 599757,
+        "complete": 831785
+      },
+      "post_norm": {
+        "first": 855237,
+        "complete": 862022
+      },
+      "post_norm_sum": {
+        "first": 834311,
+        "complete": 855236
+      },
+      "prediction": {
+        "first": 571203,
+        "complete": 575914
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "q_norm": {
+        "first": 328387,
+        "complete": 329859
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 833032,
+        "complete": 834310
+      },
+      "swiglu": {
+        "first": 1412292,
+        "complete": 1413737
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 1
+    }
+  },
+  {
+    "candidate": 8,
+    "training_samples_before": 8,
+    "status": "complete",
+    "nodes": 1330412,
+    "tir_sha256": "7b746e225f9f434003dda1ce82b4d809f9da074b5242d951b09ef0d74f9ab8c4",
+    "ir_sha256": "5cba54c6d826e61690305691097033b2436499dabc028f144588278c4cadef35",
+    "build_wall_seconds": 6.64420129195787,
+    "cycles": 2103834,
+    "us": 1492.0808510638299,
+    "simulation_wall_seconds": 156.88717945793178,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 90500.0,
+        "reads": 53678.0,
+        "writes": 36822.0,
+        "read_bytes": 6870784.0,
+        "write_bytes": 4713216.0,
+        "latency": 856.56
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4931473560,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101119,
+        "complete": 2103834
+      },
+      "NextState": {
+        "first": 577596,
+        "complete": 587178
+      },
+      "Output": {
+        "first": 2099840,
+        "complete": 2101118
+      },
+      "attn": {
+        "first": 598504,
+        "complete": 599749
+      },
+      "attn_acc": {
+        "first": 587179,
+        "complete": 598503
+      },
+      "ba": {
+        "first": 549473,
+        "complete": 550694
+      },
+      "ba_acc": {
+        "first": 328387,
+        "complete": 549472
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decayed_state": {
+        "first": 550695,
+        "complete": 564311
+      },
+      "down": {
+        "first": 2098594,
+        "complete": 2099839
+      },
+      "down_acc": {
+        "first": 1422446,
+        "complete": 2098593
+      },
+      "gate_up": {
+        "first": 1419630,
+        "complete": 1420999
+      },
+      "gate_up_acc": {
+        "first": 870731,
+        "complete": 1419629
+      },
+      "gated_norm": {
+        "first": 601580,
+        "complete": 608464
+      },
+      "gated_sum": {
+        "first": 599750,
+        "complete": 601579
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 564312,
+        "complete": 567370
+      },
+      "out_proj": {
+        "first": 840494,
+        "complete": 841739
+      },
+      "out_proj_acc": {
+        "first": 608465,
+        "complete": 840493
+      },
+      "post_norm": {
+        "first": 863945,
+        "complete": 870730
+      },
+      "post_norm_sum": {
+        "first": 843019,
+        "complete": 863944
+      },
+      "prediction": {
+        "first": 567371,
+        "complete": 577595
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 841740,
+        "complete": 843018
+      },
+      "swiglu": {
+        "first": 1421000,
+        "complete": 1422445
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 9,
+    "training_samples_before": 9,
+    "status": "complete",
+    "nodes": 643909,
+    "tir_sha256": "e3f1c091bbde8a1948cf7f259fde8988e4b1886ac628050ee90a4f46f6c3b783",
+    "ir_sha256": "d8b04979a3175b2b8b09e7b8abeb1fe676ba43531f1b8d04c545688d5fa87f9d",
+    "build_wall_seconds": 4.759493499994278,
+    "cycles": 2095130,
+    "us": 1485.9078014184397,
+    "simulation_wall_seconds": 135.74166637507733,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91016.0,
+        "reads": 53935.0,
+        "writes": 37081.0,
+        "read_bytes": 6903680.0,
+        "write_bytes": 4746368.0,
+        "latency": 1056.6
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 4020456856,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2092415,
+        "complete": 2095130
+      },
+      "NextState": {
+        "first": 577432,
+        "complete": 585063
+      },
+      "Output": {
+        "first": 2091136,
+        "complete": 2092414
+      },
+      "attn": {
+        "first": 589800,
+        "complete": 591045
+      },
+      "attn_acc": {
+        "first": 585064,
+        "complete": 589799
+      },
+      "ba": {
+        "first": 550946,
+        "complete": 552167
+      },
+      "ba_acc": {
+        "first": 329860,
+        "complete": 550945
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decay": {
+        "first": 552168,
+        "complete": 558987
+      },
+      "decayed_state": {
+        "first": 558988,
+        "complete": 566709
+      },
+      "delta": {
+        "first": 575915,
+        "complete": 577431
+      },
+      "down": {
+        "first": 2089890,
+        "complete": 2091135
+      },
+      "down_acc": {
+        "first": 1413742,
+        "complete": 2089889
+      },
+      "gate_up": {
+        "first": 1410926,
+        "complete": 1412295
+      },
+      "gate_up_acc": {
+        "first": 862027,
+        "complete": 1410925
+      },
+      "gated_norm": {
+        "first": 592876,
+        "complete": 599760
+      },
+      "gated_sum": {
+        "first": 591046,
+        "complete": 592875
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 566710,
+        "complete": 569768
+      },
+      "k_norm": {
+        "first": 569769,
+        "complete": 571202
+      },
+      "out_proj": {
+        "first": 831790,
+        "complete": 833035
+      },
+      "out_proj_acc": {
+        "first": 599761,
+        "complete": 831789
+      },
+      "post_norm": {
+        "first": 855241,
+        "complete": 862026
+      },
+      "post_norm_sum": {
+        "first": 834315,
+        "complete": 855240
+      },
+      "prediction": {
+        "first": 571203,
+        "complete": 575914
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "q_norm": {
+        "first": 328387,
+        "complete": 329859
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 833036,
+        "complete": 834314
+      },
+      "swiglu": {
+        "first": 1412296,
+        "complete": 1413741
+      }
+    },
+    "choices": {
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 10,
+    "training_samples_before": 10,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "2b11c3084a635a1cf9b50f8cab9fcf525a7630eaace3995314e4b547d0f72a7e",
+    "ir_sha256": "8eebd745f6f88fcb90c84b30a781e461fb78023b5d41b43083a510c7f09c64f2",
+    "build_wall_seconds": 4.250228291028179,
+    "cycles": 2104154,
+    "us": 1492.3078014184398,
+    "simulation_wall_seconds": 129.65374820807483,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91539.0,
+        "reads": 54194.0,
+        "writes": 37345.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4780160.0,
+        "latency": 1056.52
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6820190304,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101435,
+        "complete": 2104154
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594077
+      },
+      "Output": {
+        "first": 2100156,
+        "complete": 2101434
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598813,
+        "complete": 600058
+      },
+      "attn_acc": {
+        "first": 594078,
+        "complete": 598812
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098910,
+        "complete": 2100155
+      },
+      "down_acc": {
+        "first": 1422762,
+        "complete": 2098909
+      },
+      "gate_up": {
+        "first": 1419946,
+        "complete": 1421315
+      },
+      "gate_up_acc": {
+        "first": 871047,
+        "complete": 1419945
+      },
+      "gated_norm": {
+        "first": 601889,
+        "complete": 608780
+      },
+      "gated_sum": {
+        "first": 600059,
+        "complete": 601888
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840810,
+        "complete": 842055
+      },
+      "out_proj_acc": {
+        "first": 608781,
+        "complete": 840809
+      },
+      "post_norm": {
+        "first": 864261,
+        "complete": 871046
+      },
+      "post_norm_sum": {
+        "first": 843335,
+        "complete": 864260
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842056,
+        "complete": 843334
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421316,
+        "complete": 1422761
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 1
+    }
+  },
+  {
+    "candidate": 11,
+    "training_samples_before": 11,
+    "status": "complete",
+    "nodes": 643909,
+    "tir_sha256": "89e5a0df275f8dfb72159631300b4fc4a5b42c9c189c32b439cfd861ae64b7c0",
+    "ir_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+    "build_wall_seconds": 4.522394458996132,
+    "cycles": 2095130,
+    "us": 1485.9078014184397,
+    "simulation_wall_seconds": 128.9873455830384,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91020.0,
+        "reads": 53935.0,
+        "writes": 37085.0,
+        "read_bytes": 6903680.0,
+        "write_bytes": 4746880.0,
+        "latency": 1060.98
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6774183984,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2092411,
+        "complete": 2095130
+      },
+      "NextState": {
+        "first": 577432,
+        "complete": 585060
+      },
+      "Output": {
+        "first": 2091132,
+        "complete": 2092410
+      },
+      "attn": {
+        "first": 589796,
+        "complete": 591041
+      },
+      "attn_acc": {
+        "first": 585061,
+        "complete": 589795
+      },
+      "ba": {
+        "first": 550946,
+        "complete": 552167
+      },
+      "ba_acc": {
+        "first": 329860,
+        "complete": 550945
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decay": {
+        "first": 552168,
+        "complete": 558987
+      },
+      "decayed_state": {
+        "first": 558988,
+        "complete": 566709
+      },
+      "delta": {
+        "first": 575915,
+        "complete": 577431
+      },
+      "down": {
+        "first": 2089886,
+        "complete": 2091131
+      },
+      "down_acc": {
+        "first": 1413738,
+        "complete": 2089885
+      },
+      "gate_up": {
+        "first": 1410922,
+        "complete": 1412291
+      },
+      "gate_up_acc": {
+        "first": 862023,
+        "complete": 1410921
+      },
+      "gated_norm": {
+        "first": 592872,
+        "complete": 599756
+      },
+      "gated_sum": {
+        "first": 591042,
+        "complete": 592871
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 566710,
+        "complete": 569768
+      },
+      "k_norm": {
+        "first": 569769,
+        "complete": 571202
+      },
+      "out_proj": {
+        "first": 831786,
+        "complete": 833031
+      },
+      "out_proj_acc": {
+        "first": 599757,
+        "complete": 831785
+      },
+      "post_norm": {
+        "first": 855237,
+        "complete": 862022
+      },
+      "post_norm_sum": {
+        "first": 834311,
+        "complete": 855236
+      },
+      "prediction": {
+        "first": 571203,
+        "complete": 575914
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "q_norm": {
+        "first": 328387,
+        "complete": 329859
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 833032,
+        "complete": 834310
+      },
+      "swiglu": {
+        "first": 1412292,
+        "complete": 1413737
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 12,
+    "training_samples_before": 12,
+    "status": "complete",
+    "nodes": 1330412,
+    "tir_sha256": "b9c664ef783a0327e0dc6280812926e38add70d02165fb334be4c36cf0057913",
+    "ir_sha256": "510e73f6a6e325b0c132b6ff1b3659d3aca349e507753304f14964294dfec23e",
+    "build_wall_seconds": 7.764231333043426,
+    "cycles": 2103816,
+    "us": 1492.068085106383,
+    "simulation_wall_seconds": 139.77185541694053,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 90507.0,
+        "reads": 53678.0,
+        "writes": 36829.0,
+        "read_bytes": 6870784.0,
+        "write_bytes": 4714112.0,
+        "latency": 854.97
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 7777721184,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101097,
+        "complete": 2103816
+      },
+      "NextState": {
+        "first": 577581,
+        "complete": 587149
+      },
+      "Output": {
+        "first": 2099818,
+        "complete": 2101096
+      },
+      "attn": {
+        "first": 598475,
+        "complete": 599720
+      },
+      "attn_acc": {
+        "first": 587150,
+        "complete": 598474
+      },
+      "ba": {
+        "first": 549473,
+        "complete": 550694
+      },
+      "ba_acc": {
+        "first": 328387,
+        "complete": 549472
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decayed_state": {
+        "first": 550695,
+        "complete": 564296
+      },
+      "down": {
+        "first": 2098572,
+        "complete": 2099817
+      },
+      "down_acc": {
+        "first": 1422424,
+        "complete": 2098571
+      },
+      "gate_up": {
+        "first": 1419608,
+        "complete": 1420977
+      },
+      "gate_up_acc": {
+        "first": 870709,
+        "complete": 1419607
+      },
+      "gated_norm": {
+        "first": 601551,
+        "complete": 608442
+      },
+      "gated_sum": {
+        "first": 599721,
+        "complete": 601550
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 564297,
+        "complete": 567355
+      },
+      "out_proj": {
+        "first": 840472,
+        "complete": 841717
+      },
+      "out_proj_acc": {
+        "first": 608443,
+        "complete": 840471
+      },
+      "post_norm": {
+        "first": 863923,
+        "complete": 870708
+      },
+      "post_norm_sum": {
+        "first": 842997,
+        "complete": 863922
+      },
+      "prediction": {
+        "first": 567356,
+        "complete": 577580
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 841718,
+        "complete": 842996
+      },
+      "swiglu": {
+        "first": 1420978,
+        "complete": 1422423
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 2
+    }
+  },
+  {
+    "candidate": 13,
+    "training_samples_before": 13,
+    "status": "complete",
+    "nodes": 644816,
+    "tir_sha256": "e09808a99c151a1c7c0c0084b0121b1e72d9574ac3e0a3dda3d128923652d868",
+    "ir_sha256": "8eebd745f6f88fcb90c84b30a781e461fb78023b5d41b43083a510c7f09c64f2",
+    "build_wall_seconds": 4.552069499972276,
+    "cycles": 2104154,
+    "us": 1492.3078014184398,
+    "simulation_wall_seconds": 156.91636858298443,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91539.0,
+        "reads": 54194.0,
+        "writes": 37345.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4780160.0,
+        "latency": 1056.52
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6819223624,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2101435,
+        "complete": 2104154
+      },
+      "NextState": {
+        "first": 586449,
+        "complete": 594077
+      },
+      "Output": {
+        "first": 2100156,
+        "complete": 2101434
+      },
+      "a": {
+        "first": 553053,
+        "complete": 559659
+      },
+      "attn": {
+        "first": 598813,
+        "complete": 600058
+      },
+      "attn_acc": {
+        "first": 594078,
+        "complete": 598812
+      },
+      "ba": {
+        "first": 551831,
+        "complete": 553052
+      },
+      "ba_acc": {
+        "first": 330745,
+        "complete": 551830
+      },
+      "beta": {
+        "first": 579409,
+        "complete": 580430
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "conv_silu": {
+        "first": 325328,
+        "complete": 326690
+      },
+      "decay": {
+        "first": 560988,
+        "complete": 567671
+      },
+      "decayed_state": {
+        "first": 567672,
+        "complete": 575393
+      },
+      "delta": {
+        "first": 585143,
+        "complete": 586448
+      },
+      "down": {
+        "first": 2098910,
+        "complete": 2100155
+      },
+      "down_acc": {
+        "first": 1422762,
+        "complete": 2098909
+      },
+      "gate_up": {
+        "first": 1419946,
+        "complete": 1421315
+      },
+      "gate_up_acc": {
+        "first": 871047,
+        "complete": 1419945
+      },
+      "gated_norm": {
+        "first": 601889,
+        "complete": 608780
+      },
+      "gated_sum": {
+        "first": 600059,
+        "complete": 601888
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k": {
+        "first": 575394,
+        "complete": 576639
+      },
+      "k_l2": {
+        "first": 576640,
+        "complete": 578080
+      },
+      "k_norm": {
+        "first": 578081,
+        "complete": 579408
+      },
+      "out_proj": {
+        "first": 840810,
+        "complete": 842055
+      },
+      "out_proj_acc": {
+        "first": 608781,
+        "complete": 840809
+      },
+      "post_norm": {
+        "first": 864261,
+        "complete": 871046
+      },
+      "post_norm_sum": {
+        "first": 843335,
+        "complete": 864260
+      },
+      "prediction": {
+        "first": 580431,
+        "complete": 585142
+      },
+      "q": {
+        "first": 326691,
+        "complete": 327936
+      },
+      "q_l2": {
+        "first": 327937,
+        "complete": 329377
+      },
+      "q_norm": {
+        "first": 329378,
+        "complete": 330744
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 842056,
+        "complete": 843334
+      },
+      "softplus": {
+        "first": 559660,
+        "complete": 560987
+      },
+      "swiglu": {
+        "first": 1421316,
+        "complete": 1422761
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 0
+    }
+  },
+  {
+    "candidate": 14,
+    "training_samples_before": 14,
+    "status": "complete",
+    "nodes": 643909,
+    "tir_sha256": "e3b9d157dba133ca05f97b68faa92989f1f4e42125a2daa06dcf90222fba226a",
+    "ir_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+    "build_wall_seconds": 5.350790249998681,
+    "cycles": 2095130,
+    "us": 1485.9078014184397,
+    "simulation_wall_seconds": 135.33231787499972,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91020.0,
+        "reads": 53935.0,
+        "writes": 37085.0,
+        "read_bytes": 6903680.0,
+        "write_bytes": 4746880.0,
+        "latency": 1060.98
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 10493.94
+      }
+    },
+    "maximum_process_memory_bytes": 6774102064,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 2092411,
+        "complete": 2095130
+      },
+      "NextState": {
+        "first": 577432,
+        "complete": 585060
+      },
+      "Output": {
+        "first": 2091132,
+        "complete": 2092410
+      },
+      "attn": {
+        "first": 589796,
+        "complete": 591041
+      },
+      "attn_acc": {
+        "first": 585061,
+        "complete": 589795
+      },
+      "ba": {
+        "first": 550946,
+        "complete": 552167
+      },
+      "ba_acc": {
+        "first": 329860,
+        "complete": 550945
+      },
+      "conv": {
+        "first": 318415,
+        "complete": 325327
+      },
+      "decay": {
+        "first": 552168,
+        "complete": 558987
+      },
+      "decayed_state": {
+        "first": 558988,
+        "complete": 566709
+      },
+      "delta": {
+        "first": 575915,
+        "complete": 577431
+      },
+      "down": {
+        "first": 2089886,
+        "complete": 2091131
+      },
+      "down_acc": {
+        "first": 1413738,
+        "complete": 2089885
+      },
+      "gate_up": {
+        "first": 1410922,
+        "complete": 1412291
+      },
+      "gate_up_acc": {
+        "first": 862023,
+        "complete": 1410921
+      },
+      "gated_norm": {
+        "first": 592872,
+        "complete": 599756
+      },
+      "gated_sum": {
+        "first": 591042,
+        "complete": 592871
+      },
+      "input_norm": {
+        "first": 20925,
+        "complete": 27710
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 20924
+      },
+      "k_l2": {
+        "first": 566710,
+        "complete": 569768
+      },
+      "k_norm": {
+        "first": 569769,
+        "complete": 571202
+      },
+      "out_proj": {
+        "first": 831786,
+        "complete": 833031
+      },
+      "out_proj_acc": {
+        "first": 599757,
+        "complete": 831785
+      },
+      "post_norm": {
+        "first": 855237,
+        "complete": 862022
+      },
+      "post_norm_sum": {
+        "first": 834311,
+        "complete": 855236
+      },
+      "prediction": {
+        "first": 571203,
+        "complete": 575914
+      },
+      "q_l2": {
+        "first": 325328,
+        "complete": 328386
+      },
+      "q_norm": {
+        "first": 328387,
+        "complete": 329859
+      },
+      "qkvz": {
+        "first": 317119,
+        "complete": 318414
+      },
+      "qkvz_acc": {
+        "first": 27711,
+        "complete": 317118
+      },
+      "residual": {
+        "first": 833032,
+        "complete": 834310
+      },
+      "swiglu": {
+        "first": 1412292,
+        "complete": 1413737
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 128,
+      "warps": 2,
+      "stages": 1,
+      "inline": 2
+    }
+  },
+  {
+    "candidate": 15,
+    "training_samples_before": 15,
+    "status": "complete",
+    "nodes": 965978,
+    "tir_sha256": "a62bf5c7552837ff72f1da0001a522e2d5e50bc979886a4426f05f11f0ed54e5",
+    "ir_sha256": "b052d9447f1663b3f0233982a4e45face5ba7b1864d89d62eab048f6a4fc99e3",
+    "build_wall_seconds": 6.078115792013705,
+    "cycles": 3231252,
+    "us": 2291.668085106383,
+    "simulation_wall_seconds": 183.11150983301923,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 91539.0,
+        "reads": 54194.0,
+        "writes": 37345.0,
+        "read_bytes": 6936832.0,
+        "write_bytes": 4780160.0,
+        "latency": 878.84
+      },
+      "HBF": {
+        "requests": 3412612.0,
+        "reads": 3412612.0,
+        "writes": 0.0,
+        "read_bytes": 436814336.0,
+        "write_bytes": 0.0,
+        "latency": 6602.01
+      }
+    },
+    "maximum_process_memory_bytes": 7239457008,
+    "stage_timings": {
+      "NextConvState": {
+        "first": 3228533,
+        "complete": 3231252
+      },
+      "NextState": {
+        "first": 934872,
+        "complete": 942500
+      },
+      "Output": {
+        "first": 3227254,
+        "complete": 3228532
+      },
+      "a": {
+        "first": 900302,
+        "complete": 906908
+      },
+      "attn": {
+        "first": 947789,
+        "complete": 949034
+      },
+      "attn_acc": {
+        "first": 942501,
+        "complete": 947788
+      },
+      "ba": {
+        "first": 899080,
+        "complete": 900301
+      },
+      "ba_acc": {
+        "first": 486282,
+        "complete": 899079
+      },
+      "beta": {
+        "first": 927269,
+        "complete": 928290
+      },
+      "conv": {
+        "first": 473341,
+        "complete": 480253
+      },
+      "conv_silu": {
+        "first": 480254,
+        "complete": 481616
+      },
+      "decay": {
+        "first": 908237,
+        "complete": 914920
+      },
+      "decayed_state": {
+        "first": 914921,
+        "complete": 922642
+      },
+      "delta": {
+        "first": 933566,
+        "complete": 934871
+      },
+      "down": {
+        "first": 3226008,
+        "complete": 3227253
+      },
+      "down_acc": {
+        "first": 1980676,
+        "complete": 3226007
+      },
+      "gate_up": {
+        "first": 1977860,
+        "complete": 1979229
+      },
+      "gate_up_acc": {
+        "first": 1426774,
+        "complete": 1977859
+      },
+      "gated_norm": {
+        "first": 951481,
+        "complete": 958372
+      },
+      "gated_sum": {
+        "first": 949035,
+        "complete": 951480
+      },
+      "input_norm": {
+        "first": 40637,
+        "complete": 47422
+      },
+      "input_norm_sum": {
+        "first": 1,
+        "complete": 40636
+      },
+      "k": {
+        "first": 922643,
+        "complete": 923888
+      },
+      "k_l2": {
+        "first": 923889,
+        "complete": 925940
+      },
+      "k_norm": {
+        "first": 925941,
+        "complete": 927268
+      },
+      "out_proj": {
+        "first": 1376825,
+        "complete": 1378070
+      },
+      "out_proj_acc": {
+        "first": 958373,
+        "complete": 1376824
+      },
+      "post_norm": {
+        "first": 1419988,
+        "complete": 1426773
+      },
+      "post_norm_sum": {
+        "first": 1379350,
+        "complete": 1419987
+      },
+      "prediction": {
+        "first": 928291,
+        "complete": 933565
+      },
+      "q": {
+        "first": 481617,
+        "complete": 482862
+      },
+      "q_l2": {
+        "first": 482863,
+        "complete": 484914
+      },
+      "q_norm": {
+        "first": 484915,
+        "complete": 486281
+      },
+      "qkvz": {
+        "first": 472045,
+        "complete": 473340
+      },
+      "qkvz_acc": {
+        "first": 47423,
+        "complete": 472044
+      },
+      "residual": {
+        "first": 1378071,
+        "complete": 1379349
+      },
+      "softplus": {
+        "first": 906909,
+        "complete": 908236
+      },
+      "swiglu": {
+        "first": 1979230,
+        "complete": 1980675
+      }
+    },
+    "choices": {
+      "output_tile": 64,
+      "reduction_tile": 64,
+      "warps": 2,
+      "stages": 1,
+      "inline": 2
+    }
+  }
+]

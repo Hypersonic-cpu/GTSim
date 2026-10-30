@@ -1,0 +1,206 @@
+[
+  {
+    "architecture": "5M",
+    "stages": 1,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 56585,
+    "us": 40.13120567375886,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 262528.0,
+        "reads": 262336.0,
+        "writes": 192.0,
+        "read_bytes": 33579008.0,
+        "write_bytes": 24576.0,
+        "latency": 292.0
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "nominal_B_tile_window_bytes": 1048576,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  },
+  {
+    "architecture": "5M",
+    "stages": 2,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 42764,
+    "us": 30.329078014184397,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 262528.0,
+        "reads": 262336.0,
+        "writes": 192.0,
+        "read_bytes": 33579008.0,
+        "write_bytes": 24576.0,
+        "latency": 292.0
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "nominal_B_tile_window_bytes": 2097152,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  },
+  {
+    "architecture": "5M",
+    "stages": 3,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 42535,
+    "us": 30.166666666666668,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 262528.0,
+        "reads": 262336.0,
+        "writes": 192.0,
+        "read_bytes": 33579008.0,
+        "write_bytes": 24576.0,
+        "latency": 292.0
+      },
+      "HBF": {
+        "requests": 0.0,
+        "reads": 0.0,
+        "writes": 0.0,
+        "read_bytes": 0.0,
+        "write_bytes": 0.0,
+        "latency": 0.0
+      }
+    },
+    "nominal_B_tile_window_bytes": 3145728,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  },
+  {
+    "architecture": "3M2F",
+    "stages": 1,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 233273,
+    "us": 165.44184397163122,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 384.0,
+        "reads": 192.0,
+        "writes": 192.0,
+        "read_bytes": 24576.0,
+        "write_bytes": 24576.0,
+        "latency": 294.75
+      },
+      "HBF": {
+        "requests": 262144.0,
+        "reads": 262144.0,
+        "writes": 0.0,
+        "read_bytes": 33554432.0,
+        "write_bytes": 0.0,
+        "latency": 5754.39
+      }
+    },
+    "nominal_B_tile_window_bytes": 1048576,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  },
+  {
+    "architecture": "3M2F",
+    "stages": 2,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 127978,
+    "us": 90.7645390070922,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 384.0,
+        "reads": 192.0,
+        "writes": 192.0,
+        "read_bytes": 24576.0,
+        "write_bytes": 24576.0,
+        "latency": 294.73
+      },
+      "HBF": {
+        "requests": 262144.0,
+        "reads": 262144.0,
+        "writes": 0.0,
+        "read_bytes": 33554432.0,
+        "write_bytes": 0.0,
+        "latency": 5992.3
+      }
+    },
+    "nominal_B_tile_window_bytes": 2097152,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  },
+  {
+    "architecture": "3M2F",
+    "stages": 3,
+    "fixed": {
+      "N": 4096,
+      "K": 4096,
+      "output_tile": 128,
+      "reduction_tile": 128,
+      "warps": 4
+    },
+    "cycles": 106157,
+    "us": 75.2886524822695,
+    "memory_statistics": {
+      "HBM": {
+        "requests": 384.0,
+        "reads": 192.0,
+        "writes": 192.0,
+        "read_bytes": 24576.0,
+        "write_bytes": 24576.0,
+        "latency": 294.71
+      },
+      "HBF": {
+        "requests": 262144.0,
+        "reads": 262144.0,
+        "writes": 0.0,
+        "read_bytes": 33554432.0,
+        "write_bytes": 0.0,
+        "latency": 7253.92
+      }
+    },
+    "nominal_B_tile_window_bytes": 3145728,
+    "window_definition": "32 CTA * BK128 * BN128 * BF16 * stages; capacity proxy, not measured in-flight bytes",
+    "learned_weight_bytes": 33554432
+  }
+]

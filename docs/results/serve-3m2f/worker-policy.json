@@ -1,5 +1,8 @@
 {
   "maximum_simulation_bytes": 3772419264,
   "jobs": 1,
-  "threshold_bytes": 3000000000
+  "threshold_bytes": 3000000000,
+  "current_study_maximum_process_memory_bytes": 7777721184,
+  "current_study_jobs": 1,
+  "measurement": "Maximum of /usr/bin/time maximum RSS and peak footprint across completed study candidates"
 }

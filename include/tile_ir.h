@@ -38,12 +38,15 @@ struct TileIROperation {
     Tile region;
     std::vector<int> after_issue;
     std::vector<int> after_complete;
+    int granularity_bytes{4};
+    Layout layout{Layout::RowMajor};
 };
 
 struct TileIR {
     std::vector<TileIRTensor> tensors;
     std::vector<TileIRCTA> ctas;
     std::vector<TileIROperation> operations;
+    int version{1};
 };
 
 TileIR parse_tile_ir(std::istream& input);

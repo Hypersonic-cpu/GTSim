@@ -16,6 +16,11 @@ max_concurrent_blocks_per_sm: 32
 tensor_core_throughput: 128
 tensor_core_latency_cycles: 16
 tensor_core_width: 16
+# GA100: 64 FP32 cores/SM, four subpartitions -> 16 FP32 FMA lanes/SP.
+# A 32-lane SIMD instruction occupies this pipeline for two cycles.
+# Nominal dense FP32: 108 * 4 * 16 * 2 * 1.410 GHz = 19.49184 TFLOP/s.
+simd_throughput: 32
+simd_width: 16
 l2_cache_size_bytes: 41943040
 l2_hit_latency_cycles: 300
 l2_bandwidth_bytes_per_cycle: 1853

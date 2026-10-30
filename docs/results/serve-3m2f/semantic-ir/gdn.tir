@@ -5,7 +5,7 @@
 @I.ir_module
 class Module:
     @T.prim_func(s_tir=True)
-    def main(X: T.Buffer((1, 4096), "bfloat16"), W_qkvz: T.Buffer((4096, 12288), "bfloat16"), W_ba: T.Buffer((4096, 64), "bfloat16"), W_out: T.Buffer((4096, 4096), "bfloat16"), W_gate_up: T.Buffer((4096, 24576), "bfloat16"), W_down: T.Buffer((12288, 4096), "bfloat16"), W_conv: T.Buffer((8192, 4), "bfloat16"), W_input_norm: T.Buffer((4096,), "float32"), W_post_norm: T.Buffer((4096,), "float32"), W_gated_norm: T.Buffer((128,), "float32"), A_log: T.Buffer((32,), "float32"), dt_bias: T.Buffer((32,), "float32"), ConvState: T.Buffer((1, 8192, 3), "bfloat16"), State: T.Buffer((1, 32, 128, 128), "float32"), Output: T.Buffer((1, 4096), "bfloat16"), NextState: T.Buffer((1, 32, 128, 128), "float32"), NextConvState: T.Buffer((1, 8192, 3), "bfloat16")):
+    def main(X: T.Buffer((1, 4096), "bfloat16"), W_qkvz: T.Buffer((4096, 12288), "bfloat16"), W_ba: T.Buffer((4096, 64), "bfloat16"), W_out: T.Buffer((4096, 4096), "bfloat16"), W_gate_up: T.Buffer((4096, 24576), "bfloat16"), W_down: T.Buffer((12288, 4096), "bfloat16"), W_conv: T.Buffer((8192, 4), "bfloat16"), W_input_norm: T.Buffer((4096,), "bfloat16"), W_post_norm: T.Buffer((4096,), "bfloat16"), W_gated_norm: T.Buffer((128,), "bfloat16"), A_log: T.Buffer((32,), "bfloat16"), dt_bias: T.Buffer((32,), "bfloat16"), ConvState: T.Buffer((1, 8192, 4), "bfloat16"), State: T.Buffer((1, 32, 128, 128), "float32"), Output: T.Buffer((1, 4096), "bfloat16"), NextState: T.Buffer((1, 32, 128, 128), "float32"), NextConvState: T.Buffer((1, 8192, 4), "bfloat16")):
         T.func_attr({"gtsim.semantic_tensor_tiers": "{\"A_log\": \"HBF\", \"ConvState\": \"HBM\", \"NextConvState\": \"HBM\", \"NextState\": \"HBM\", \"Output\": \"HBM\", \"State\": \"HBM\", \"W_ba\": \"HBF\", \"W_conv\": \"HBF\", \"W_down\": \"HBF\", \"W_gate_up\": \"HBF\", \"W_gated_norm\": \"HBF\", \"W_input_norm\": \"HBF\", \"W_out\": \"HBF\", \"W_post_norm\": \"HBF\", \"W_qkvz\": \"HBF\", \"X\": \"HBM\", \"dt_bias\": \"HBF\"}", "tirx.noalias": True})
         # with T.sblock("root"):
         input_norm_sum = T.sblock_alloc_buffer((1,))
@@ -29,7 +29,8 @@ class Module:
         beta = T.sblock_alloc_buffer((1, 32))
         prediction = T.sblock_alloc_buffer((1, 32, 128))
         delta = T.sblock_alloc_buffer((1, 32, 128))
-        attn = T.sblock_alloc_buffer((1, 32, 128))
+        attn_acc = T.sblock_alloc_buffer((1, 32, 128))
+        attn = T.sblock_alloc_buffer((1, 32, 128), "bfloat16")
         gated_sum = T.sblock_alloc_buffer((1, 32))
         gated_norm = T.sblock_alloc_buffer((1, 4096), "bfloat16")
         out_proj_acc = T.sblock_alloc_buffer((1, 4096))
@@ -55,7 +56,7 @@ class Module:
                 v_b, v_d = T.axis.remap("SS", [b, d])
                 T.reads(X[v_b, v_d], input_norm_sum[v_b], W_input_norm[v_d])
                 T.writes(input_norm[v_b, v_d])
-                input_norm[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", X[v_b, v_d]) / T.sqrt(input_norm_sum[v_b] / T.float32(4096.0) + T.float32(9.9999999999999995e-07)) * (T.float32(1.0) + W_input_norm[v_d]))
+                input_norm[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", X[v_b, v_d]) / T.sqrt(input_norm_sum[v_b] / T.float32(4096.0) + T.float32(9.9999999999999995e-07)) * (T.float32(1.0) + T.Cast("float32", W_input_norm[v_d])))
         for b, j, qkvz_k in T.grid(1, 12288, 4096):
             with T.sblock("qkvz_acc"):
                 v_b, v_j, v_qkvz_k = T.axis.remap("SSR", [b, j, qkvz_k])
@@ -73,9 +74,9 @@ class Module:
         for b, c in T.grid(1, 8192):
             with T.sblock("conv"):
                 v_b, v_c = T.axis.remap("SS", [b, c])
-                T.reads(ConvState[v_b, v_c, 0:3], W_conv[v_c, 0:4], qkvz[v_b, v_c])
+                T.reads(ConvState[v_b, v_c, 1:4], W_conv[v_c, 0:4], qkvz[v_b, v_c])
                 T.writes(conv[v_b, v_c])
-                conv[v_b, v_c] = T.Cast("float32", ConvState[v_b, v_c, 0]) * T.Cast("float32", W_conv[v_c, 0]) + T.Cast("float32", ConvState[v_b, v_c, 1]) * T.Cast("float32", W_conv[v_c, 1]) + T.Cast("float32", ConvState[v_b, v_c, 2]) * T.Cast("float32", W_conv[v_c, 2]) + T.Cast("float32", qkvz[v_b, v_c]) * T.Cast("float32", W_conv[v_c, 3])
+                conv[v_b, v_c] = T.Cast("float32", ConvState[v_b, v_c, 1]) * T.Cast("float32", W_conv[v_c, 0]) + T.Cast("float32", ConvState[v_b, v_c, 2]) * T.Cast("float32", W_conv[v_c, 1]) + T.Cast("float32", ConvState[v_b, v_c, 3]) * T.Cast("float32", W_conv[v_c, 2]) + T.Cast("float32", qkvz[v_b, v_c]) * T.Cast("float32", W_conv[v_c, 3])
         for b, c in T.grid(1, 8192):
             with T.sblock("conv_silu"):
                 v_b, v_c = T.axis.remap("SS", [b, c])
@@ -121,7 +122,7 @@ class Module:
                 v_b, v_h = T.axis.remap("SS", [b, h])
                 T.reads(ba[v_b, v_h + 32], dt_bias[v_h])
                 T.writes(a[v_b, v_h])
-                a[v_b, v_h] = T.Cast("float32", ba[v_b, v_h + 32]) + dt_bias[v_h]
+                a[v_b, v_h] = T.Cast("float32", ba[v_b, v_h + 32]) + T.Cast("float32", dt_bias[v_h])
         for b, h in T.grid(1, 32):
             with T.sblock("softplus"):
                 v_b, v_h = T.axis.remap("SS", [b, h])
@@ -133,7 +134,7 @@ class Module:
                 v_b, v_h = T.axis.remap("SS", [b, h])
                 T.reads(A_log[v_h], softplus[v_b, v_h])
                 T.writes(decay[v_b, v_h])
-                decay[v_b, v_h] = T.exp(T.exp(A_log[v_h]) * T.float32(-1.0) * softplus[v_b, v_h])
+                decay[v_b, v_h] = T.exp(T.exp(T.Cast("float32", A_log[v_h])) * T.float32(-1.0) * softplus[v_b, v_h])
         for b, h, i, j in T.grid(1, 32, 128, 128):
             with T.sblock("decayed_state"):
                 v_b, v_h, v_i, v_j = T.axis.remap("SSSS", [b, h, i, j])
@@ -187,13 +188,19 @@ class Module:
                 T.writes(NextState[v_b, v_h, v_i, v_j])
                 NextState[v_b, v_h, v_i, v_j] = decayed_state[v_b, v_h, v_i, v_j] + k_norm[v_b, v_h // 2, v_i] * delta[v_b, v_h, v_j]
         for b, h, j, out_k in T.grid(1, 32, 128, 128):
-            with T.sblock("attn"):
+            with T.sblock("attn_acc"):
                 v_b, v_h, v_j, v_out_k = T.axis.remap("SSSR", [b, h, j, out_k])
                 T.reads(q_norm[v_b, v_h // 2, v_out_k], NextState[v_b, v_h, v_out_k, v_j])
-                T.writes(attn[v_b, v_h, v_j])
+                T.writes(attn_acc[v_b, v_h, v_j])
                 with T.init():
-                    attn[v_b, v_h, v_j] = T.float32(0.0)
-                attn[v_b, v_h, v_j] = attn[v_b, v_h, v_j] + q_norm[v_b, v_h // 2, v_out_k] * NextState[v_b, v_h, v_out_k, v_j]
+                    attn_acc[v_b, v_h, v_j] = T.float32(0.0)
+                attn_acc[v_b, v_h, v_j] = attn_acc[v_b, v_h, v_j] + q_norm[v_b, v_h // 2, v_out_k] * NextState[v_b, v_h, v_out_k, v_j]
+        for b, h, j in T.grid(1, 32, 128):
+            with T.sblock("attn"):
+                v_b, v_h, v_j = T.axis.remap("SSS", [b, h, j])
+                T.reads(attn_acc[v_b, v_h, v_j])
+                T.writes(attn[v_b, v_h, v_j])
+                attn[v_b, v_h, v_j] = T.Cast("bfloat16", attn_acc[v_b, v_h, v_j])
         for b, h, out_norm_d in T.grid(1, 32, 128):
             with T.sblock("gated_sum"):
                 v_b, v_h, v_out_norm_d = T.axis.remap("SSR", [b, h, out_norm_d])
@@ -201,13 +208,13 @@ class Module:
                 T.writes(gated_sum[v_b, v_h])
                 with T.init():
                     gated_sum[v_b, v_h] = T.float32(0.0)
-                gated_sum[v_b, v_h] = gated_sum[v_b, v_h] + attn[v_b, v_h, v_out_norm_d] * attn[v_b, v_h, v_out_norm_d]
+                gated_sum[v_b, v_h] = gated_sum[v_b, v_h] + T.Cast("float32", attn[v_b, v_h, v_out_norm_d]) * T.Cast("float32", attn[v_b, v_h, v_out_norm_d])
         for b, d in T.grid(1, 4096):
             with T.sblock("gated_norm"):
                 v_b, v_d = T.axis.remap("SS", [b, d])
                 T.reads(attn[v_b, v_d // 128, v_d % 128], gated_sum[v_b, v_d // 128], W_gated_norm[v_d % 128], qkvz[v_b, v_d + 8192])
                 T.writes(gated_norm[v_b, v_d])
-                gated_norm[v_b, v_d] = T.Cast("bfloat16", attn[v_b, v_d // 128, v_d % 128] / T.sqrt(gated_sum[v_b, v_d // 128] / T.float32(128.0) + T.float32(9.9999999999999995e-07)) * W_gated_norm[v_d % 128] * T.Cast("float32", qkvz[v_b, v_d + 8192]) / (T.float32(1.0) + T.exp(T.Cast("float32", qkvz[v_b, v_d + 8192]) * T.float32(-1.0))))
+                gated_norm[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", attn[v_b, v_d // 128, v_d % 128]) / T.sqrt(gated_sum[v_b, v_d // 128] / T.float32(128.0) + T.float32(9.9999999999999995e-07)) * T.Cast("float32", W_gated_norm[v_d % 128]) * T.Cast("float32", qkvz[v_b, v_d + 8192]) / (T.float32(1.0) + T.exp(T.Cast("float32", qkvz[v_b, v_d + 8192]) * T.float32(-1.0))))
         for b, j, out_proj_k in T.grid(1, 4096, 4096):
             with T.sblock("out_proj_acc"):
                 v_b, v_j, v_out_proj_k = T.axis.remap("SSR", [b, j, out_proj_k])
@@ -241,7 +248,7 @@ class Module:
                 v_b, v_d = T.axis.remap("SS", [b, d])
                 T.reads(residual[v_b, v_d], post_norm_sum[v_b], W_post_norm[v_d])
                 T.writes(post_norm[v_b, v_d])
-                post_norm[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", residual[v_b, v_d]) / T.sqrt(post_norm_sum[v_b] / T.float32(4096.0) + T.float32(9.9999999999999995e-07)) * (T.float32(1.0) + W_post_norm[v_d]))
+                post_norm[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", residual[v_b, v_d]) / T.sqrt(post_norm_sum[v_b] / T.float32(4096.0) + T.float32(9.9999999999999995e-07)) * (T.float32(1.0) + T.Cast("float32", W_post_norm[v_d])))
         for b, j, gate_up_k in T.grid(1, 24576, 4096):
             with T.sblock("gate_up_acc"):
                 v_b, v_j, v_gate_up_k = T.axis.remap("SSR", [b, j, gate_up_k])
@@ -282,9 +289,9 @@ class Module:
                 T.reads(residual[v_b, v_d], down[v_b, v_d])
                 T.writes(Output[v_b, v_d])
                 Output[v_b, v_d] = T.Cast("bfloat16", T.Cast("float32", residual[v_b, v_d]) + T.Cast("float32", down[v_b, v_d]))
-        for b, c, t in T.grid(1, 8192, 3):
+        for b, c, t in T.grid(1, 8192, 4):
             with T.sblock("NextConvState"):
                 v_b, v_c, v_t = T.axis.remap("SSS", [b, c, t])
                 T.reads(ConvState[v_b, v_c, v_t + 1], qkvz[v_b, v_c])
                 T.writes(NextConvState[v_b, v_c, v_t])
-                NextConvState[v_b, v_c, v_t] = T.if_then_else(v_t < 2, ConvState[v_b, v_c, v_t + 1], qkvz[v_b, v_c])
+                NextConvState[v_b, v_c, v_t] = T.if_then_else(v_t < 3, ConvState[v_b, v_c, v_t + 1], qkvz[v_b, v_c])

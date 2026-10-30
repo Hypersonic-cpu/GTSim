@@ -50,6 +50,7 @@ Fields fields(std::istringstream& line, std::initializer_list<const char*> keys)
 }
 
 DataType dtype(const std::string& name) {
+    if (name == "bf16") return DataType::BF16;
     if (name == "fp16") return DataType::FP16;
     if (name == "fp32") return DataType::FP32;
     throw std::invalid_argument("unsupported dtype '" + name + "'");
@@ -77,8 +78,9 @@ TileIR parse_tile_ir(std::istream& input) {
         try {
             if (!header) {
                 std::string version, extra;
-                if (kind != "gtsim.tile_ir" || !(stream >> version) || version != "1" || stream >> extra)
-                    throw std::invalid_argument("expected gtsim.tile_ir 1");
+                if (kind != "gtsim.tile_ir" || !(stream >> version) || (version != "1" && version != "2") || stream >> extra)
+                    throw std::invalid_argument("expected gtsim.tile_ir 1 or 2");
+                ir.version = integer(version);
                 header = true;
             } else if (kind == "tensor") {
                 auto f = fields(stream, {"id", "name", "shape", "strides", "dtype", "tier"});
@@ -96,7 +98,9 @@ TileIR parse_tile_ir(std::istream& input) {
                 std::string equals, op;
                 if (!(stream >> equals >> op) || equals != "=")
                     throw std::invalid_argument("expected %id = operation");
-                auto f = fields(stream, {"name", "cta", "warp", "tensor", "dtype", "tile", "after_issue", "after_complete"});
+                auto f = ir.version == 1
+                    ? fields(stream, {"name", "cta", "warp", "tensor", "dtype", "tile", "after_issue", "after_complete"})
+                    : fields(stream, {"name", "cta", "warp", "tensor", "dtype", "tile", "after_issue", "after_complete", "granularity", "layout"});
                 auto tile = list(f.at("tile"));
                 if (tile.size() != 4 || tile[2] == 0 || tile[3] == 0 ||
                     tile[2] > std::numeric_limits<int>::max() / tile[3])
@@ -104,6 +108,13 @@ TileIR parse_tile_ir(std::istream& input) {
                 ir.operations.push_back({id, f.at("name"), op, integer(f.at("cta")), integer(f.at("warp")),
                     integer(f.at("tensor")), dtype(f.at("dtype")), Tile(tile[0], tile[1], tile[2], tile[3]),
                     list(f.at("after_issue")), list(f.at("after_complete"))});
+                if (ir.version == 2) {
+                    auto& operation = ir.operations.back();
+                    operation.granularity_bytes = integer(f.at("granularity"));
+                    if (f.at("layout") != "row" && f.at("layout") != "swizzled")
+                        throw std::invalid_argument("unknown memory layout");
+                    operation.layout = f.at("layout") == "swizzled" ? Layout::Swizzled : Layout::RowMajor;
+                }
             } else {
                 throw std::invalid_argument("unsupported statement '" + kind + "'");
             }
@@ -113,6 +124,8 @@ TileIR parse_tile_ir(std::istream& input) {
     }
     if (input.bad()) throw std::runtime_error("error reading Tile IR");
     if (!header) throw std::invalid_argument("missing Tile IR header");
+    if (ir.version == 2 && (ir.tensors.empty() || ir.ctas.empty() || ir.operations.empty()))
+        throw std::invalid_argument("empty version 2 program");
     return ir;
 }
 

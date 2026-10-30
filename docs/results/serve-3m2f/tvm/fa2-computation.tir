@@ -1,0 +1,66 @@
+# from tvm.script import ir as I
+# from tvm.script import tirx as T
+# from tvm.tirx.layout import Axis
+
+@I.ir_module
+class Module:
+    @T.prim_func(s_tir=True)
+    def main(Q: T.Buffer((1, 16, 256), "bfloat16"), K: T.Buffer((1, 4, 32768, 256), "bfloat16"), V: T.Buffer((1, 4, 32768, 256), "bfloat16"), O: T.Buffer((1, 16, 256), "bfloat16")):
+        T.func_attr({"gtsim.semantic_tensor_tiers": "{\"K\": \"HBM\", \"O\": \"HBM\", \"Q\": \"HBM\", \"V\": \"HBM\"}", "tirx.noalias": True})
+        # with T.sblock("root"):
+        raw_score = T.sblock_alloc_buffer((1, 16, 32768))
+        score = T.sblock_alloc_buffer((1, 16, 32768))
+        row_max = T.sblock_alloc_buffer((1, 16))
+        exp = T.sblock_alloc_buffer((1, 16, 32768))
+        raw_o = T.sblock_alloc_buffer((1, 16, 256))
+        row_sum = T.sblock_alloc_buffer((1, 16))
+        for b, h, t, d in T.grid(1, 16, 32768, 256):
+            with T.sblock("raw_score"):
+                v_b, v_h, v_t, v_d = T.axis.remap("SSSR", [b, h, t, d])
+                T.reads(Q[v_b, v_h, v_d], K[v_b, v_h // 4, v_t, v_d])
+                T.writes(raw_score[v_b, v_h, v_t])
+                with T.init():
+                    raw_score[v_b, v_h, v_t] = T.float32(0.0)
+                raw_score[v_b, v_h, v_t] = raw_score[v_b, v_h, v_t] + T.Cast("float32", Q[v_b, v_h, v_d]) * T.Cast("float32", K[v_b, v_h // 4, v_t, v_d])
+        for b, h, t in T.grid(1, 16, 32768):
+            with T.sblock("score"):
+                v_b, v_h, v_t = T.axis.remap("SSS", [b, h, t])
+                T.reads(raw_score[v_b, v_h, v_t])
+                T.writes(score[v_b, v_h, v_t])
+                score[v_b, v_h, v_t] = raw_score[v_b, v_h, v_t] / T.float32(16.0)
+        for b, h, t_max in T.grid(1, 16, 32768):
+            with T.sblock("row_max"):
+                v_b, v_h, v_t_max = T.axis.remap("SSR", [b, h, t_max])
+                T.reads(score[v_b, v_h, v_t_max])
+                T.writes(row_max[v_b, v_h])
+                with T.init():
+                    row_max[v_b, v_h] = T.float32(-340282346638528859811704183484516925440.0)
+                row_max[v_b, v_h] = T.max(row_max[v_b, v_h], score[v_b, v_h, v_t_max])
+        for b, h, t in T.grid(1, 16, 32768):
+            with T.sblock("exp"):
+                v_b, v_h, v_t = T.axis.remap("SSS", [b, h, t])
+                T.reads(score[v_b, v_h, v_t], row_max[v_b, v_h])
+                T.writes(exp[v_b, v_h, v_t])
+                exp[v_b, v_h, v_t] = T.exp(score[v_b, v_h, v_t] - row_max[v_b, v_h])
+        for b, h, d, t_out in T.grid(1, 16, 256, 32768):
+            with T.sblock("raw_o"):
+                v_b, v_h, v_d, v_t_out = T.axis.remap("SSSR", [b, h, d, t_out])
+                T.reads(exp[v_b, v_h, v_t_out], V[v_b, v_h // 4, v_t_out, v_d])
+                T.writes(raw_o[v_b, v_h, v_d])
+                with T.init():
+                    raw_o[v_b, v_h, v_d] = T.float32(0.0)
+                raw_o[v_b, v_h, v_d] = raw_o[v_b, v_h, v_d] + exp[v_b, v_h, v_t_out] * T.Cast("float32", V[v_b, v_h // 4, v_t_out, v_d])
+        for b, h, t_sum in T.grid(1, 16, 32768):
+            with T.sblock("row_sum"):
+                v_b, v_h, v_t_sum = T.axis.remap("SSR", [b, h, t_sum])
+                T.reads(exp[v_b, v_h, v_t_sum])
+                T.writes(row_sum[v_b, v_h])
+                with T.init():
+                    row_sum[v_b, v_h] = T.float32(0.0)
+                row_sum[v_b, v_h] = row_sum[v_b, v_h] + exp[v_b, v_h, v_t_sum]
+        for b, h, d in T.grid(1, 16, 256):
+            with T.sblock("O"):
+                v_b, v_h, v_d = T.axis.remap("SSS", [b, h, d])
+                T.reads(raw_o[v_b, v_h, v_d], row_sum[v_b, v_h])
+                T.writes(O[v_b, v_h, v_d])
+                O[v_b, v_h, v_d] = T.Cast("bfloat16", raw_o[v_b, v_h, v_d] / row_sum[v_b, v_h])

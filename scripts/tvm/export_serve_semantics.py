@@ -1,20 +1,41 @@
-"""Export unconstrained serving algorithms, with explicit placement metadata.
-
-This exports semantic inputs only. The current GEMM-only Hopper compiler does
-not lower these functions, so there is deliberately no fabricated best schedule.
-"""
-import argparse,json,sys
+"""Export algorithm-only serving TensorIR and report the actual search state."""
+import argparse
+import json
+import sys
 from pathlib import Path
-from pinned_tvm import ROOT,load_tvm
-p=argparse.ArgumentParser();p.add_argument('--out-dir',type=Path,default=ROOT/'validation/results/serve-3m2f/semantic-ir');a=p.parse_args()
-tvm=load_tvm();sys.path.insert(0,str(ROOT/'workloads/serve'));import semantics
-a.out_dir.mkdir(parents=True,exist_ok=True)
-records={}
-for name,fun in [('fa2',semantics.fa2),('gdn',semantics.gdn)]:
-    tensors=fun();tiers={t.name:('HBF' if t.name.startswith('W_') or t.name in ('A_log','dt_bias') else 'HBM') for t in tensors}
-    f=tvm.te.create_prim_func(tensors).with_attr('gtsim.semantic_tensor_tiers',json.dumps(tiers,sort_keys=True))
-    mod=tvm.IRModule({'main':f});(a.out_dir/(name+'.tir')).write_text(mod.script())
-    records[name]={'tensors':{t.name:{'shape':[int(n) for n in t.shape],'dtype':str(t.dtype),'tier':tiers[t.name]} for t in tensors},'status':'semantic_export_only_not_optimized'}
-(a.out_dir/'manifest.json').write_text(json.dumps(records,indent=2)+'\n')
-(a.out_dir/'search-status.json').write_text(json.dumps({'status':'not_run_unsupported_lowering','workers':1,'reason':'Existing native_dag/compiler accepts Hopper GEMM reduction plus cast, not Ampere FA2 or recurrent/fused GDN. Extend and validate lowering before MetaSchedule feedback.','best_ir':None},indent=2)+'\n')
-print('Exported FA2/GDN semantic TensorIR; search not run (unsupported lowering).')
+
+from pinned_tvm import ROOT, load_tvm
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out-dir', type=Path, default=ROOT/'validation/results/serve-3m2f/semantic-ir')
+    parser.add_argument('--search-root', type=Path, default=ROOT/'validation/results/serve-3m2f/study-a100-fp32/search')
+    args = parser.parse_args()
+    tvm = load_tvm()
+    from serve_memory import annotate, KEY
+    sys.path.insert(0, str(ROOT/'workloads/serve'))
+    import semantics
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    records = {}
+    for name, function in [('fa2', semantics.fa2), ('gdn', semantics.gdn)]:
+        tensors = function()
+        mod = annotate(tvm, tvm.IRModule({'main': tvm.te.create_prim_func(tensors)}), 'CoLocated')
+        tiers = json.loads(str(mod['main'].attrs[KEY]))
+        (args.out_dir/(name+'.tir')).write_text(mod.script()+'\n')
+        records[name] = dict(tensors={t.name: dict(shape=[int(n) for n in t.shape], dtype=str(t.dtype), tier=tiers[t.name])
+                                      for t in tensors},
+                             status='functional_input_not_optimized_schedule')
+    (args.out_dir/'manifest.json').write_text(json.dumps(records, indent=2)+'\n')
+    names = ['fa2', 'gdn_qkvz', 'gqa_qkvgate', 'output_proj', 'mlp_gate_up', 'mlp_down', 'gdn_full']
+    completed = [name for name in names if (args.search_root/name/'results.json').exists()]
+    best = {name: str(args.search_root/name/'best'/'scheduled.tir') for name in completed}
+    status = dict(status='complete' if len(completed)==len(names) else 'in_progress',
+                  workers=1, completed=completed, expected=names, best_ir=best,
+                  note='The files in this directory are unscheduled semantic inputs. Best scheduled/native IR is separate.')
+    (args.out_dir/'search-status.json').write_text(json.dumps(status, indent=2)+'\n')
+    print('Exported semantic input IR; completed searches:', len(completed), '/', len(names))
+
+
+if __name__ == '__main__':
+    main()

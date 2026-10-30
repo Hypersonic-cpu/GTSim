@@ -1,6 +1,32 @@
 {
-  "status": "not_run_unsupported_lowering",
+  "status": "complete",
   "workers": 1,
-  "reason": "Existing native_dag/compiler accepts Hopper GEMM reduction plus cast, not Ampere FA2 or recurrent/fused GDN. Extend and validate lowering before MetaSchedule feedback.",
-  "best_ir": null
+  "completed": [
+    "fa2",
+    "gdn_qkvz",
+    "gqa_qkvgate",
+    "output_proj",
+    "mlp_gate_up",
+    "mlp_down",
+    "gdn_full"
+  ],
+  "expected": [
+    "fa2",
+    "gdn_qkvz",
+    "gqa_qkvgate",
+    "output_proj",
+    "mlp_gate_up",
+    "mlp_down",
+    "gdn_full"
+  ],
+  "best_ir": {
+    "fa2": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/fa2/best/scheduled.tir",
+    "gdn_qkvz": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/gdn_qkvz/best/scheduled.tir",
+    "gqa_qkvgate": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/gqa_qkvgate/best/scheduled.tir",
+    "output_proj": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/output_proj/best/scheduled.tir",
+    "mlp_gate_up": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/mlp_gate_up/best/scheduled.tir",
+    "mlp_down": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/mlp_down/best/scheduled.tir",
+    "gdn_full": "/Users/kong/Documents/Github/GTSim/validation/results/serve-3m2f/study-a100-fp32/search/gdn_full/best/scheduled.tir"
+  },
+  "note": "The files in this directory are unscheduled semantic inputs. Best scheduled/native IR is separate."
 }

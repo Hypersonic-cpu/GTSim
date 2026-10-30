@@ -1,7 +1,11 @@
 from pathlib import Path
-import json,subprocess,time,re
-root=Path(__file__).resolve().parents[2];out=root/'validation/results/serve-3m2f';out.mkdir(parents=True,exist_ok=True)
+import argparse,hashlib,json,subprocess,time,re
+root=Path(__file__).resolve().parents[2]
+p=argparse.ArgumentParser();p.add_argument('--out-dir',type=Path,default=root/'validation/results/serve-3m2f');a=p.parse_args();out=a.out_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+if (out/'results.json').exists():raise RuntimeError('Preserve existing baseline results; choose a new --out-dir')
 configs={'normal':root/'configs/v0.1.0/a100-pcie40-simple.yaml','hbf':root/'configs/v0.1.0/a100-pcie40-3m2f-grade1-simple.yaml'}
+spec={'files':{str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest() for f in [*configs.values(),root/'build/gtsim_fa2',root/'build/gtsim_gemm',Path(__file__).resolve()]}}
+(out/'run-spec.json').write_text(json.dumps(spec,indent=2)+'\n')
 cases=[('fa2',None),('gqa_qkvgate',(1,10240,4096)),('gdn_qkvz',(1,12288,4096)),('output_proj',(1,4096,4096)),('mlp_gate_up',(1,24576,4096)),('mlp_down',(1,4096,12288))]
 rows=[]
 for arch,cfg in configs.items():

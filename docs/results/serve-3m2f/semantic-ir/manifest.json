@@ -40,7 +40,7 @@
         "tier": "HBM"
       }
     },
-    "status": "semantic_export_only_not_optimized"
+    "status": "functional_input_not_optimized_schedule"
   },
   "gdn": {
     "tensors": {
@@ -104,42 +104,42 @@
         "shape": [
           4096
         ],
-        "dtype": "float32",
+        "dtype": "bfloat16",
         "tier": "HBF"
       },
       "W_post_norm": {
         "shape": [
           4096
         ],
-        "dtype": "float32",
+        "dtype": "bfloat16",
         "tier": "HBF"
       },
       "W_gated_norm": {
         "shape": [
           128
         ],
-        "dtype": "float32",
+        "dtype": "bfloat16",
         "tier": "HBF"
       },
       "A_log": {
         "shape": [
           32
         ],
-        "dtype": "float32",
+        "dtype": "bfloat16",
         "tier": "HBF"
       },
       "dt_bias": {
         "shape": [
           32
         ],
-        "dtype": "float32",
+        "dtype": "bfloat16",
         "tier": "HBF"
       },
       "ConvState": {
         "shape": [
           1,
           8192,
-          3
+          4
         ],
         "dtype": "bfloat16",
         "tier": "HBM"
@@ -176,12 +176,12 @@
         "shape": [
           1,
           8192,
-          3
+          4
         ],
         "dtype": "bfloat16",
         "tier": "HBM"
       }
     },
-    "status": "semantic_export_only_not_optimized"
+    "status": "functional_input_not_optimized_schedule"
   }
 }

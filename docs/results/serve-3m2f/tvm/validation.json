@@ -1,0 +1,35 @@
+{
+  "ctest": {
+    "passed": 19,
+    "failed": 0
+  },
+  "serving_final_finite_assertions": {
+    "passed": 1,
+    "failed": 0
+  },
+  "wall_time_audit_unit_tests": {
+    "passed": 2,
+    "failed": 0
+  },
+  "main_search_candidates": {
+    "attempted": 68,
+    "successful": 68
+  },
+  "best_trace_replays": 7,
+  "prefetch_ablation_runs": 6,
+  "checks": [
+    "Saved TensorIR JSON hashes match measured selections",
+    "Read bandwidth floors respected",
+    "HBF writes zero",
+    "8*GQA+24*GDN=TPOT in every displayed scenario",
+    "Frozen 71-source archive hashes checked",
+    "Measured simulator binary and hardware configs match provenance",
+    "HTML links and embedded PNG checked"
+  ],
+  "visual_review": {
+    "png_figures": "reviewed",
+    "html": "structure and links checked; browser rendering not verified"
+  },
+  "cuda_execution": false,
+  "optional_split_k_performance_search": "stopped for user-requested finalization, excluded"
+}

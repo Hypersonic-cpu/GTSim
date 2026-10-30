@@ -370,3 +370,27 @@ For imported `--input-tir`, the TIR's declared spaces are authoritative.
 `gtsim_gemm_ir ... kernel.gtsir --inspect` exports the actual registry bases,
 CTA resources and materialized DAG, without simulation. See
 [tvm-hbf-placement.md](tvm-hbf-placement.md) for results and assumptions.
+
+## Serving extension: version 2
+
+The experimental serving compiler uses `gtsim.tile_ir 2`, preserving the
+version-1 parser/materializer behavior and reference cycles. Version 2 adds BF16,
+1..32 warp CTAs, Ampere `mma.sync.m16n8k16`, non-TMA `cp.dram2sram`,
+shared/register loads, explicit SIMD/SFU operations, shuffle and zero-setup
+completion joins. Hopper WGMMA/TMA are rejected in this version.
+
+Every v2 operation additionally requires `granularity=4|8|16` bytes per thread
+and `layout=row|swizzled`. Global accesses retain bounds, dtype and device
+validation. Shared/register/compute tiles describe physical local fragments,
+which may include padded rows outside the logical output; their materialized
+`matrix_id` is -1. They cannot create global-memory traffic through a dummy
+tensor identity. Shared accesses must fit the declared CTA allocation.
+
+Global warp IDs are unique and assigned so consecutive CTA warps on each SM
+rotate through its four subpartitions. They are no longer `cta*12+warp` in v2;
+that v1 mapping is unchanged. Resource limits and all hardware timing remain
+in the shared configuration. A100 scalar throughput was independently corrected
+in both A100 profiles to 16 FP32 lanes/SP, not overridden by the importer.
+
+See [the serving study](serve-tvm.md) for semantic input, explicit TensorIR
+placement, native MetaSchedule feedback and numerical/provenance checks.

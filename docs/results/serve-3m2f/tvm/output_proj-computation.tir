@@ -1,0 +1,25 @@
+# from tvm.script import ir as I
+# from tvm.script import tirx as T
+# from tvm.tirx.layout import Axis
+
+@I.ir_module
+class Module:
+    @T.prim_func(s_tir=True)
+    def main(X: T.Buffer((1, 4096), "bfloat16"), W_projection: T.Buffer((4096, 4096), "bfloat16"), Output: T.Buffer((1, 4096), "bfloat16")):
+        T.func_attr({"gtsim.semantic_tensor_tiers": "{\"Output\": \"HBM\", \"W_projection\": \"HBF\", \"X\": \"HBM\"}", "tirx.noalias": True})
+        # with T.sblock("root"):
+        projection_acc = T.sblock_alloc_buffer((1, 4096))
+        for b, j, k in T.grid(1, 4096, 4096):
+            with T.sblock("projection_acc"):
+                v_b, v_j, v_k = T.axis.remap("SSR", [b, j, k])
+                T.reads(X[v_b, v_k], W_projection[v_k, v_j])
+                T.writes(projection_acc[v_b, v_j])
+                with T.init():
+                    projection_acc[v_b, v_j] = T.float32(0.0)
+                projection_acc[v_b, v_j] = projection_acc[v_b, v_j] + T.Cast("float32", X[v_b, v_k]) * T.Cast("float32", W_projection[v_k, v_j])
+        for b, j in T.grid(1, 4096):
+            with T.sblock("Output"):
+                v_b, v_j = T.axis.remap("SS", [b, j])
+                T.reads(projection_acc[v_b, v_j])
+                T.writes(Output[v_b, v_j])
+                Output[v_b, v_j] = T.Cast("bfloat16", projection_acc[v_b, v_j])
