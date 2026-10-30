@@ -1,0 +1,13 @@
+{
+  "ctest_passed": 29,
+  "ctest_failed": 0,
+  "backend_contracts_passed": 8,
+  "six_previous_winner_cycles_unchanged": true,
+  "HBM_only_controls_identical": true,
+  "HBF_traffic_conserved": true,
+  "HBF_writes_programs_erases_failures": 0,
+  "bandwidth_floor_checks_passed": true,
+  "outliers_repeated_with_identical_cycles_and_full_counters": true,
+  "source_snapshot_verified": true,
+  "TVM_search_in_experiment": false
+}

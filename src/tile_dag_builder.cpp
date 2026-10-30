@@ -18,6 +18,15 @@ std::string describe_tile_ir_hardware(const SimulatorConfig& config) {
            << ",\"core_frequency_mhz\":" << config.core_frequency_mhz
            << ",\"simd_width\":" << config.simd_width
            << ",\"simd_throughput\":" << config.simd_throughput
+           << ",\"hbm_backend\":\"" << (config.memory.hbm.backend == HBMBackend::Naive ? "naive" : "ramulator2") << "\""
+           << ",\"hbf_backend\":\"" << (config.memory.hbf.backend == HBFBackend::Naive ? "naive" : "bank_plane") << "\""
+           << ",\"hbm_stacks\":" << config.memory.hbm.stacks
+           << ",\"hbf_stacks\":" << config.memory.hbf.controller.stacks
+           << ",\"hbf_dies_per_stack\":" << config.memory.hbf.controller.dies_per_stack
+           << ",\"hbf_banks_per_channel\":" << config.memory.hbf.controller.banks_per_channel
+           << ",\"hbf_read_latency_cycles\":" << config.memory.hbf.read_latency_cycles
+           << ",\"hbf_write_latency_cycles\":" << config.memory.hbf.write_latency_cycles
+           << ",\"hbf_write_bw_GBps\":" << config.memory.hbf.write_bw_GBps
            << ",\"topology\":\"" << memory_topology_name(config.memory.topology) << "\""
            << ",\"hbm_capacity_bytes\":" << config.memory.hbm.capacity_bytes
            << ",\"hbf_capacity_bytes\":" << config.memory.hbf.capacity_bytes
@@ -32,6 +41,8 @@ std::unique_ptr<DAG> materialize_tile_ir(const TileIR& ir, const SimulatorConfig
     if (ir.tensors.empty() || ir.ctas.empty() || ir.operations.empty())
         throw std::invalid_argument("Tile IR requires tensors, CTAs, and operations");
     auto dag = std::make_unique<DAG>();
+    if (config.memory.address_layout.enabled)
+        dag->tensor_registry = TensorRegistry(config.memory.address_layout);
     std::unordered_set<std::string> names;
     std::uint64_t allocated[2]{};
     for (const auto& t : ir.tensors) {
@@ -45,7 +56,12 @@ std::unique_ptr<DAG> materialize_tile_ir(const TileIR& ir, const SimulatorConfig
         if ((config.memory.topology == MemoryTopology::FullHBM && t.tier == MemoryTier::HBF) ||
             (config.memory.topology == MemoryTopology::FullHBF && t.tier == MemoryTier::HBM))
             throw std::invalid_argument("tensor device is unavailable in selected topology");
-        dag->tensor_registry.allocate_device_tensor(t.id, t.name, t.shape, t.strides, t.dtype, t.tier);
+        if (config.memory.address_layout.enabled) {
+            const bool weight = t.tier == MemoryTier::HBF;
+            dag->tensor_registry.allocate_tensor(t.id, t.name, t.shape, t.strides, t.dtype, t.tier, weight, weight);
+        } else {
+            dag->tensor_registry.allocate_device_tensor(t.id, t.name, t.shape, t.strides, t.dtype, t.tier);
+        }
         const int device = t.tier == MemoryTier::HBM ? 0 : 1;
         const auto bytes = dag->tensor_registry.at(t.id).byte_size();
         if (bytes > std::numeric_limits<std::uint64_t>::max() - allocated[device])

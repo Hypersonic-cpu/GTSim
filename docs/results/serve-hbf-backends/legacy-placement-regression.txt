@@ -1,0 +1,21 @@
+Test project /Users/kong/Documents/Github/GTSim/build-backends
+    Start  6: gemm_smoke
+1/8 Test  #6: gemm_smoke .......................   Passed    1.82 sec
+    Start  7: fa3_smoke
+2/8 Test  #7: fa3_smoke ........................   Passed    0.75 sec
+    Start 11: kernel_swopt_semantics
+3/8 Test #11: kernel_swopt_semantics ...........   Passed    0.73 sec
+    Start 16: mixed_workload_placement
+4/8 Test #16: mixed_workload_placement .........   Passed    0.73 sec
+    Start 18: ramulator_gemm_smoke
+5/8 Test #18: ramulator_gemm_smoke .............   Passed    0.13 sec
+    Start 19: ramulator_fa3_smoke
+6/8 Test #19: ramulator_fa3_smoke ..............   Passed    0.18 sec
+    Start 20: mixed_hbfine_smoke
+7/8 Test #20: mixed_hbfine_smoke ...............   Passed    0.96 sec
+    Start 23: v0_1_0_regression
+8/8 Test #23: v0_1_0_regression ................   Passed    0.39 sec
+
+100% tests passed out of 8
+
+Total Test time (real) =   5.71 sec

@@ -1,4 +1,5 @@
 #include "arch_conf.h"
+#include "../common/placement.h"
 #include "../common/workload_options.h"
 #include "../common/split_reduce.h"
 #include <algorithm>
@@ -14,13 +15,17 @@ DAG* build_fa3_h100(int seq_q = 128,
                      int num_heads_q = 1,
                      int num_heads_kv = 1,
                      int batch = 1, const KernelOptions& input_options = {},
-                     const SimulatorConfig& hardware = make_h100_sxm_config()) {
+                     const SimulatorConfig& hardware = make_h100_sxm_config(),
+                     const WorkloadMemoryOptions* memory = nullptr) {
+    if (memory && memory->placement == TensorPlacementProfile::GEMMBInHBF)
+        throw std::invalid_argument("GEMM B placement is not an FA3 placement");
     KernelOptions options = input_options;
     // A single live query uses one padded m64 Tensor Core consumer group.
     // Global memory accesses remain restricted to the live query row.
     if (seq_q == 1) options.q_tile = 64;
     options.validate(true, seq_q, options.head_dim, seq_kv, hardware);
     DAG* dag = new DAG();
+    if (memory) dag->tensor_registry = TensorRegistry(memory->layout);
     int node_id = 0;
 
     const int num_sms = hardware.num_sms;
@@ -72,7 +77,7 @@ DAG* build_fa3_h100(int seq_q = 128,
                 matrix_base_q, "Q_b" + std::to_string(b) + "_h" + std::to_string(h),
                 {static_cast<std::uint64_t>(seq_q), static_cast<std::uint64_t>(head_dim)},
                 {static_cast<std::uint64_t>(head_dim), 1}, options.io_dtype,
-                MemoryTier::HBM);
+                memory && memory->placement == TensorPlacementProfile::FA3QInHBF ? MemoryTier::HBF : MemoryTier::HBM, true, true);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_q + 3,
                 "O_b" + std::to_string(b) + "_h" + std::to_string(h),
@@ -89,11 +94,11 @@ DAG* build_fa3_h100(int seq_q = 128,
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 1,
                 "K_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, options.io_dtype, MemoryTier::HBF);
+                kv_shape, kv_strides, options.io_dtype, memory ? MemoryTier::HBM : MemoryTier::HBF);
             dag->tensor_registry.allocate_tensor(
                 matrix_base_kv + 2,
                 "V_b" + std::to_string(b) + "_h" + std::to_string(h),
-                kv_shape, kv_strides, options.io_dtype, MemoryTier::HBF);
+                kv_shape, kv_strides, options.io_dtype, memory ? MemoryTier::HBM : MemoryTier::HBF);
         }
     }
 
@@ -632,6 +637,11 @@ DAG* build_fa3_h100(int seq_q = 128,
     return dag;
 }
 
+DAG* build_fa3_h100(int seq_q, int seq_kv, int heads_q, int heads_kv, int batch, WorkloadMemoryOptions memory) {
+    return build_fa3_h100(seq_q, seq_kv, heads_q, heads_kv, batch, {}, make_h100_sxm_config(), &memory);
+}
+
+#ifndef GTSIM_WORKLOAD_LIBRARY
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: gtsim_fa3 <architecture.yaml> "
@@ -683,7 +693,13 @@ int main(int argc, char* argv[]) {
 
     std::cout << "=== H100 FA3 ===\n\n";
     DAG* dag = nullptr;
-    try { dag = build_fa3_h100(seq_q, seq_kv, num_heads_q, num_heads_kv, batch, options, config); }
+    try {
+        const auto memory = workload_memory_options(config);
+        const bool segmented = config.memory.address_layout.enabled ||
+                               config.memory.placement != TensorPlacementProfile::AllHBM;
+        dag = build_fa3_h100(seq_q, seq_kv, num_heads_q, num_heads_kv, batch, options, config, segmented ? &memory : nullptr);
+        if (segmented) print_workload_memory(dag->tensor_registry, memory.placement);
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
     std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
 
@@ -702,3 +718,4 @@ int main(int argc, char* argv[]) {
     delete dag;
     return complete ? 0 : 3;
 }
+#endif

@@ -1,6 +1,7 @@
 #ifndef DAG_NODE_H
 #define DAG_NODE_H
 
+#include "memory_layout.h"
 #include <array>
 #include <algorithm>
 #include <cstdint>
@@ -174,11 +175,6 @@ inline int bytes_per_element(DataType type) {
     }
 }
 
-enum class MemoryTier : std::uint8_t {
-    HBM,
-    HBF
-};
-
 struct TensorMetadata {
     int id{};
     std::string name;
@@ -187,6 +183,8 @@ struct TensorMetadata {
     std::vector<std::uint64_t> strides;
     DataType dtype{DataType::FP16};
     MemoryTier initial_memory_tier{MemoryTier::HBM};
+    bool preloaded{false};
+    bool read_only{false};
 
     std::uint64_t byte_size() const {
         if (shape.size() != strides.size()) {
@@ -237,15 +235,29 @@ public:
     static constexpr std::uint64_t kFirstGlobalAddress = 1ULL << 32;
 
     TensorRegistry() : next_global_address_(kFirstGlobalAddress) {}
+    explicit TensorRegistry(MemoryAddressLayout layout) : layout_(layout), next_global_address_(kFirstGlobalAddress) {
+        layout_.validate();
+        next_hbm_ = layout_.hbm_base + layout_.hbm_allocation_offset;
+        next_hbf_ = layout_.hbf_base;
+    }
+    const MemoryAddressLayout& address_layout() const { return layout_; }
+    const auto& entries() const { return tensors_; }
+    std::uint64_t reserved_bytes(MemoryTier tier) const {
+        if (!layout_.enabled) throw std::logic_error("per-device reservation requires segmented allocation");
+        return (tier == MemoryTier::HBM ? next_hbm_ : next_hbf_) - layout_.base(tier);
+    }
 
     const TensorMetadata& allocate_tensor(int id, std::string name,
                                           std::vector<std::uint64_t> shape,
                                           std::vector<std::uint64_t> strides,
                                           DataType dtype,
-                                          MemoryTier tier = MemoryTier::HBM) {
-        const std::uint64_t base = align_up(next_global_address_, kAddressAlignment);
+                                          MemoryTier tier = MemoryTier::HBM,
+                                          bool preloaded = false, bool read_only = false) {
+        const std::uint64_t cursor = !layout_.enabled ? next_global_address_ :
+                                      tier == MemoryTier::HBM ? next_hbm_ : next_hbf_;
+        const std::uint64_t base = align_up(cursor, kAddressAlignment);
         TensorMetadata tensor{id, std::move(name), base, std::move(shape),
-                              std::move(strides), dtype, tier};
+                              std::move(strides), dtype, tier, preloaded, read_only};
         return register_tensor(std::move(tensor));
     }
 
@@ -285,14 +297,26 @@ public:
             std::numeric_limits<std::uint64_t>::max() - reserved_size) {
             throw std::overflow_error("global tensor address range overflows uint64_t");
         }
+        const auto allocation_size = layout_.enabled ? align_up(reserved_size, kAddressAlignment) : reserved_size;
+        if (layout_.enabled && (tensor.global_base_address % kAddressAlignment ||
+            layout_.resolve(tensor.global_base_address, allocation_size) != tensor.initial_memory_tier)) {
+            throw std::invalid_argument("tensor extent or metadata disagrees with its device segment");
+        }
         for (const auto& [unused_id, existing_tensor] : tensors_) {
             (void)unused_id;
-            const std::uint64_t existing_size = existing_tensor.byte_size();
-            if (size > 0 && existing_size > 0 &&
+            const auto existing_bytes = existing_tensor.byte_size();
+            const auto existing_size = layout_.enabled ?
+                align_up(std::max<std::uint64_t>(existing_bytes, 1), kAddressAlignment) : existing_bytes;
+            const auto checked_size = layout_.enabled ? allocation_size : size;
+            if (checked_size > 0 && existing_size > 0 &&
                 tensor.global_base_address < existing_tensor.global_base_address + existing_size &&
-                existing_tensor.global_base_address < tensor.global_base_address + size) {
+                existing_tensor.global_base_address < tensor.global_base_address + checked_size) {
                 throw std::invalid_argument("overlapping global tensor address ranges");
             }
+        }
+        if (layout_.enabled) {
+            auto& cursor = tensor.initial_memory_tier == MemoryTier::HBM ? next_hbm_ : next_hbf_;
+            cursor = std::max(cursor, tensor.global_base_address + allocation_size);
         }
         next_global_address_ = std::max(
             next_global_address_,
@@ -309,13 +333,31 @@ public:
     }
 
     MemoryTier resolve_tier(std::uint64_t address) const {
-        for (const auto& [unused_id, tensor] : tensors_) {
-            (void)unused_id;
+        for (const auto& [id, tensor] : tensors_) {
+            (void)id;
             if (tensor.contains(address)) {
+                if (layout_.enabled && layout_.resolve(address) != tensor.initial_memory_tier)
+                    throw std::logic_error("tensor metadata disagrees with physical segment");
                 return tensor.initial_memory_tier;
             }
         }
-        throw std::out_of_range("global address is outside registered tensor ranges");
+        throw std::out_of_range("global address is outside allocated tensor extents");
+    }
+
+    void validate_access(std::uint64_t address, std::uint64_t bytes, MemoryTier tier, bool write) const {
+        if (!layout_.enabled) return;
+        if (layout_.resolve(address, bytes) != tier)
+            throw std::invalid_argument("request tier disagrees with physical address segment");
+        for (const auto& [id, tensor] : tensors_) {
+            (void)id;
+            if (!tensor.contains(address)) continue;
+            const auto reserved = align_up(std::max<std::uint64_t>(1, tensor.byte_size()), kAddressAlignment);
+            if (bytes > reserved - (address - tensor.global_base_address) ||
+                tensor.initial_memory_tier != tier || (write && tensor.read_only))
+                throw std::invalid_argument("memory transaction exceeds its tensor allocation or writes read-only input");
+            return;
+        }
+        throw std::out_of_range("memory transaction addresses an allocation hole");
     }
 
     bool contains_tier(MemoryTier tier) const {
@@ -331,6 +373,9 @@ public:
     std::size_t size() const { return tensors_.size(); }
 
 private:
+    MemoryAddressLayout layout_{};
+    std::uint64_t next_hbm_{};
+    std::uint64_t next_hbf_{};
     std::unordered_map<int, TensorMetadata> tensors_;
     std::uint64_t next_global_address_;
     std::uint64_t next_device_address_[2]{kFirstGlobalAddress, kHBFAddressBase};

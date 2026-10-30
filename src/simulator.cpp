@@ -1,4 +1,5 @@
 #include "simulator.h"
+#include "hbf_address.h"
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
@@ -89,18 +90,38 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "Core frequency: " << config.core_frequency_mhz << " MHz\n";
     *output_stream << "Memory topology: "
                    << memory_topology_name(config.memory.topology) << "\n";
-    *output_stream << "HBM read bandwidth: " << config.memory.hbm.read_bw_GBps
-                   << " GB/s, write max: "
-                   << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
-    *output_stream << "HBM read/write latency: "
-                   << config.memory.hbm.read_latency_cycles << "/"
-                   << config.memory.hbm.write_latency_cycles << " cycles\n";
+    if (config.memory.hbm.backend == HBMBackend::Naive) {
+        *output_stream << "HBM backend: naive; read bandwidth: " << config.memory.hbm.read_bw_GBps
+                       << " GB/s, write max: " << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
+        *output_stream << "HBM read/write latency: " << config.memory.hbm.read_latency_cycles
+                       << "/" << config.memory.hbm.write_latency_cycles << " cycles\n";
+    } else {
+        *output_stream << "HBM backend: ramulator2; timing profile: "
+                       << config.memory.hbm.ramulator.config_file << "\n";
+        const int stacks = config.memory.hbm.ramulator.stacks;
+        *output_stream << "HBM topology: " << stacks << " stacks, " << stacks * 2
+                       << " logical MC groups, " << stacks * 16 << " physical channels, "
+                       << stacks * 32 << " pseudochannels\n";
+    }
     *output_stream << "HBF read/write bandwidth: "
                    << config.memory.hbf.read_bw_GBps << "/"
                    << config.memory.hbf.write_bw_GBps << " GB/s\n";
     *output_stream << "HBF read/write latency: "
                    << config.memory.hbf.read_latency_cycles << "/"
                    << config.memory.hbf.write_latency_cycles << " cycles\n";
+    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+        const auto& c = config.memory.hbf.controller;
+        *output_stream << "HBF backend: bank_plane; profile "
+                       << (c.geometry == HBFGeometryProfile::OCPReference ? "ocp_reference" : "hbflex_research")
+                       << "; stacks " << c.stacks << "; Host Channels " << c.stacks * 16
+                       << "; Banks " << c.stacks * 16 * c.banks_per_channel
+                       << "; Planes " << c.stacks * c.dies_per_stack * c.planes_per_die << "; buffers/Bank 2; sense engines/Bank 1\n";
+        *output_stream << "HBF per-stack target read/write GB/s: " << c.read_target_GBps_per_stack
+                       << "/" << c.write_target_GBps_per_stack << "; array read/program ceilings: "
+                       << hbf_array_read_ceiling_GBps(c) << "/" << hbf_array_write_ceiling_GBps(c)
+                       << "; UCIe ceiling: " << c.ucie_ceiling_GBps_per_stack
+                       << "; SRAM latency hiding: disabled; page caches: initially empty\n";
+    }
     const auto print_link_config = [&](const char* name,
                                        const D2DLinkConfig& link) {
         *output_stream << name << " link: " << link.bandwidth_GBps
@@ -160,6 +181,77 @@ void Simulator::print_statistics(bool verbose) {
     *output_stream << "Off-chip memory statistics:\n";
     print_tier_stats("  HBM", memory_stats.hbm);
     print_tier_stats("  HBF", memory_stats.hbf);
+    const auto backend = simulated_gpu->memory_system->hbm_backend_statistics();
+    if (config.memory.hbm.backend == HBMBackend::Ramulator2) {
+        const auto channels_used = std::count_if(backend.channel_transactions.begin(),
+                                                backend.channel_transactions.end(),
+                                                [](auto count) { return count > 0; });
+        *output_stream << "Ramulator HBM3 parents: " << backend.accepted_requests
+                       << "/" << backend.completed_requests << " accepted/completed; bursts: "
+                       << backend.submitted_transactions << "/" << backend.completed_transactions
+                       << "; bytes: " << backend.transaction_bytes << "; admission retries: "
+                       << backend.admission_retries << "; DRAM ticks: " << backend.dram_ticks
+                       << "; channels used: " << channels_used << "/"
+                       << backend.channel_transactions.size() << "\n";
+        const auto [min_channel, max_channel] = std::minmax_element(
+            backend.channel_transactions.begin(), backend.channel_transactions.end());
+        *output_stream << "Ramulator controllers: read/write accepted " << backend.controller_reads
+                       << "/" << backend.controller_writes << ", served "
+                       << backend.controller_served_reads << "/" << backend.controller_served_writes
+                       << "; row hit/miss/conflict " << backend.row_hits << "/"
+                       << backend.row_misses << "/" << backend.row_conflicts
+                       << "; channel burst min/max " << *min_channel << "/" << *max_channel << "\n";
+    }
+    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+        const auto hbf = simulated_gpu->memory_system->hbf_backend_statistics();
+        *output_stream << "HBF detailed JSON: {";
+        bool first = true;
+        const auto field = [&](const char* name) {
+            if (!first) *output_stream << ",";
+            first = false;
+            *output_stream << "\"" << name << "\":";
+        };
+        const auto scalar = [&](const char* name, auto value) { field(name); *output_stream << value; };
+        const auto array = [&](const char* name, const auto& values) {
+            field(name); *output_stream << "[";
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                if (i) *output_stream << ",";
+                *output_stream << values[i];
+            }
+            *output_stream << "]";
+        };
+        scalar("accepted_requests", hbf.accepted_requests);
+        scalar("completed_requests", hbf.completed_requests);
+        scalar("failed_requests", hbf.failed_requests);
+        scalar("host_read_bytes", hbf.host_read_bytes);
+        scalar("host_write_bytes", hbf.host_write_bytes);
+        scalar("sensed_bytes", hbf.sensed_bytes);
+        scalar("senses", hbf.senses);
+        scalar("programs", hbf.programs);
+        scalar("erases", hbf.erases);
+        scalar("cache_hits", hbf.cache_hits);
+        scalar("cache_misses", hbf.cache_misses);
+        scalar("cache_evictions", hbf.cache_evictions);
+        scalar("queue_stalls", hbf.queue_stalls);
+        scalar("bank_wait_ps", hbf.bank_wait_ps);
+        scalar("transfer_wait_ps", hbf.transfer_wait_ps);
+        scalar("events_processed", hbf.events_processed);
+        scalar("elapsed_ps", hbf.elapsed_ps);
+        array("stack_read_bytes", hbf.stack_read_bytes);
+        array("channel_read_bytes", hbf.channel_read_bytes);
+        array("bank_reads", hbf.bank_reads);
+        array("plane_reads", hbf.plane_reads);
+        array("stack_busy_ps", hbf.stack_busy_ps);
+        array("channel_read_busy_ps", hbf.channel_read_busy_ps);
+        array("channel_write_busy_ps", hbf.channel_write_busy_ps);
+        array("bank_busy_ps", hbf.bank_busy_ps);
+        array("plane_sense_busy_ps", hbf.plane_sense_busy_ps);
+        array("plane_program_busy_ps", hbf.plane_program_busy_ps);
+        array("plane_erase_busy_ps", hbf.plane_erase_busy_ps);
+        array("die_transfer_busy_ps", hbf.die_transfer_busy_ps);
+        array("ecc_busy_ps", hbf.ecc_busy_ps);
+        *output_stream << "}\n";
+    }
     const auto print_link_stats = [&](const char* name,
                                       const D2DLinkStatistics& stats) {
         *output_stream << "  " << name << " transferred bytes: GPU->memory "
@@ -195,6 +287,18 @@ bool Simulator::run(int max_cycles, bool verbose) {
         }
 
         if (completed_node_count == dag->nodes.size()) {
+            // Kernel timing remains the last DAG completion cycle. Drain issued
+            // traffic separately, including dirty eviction writebacks, without
+            // adding an implicit L2 flush or changing reference kernel cycles.
+            int drain_cycle = cycle;
+            while (!simulated_gpu->memory_system->idle() && drain_cycle < max_cycles) {
+                simulated_gpu->memory_system->step(++drain_cycle);
+            }
+            if (!simulated_gpu->memory_system->idle()) {
+                *output_stream << "Memory drain timed out at cycle " << drain_cycle << "\n";
+                return false;
+            }
+            *output_stream << "Memory drained at cycle: " << drain_cycle << "\n";
             print_statistics(verbose);
             print_results();
             return true;

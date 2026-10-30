@@ -39,6 +39,15 @@ profile starts from the simulator's shared H100 defaults; YAML values override
 matching fields, omitted values retain those defaults, and unknown fields are
 reported as configuration errors.
 
+An optional [Ramulator2 HBM3 backend](docs/ramulator-hbm3.md) models H100 SXM
+DRAM channels, queues, refresh, and command timing. Enable it with
+`-DGTSIM_ENABLE_RAMULATOR2=ON`; the default memory backend remains naive.
+
+An optional [HBFine Bank/Plane backend](docs/hbf-controller.md), supplied by
+`3rdparty/hbfine`, models co-located HBM/HBF devices with explicit tensor
+placement. Its portable C++ API and installable target are documented in the
+[submodule README](3rdparty/hbfine/README.md).
+
 Run the smoke tests with `ctest --test-dir build --output-on-failure`. The
 checked reference outputs are in
 [`configs/v0.1.0/references.json`](configs/v0.1.0/references.json). To

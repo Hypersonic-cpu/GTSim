@@ -1,0 +1,14 @@
+[
+  {
+    "name": "gqa_qkvgate",
+    "cycles": 1134238,
+    "confirmed": true,
+    "log_sha256": "596a6ffbcb09f034f48b502b60385fc534e4a23778ca91059a8f4298aa8f8f36"
+  },
+  {
+    "name": "mlp_gate_up",
+    "cycles": 2857025,
+    "confirmed": true,
+    "log_sha256": "f887dbd799ffe8490508df3f283f5d251fab52e99d982a0f8a3daf8e879f4c62"
+  }
+]

@@ -1,0 +1,2 @@
+# Synthetic, read-only Q for one invocation; K/V/O remain HBM.
+placement: fa3_q_hbf

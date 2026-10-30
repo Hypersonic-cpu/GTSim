@@ -1,0 +1,210 @@
+{
+  "workers": 1,
+  "tuning": false,
+  "binary_sha256": "5a5a24ec11134874ae7c8bb769f76319378c4bc8bee3be7367a3bb9fc6d865df",
+  "source_sha256": {
+    "scripts/experiments/run_serve_hbf_backends.py": "c22e16ac3825e20bea3c8e46dd875c6515ee4ba0bbd54b7aceaf1520d50eccdd",
+    "src/gpu.cpp": "0f09abed3d99a80ba9767f7c75564931879b8c10cf5ab66ce6a091ebc2a7399c",
+    "src/hbfine_backend.cpp": "040c08eaca9b94ba196c28553e240b03ece6ef3c8f9675340397f9bb22b465f0",
+    "src/memory_backend.cpp": "8631032e2b4165455fb95ac334973cef9a2219b7cc2aa60d80ca3d02dbfed601",
+    "src/ramulator_backend.cpp": "c1c350d67132318b2cc611e20b5e9867e21e18d67847bb69f987990a764cd0ab",
+    "src/scheduler.cpp": "615cd2f89b67f1ffc82c29515a1e72e0225b8f4816275026414762c635a15cca",
+    "src/simulator.cpp": "3ebaab504f5ae0d8cb87692c2703ce5c095d3ca4c3b3bdfc3d3f17e1b10688b7",
+    "src/sm.cpp": "baa63b5f441cca168d3058d51c636c27467ea6438525ba96f9c54c2fc06c04f1",
+    "src/subpartition.cpp": "13b1cf7f800fb25d56465cf15310fd99e376559d05278e213e9d85732badbdf8",
+    "src/tile_dag_builder.cpp": "f0a37106ed45c68a3cc6fa86b5d8e46bbb259f30523de8e8b6da650a030683d4",
+    "src/tile_ir_parser.cpp": "fd2898a41ba328c93181e8dc2c2db0c5f485749d0748f6d3ad8e3decf0c4847e",
+    "include/arch_conf.h": "11c67851a078a229a7043f1b150faff49bd47a625db0d20b758f3171bb855e55",
+    "include/dag_node.h": "20c5691d0c2590b5298b106afafcca7284bc7563d9773358283d57deaeb1e6a4",
+    "include/gpu.h": "3391b6a938131f5bd54e523d0f6938ff63634c478d898a68ffad1ff1ba350942",
+    "include/hbf_address.h": "b80e192e5c526a12b15c93391ac14880e1157b087ebfe1bd97539123ca57d96a",
+    "include/hbm_address.h": "050dfa748cfa9831c5c6f02d2be9e386a040c3c302488f204950fe3ff359e5c1",
+    "include/mem_conf.h": "446ff8f7b0d9b01ee8bbb3a599195de00c922c47cf5c32dd59edd5b5b3a3a8d0",
+    "include/memory.h": "b681cb4f879c085cdb3e1df6c4e0342d373fba4c106b1f12f794a857b5a56092",
+    "include/memory_backend.h": "96a5baa5340bcee23eafcd2612ae647159301b72b38e2cf88ac4b095ee79930e",
+    "include/memory_clock.h": "b71feeb017cf6b63917c3660318f028842f1ae634074ca5140c9a255153efc84",
+    "include/memory_layout.h": "f6da0b3ef243fa797dc6923b0410bc78e7ed4b229ba9439a6f18a622cdb81dee",
+    "include/noc.h": "ffa380bba21798a73bb763c0ddfcbdeb3930a9f49e7dd62396d87ca9dfb211c9",
+    "include/pipeline.h": "0981726a2b43f3eee4a26bc414e06ec4f995b82fc2dc1f4642e0d3331d20dbab",
+    "include/scheduler.h": "9deb462e5159224d4164ece981f85829baa4ec00adbc12f2e0d6f39672c731fb",
+    "include/simulator.h": "8e3a773a47f6f3e20c83726dd2c8cbaf36732e537945b2972a2f634010313234",
+    "include/sm.h": "551b33409c1dbbbf5307104089abc54bf020942109bc7bf75056f06cc2d22f1b",
+    "include/subpartition.h": "af5bbcedc05cbc4e104354b135160f877776718b66750b98d434d5090bccd8aa",
+    "include/tile_ir.h": "811bd590ec4b3a6c2fc7def9dcd333ffc267c743713e9a3c8871cf5194880588",
+    "include/tma.h": "41c2a63f8797c9dd599499fdb7a7f538a834e1807dd204af469405b0f2c04ee2",
+    "include/tmem.h": "dd5046fac5a59aa877b98542ca368081f49b62e1dbf788095dc04f99b1c9550c",
+    "3rdparty/hbfine/src/config.cpp": "a74528da6cc4227c480567c2f2e71b955e3a89ec40cb9734fa768ca692b44d80",
+    "3rdparty/hbfine/src/controller.cpp": "0114482637f5d33d56ffd6744238db1c2344d9070d10c18d67c44dd32d6fd3da",
+    "3rdparty/hbfine/include/hbfine/address.hpp": "c26bdace9147b4c5886c81f5698fe56eef33436e92bee02f0bd3fb22ca607e5c",
+    "3rdparty/hbfine/include/hbfine/config.hpp": "b6271861fa6fe1b6e8d09113ea62760c44a95eddf34ab9f6cf4ee7d72f9643d5",
+    "3rdparty/hbfine/include/hbfine/controller.hpp": "5343a02b35c6e050a59dd0eb278b71bd143bd59b2f3cd457f891370fee1b6e69",
+    "3rdparty/hbfine/include/hbfine/types.hpp": "7eb268f79a120491a6cfa1565f40a29eda9796e4ef133e65fa46b0aaf6235499",
+    "workloads/serve/serve_ir.cpp": "1babf89dfdeb6a531f60714d1537a99fe3cd6c7a43bd3ce2d2e825e237e8859a"
+  },
+  "configs": {
+    "simple": {
+      "path": "configs/v0.1.0/a100-pcie40-3m2f-grade1-simple-matched.yaml",
+      "sha256": "ce0631cb99e2732fe3acb73274a4aa415a26b0151fe75e6608b1c9ce2c0ee451",
+      "resolved": {
+        "num_sms": 108,
+        "shared_memory_per_cta_bytes": 166912,
+        "shared_memory_per_sm_bytes": 167936,
+        "register_file_per_sm_bytes": 262144,
+        "max_warps_per_sm": 64,
+        "max_concurrent_blocks_per_sm": 32,
+        "core_frequency_mhz": 1410,
+        "simd_width": 16,
+        "simd_throughput": 32,
+        "hbm_backend": "naive",
+        "hbf_backend": "naive",
+        "hbm_stacks": 3,
+        "hbf_stacks": 2,
+        "hbf_dies_per_stack": 8,
+        "hbf_banks_per_channel": 16,
+        "hbf_read_latency_cycles": 5640,
+        "hbf_write_latency_cycles": 105750,
+        "hbf_write_bw_GBps": 27.96,
+        "topology": "CoLocated",
+        "hbm_capacity_bytes": 25769803776,
+        "hbf_capacity_bytes": 549755813888,
+        "hbm_read_bw_GBps": 933,
+        "hbf_read_bw_GBps": 524.288
+      }
+    },
+    "hbfine": {
+      "path": "configs/v0.1.0/a100-pcie40-3m2f-grade1-hbfine.yaml",
+      "sha256": "f14c74ab9ee3b5af3420022f2e088fce687066a8e5f4c964e1da14971829940e",
+      "resolved": {
+        "num_sms": 108,
+        "shared_memory_per_cta_bytes": 166912,
+        "shared_memory_per_sm_bytes": 167936,
+        "register_file_per_sm_bytes": 262144,
+        "max_warps_per_sm": 64,
+        "max_concurrent_blocks_per_sm": 32,
+        "core_frequency_mhz": 1410,
+        "simd_width": 16,
+        "simd_throughput": 32,
+        "hbm_backend": "naive",
+        "hbf_backend": "bank_plane",
+        "hbm_stacks": 3,
+        "hbf_stacks": 2,
+        "hbf_dies_per_stack": 8,
+        "hbf_banks_per_channel": 16,
+        "hbf_read_latency_cycles": 5640,
+        "hbf_write_latency_cycles": 105750,
+        "hbf_write_bw_GBps": 27.96,
+        "topology": "CoLocated",
+        "hbm_capacity_bytes": 25769803776,
+        "hbf_capacity_bytes": 549755813888,
+        "hbm_read_bw_GBps": 933,
+        "hbf_read_bw_GBps": 524.288
+      }
+    }
+  },
+  "inputs": {
+    "gdn_prediction": {
+      "path": "/Users/kong/Documents/Github/GTSim/validation/results/serve-hbf-backends/20261030-state-v2/gdn_prediction-winner.gtsir",
+      "sha256": "98c5a20a8e4e2370e8204280f3a3181f5ca08ec2620905eccdfde2626b67cc31",
+      "label": "GDN recurrent prediction",
+      "MNK": [
+        1,
+        128,
+        128
+      ],
+      "expected_weight_bytes": 0,
+      "batch": 32,
+      "original_best_cycles": null,
+      "provenance": {
+        "selected_candidate": 7,
+        "selection": {
+          "output_tile": 64,
+          "reduction_tile": 128,
+          "warps": 2,
+          "stages": 1,
+          "inline": 1
+        },
+        "selection_result_sha256": "80b497646e23f55148a51c218a7f03566502e44866a69d88af5fce48784d1360",
+        "extraction": {
+          "source_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+          "retained_stages": [
+            "prediction"
+          ],
+          "operations": 1409,
+          "ctas": 64,
+          "external_completed_dependencies_removed": 64,
+          "scope": "Unchanged selected stages from full-GDN winner; external activation/state inputs are resident HBM"
+        }
+      }
+    },
+    "gdn_readout": {
+      "path": "/Users/kong/Documents/Github/GTSim/validation/results/serve-hbf-backends/20261030-state-v2/gdn_readout-winner.gtsir",
+      "sha256": "3fd063416b0751f926143fe506beb631de19fe5987f9790b13135b9cfcf4fd45",
+      "label": "GDN recurrent readout+cast",
+      "MNK": [
+        1,
+        128,
+        128
+      ],
+      "expected_weight_bytes": 0,
+      "batch": 32,
+      "original_best_cycles": null,
+      "provenance": {
+        "selected_candidate": 7,
+        "selection": {
+          "output_tile": 64,
+          "reduction_tile": 128,
+          "warps": 2,
+          "stages": 1,
+          "inline": 1
+        },
+        "selection_result_sha256": "80b497646e23f55148a51c218a7f03566502e44866a69d88af5fce48784d1360",
+        "extraction": {
+          "source_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+          "retained_stages": [
+            "attn_acc",
+            "attn"
+          ],
+          "operations": 2050,
+          "ctas": 128,
+          "external_completed_dependencies_removed": 16384,
+          "scope": "Unchanged selected stages from full-GDN winner; external activation/state inputs are resident HBM"
+        }
+      }
+    },
+    "gdn_state_update": {
+      "path": "/Users/kong/Documents/Github/GTSim/validation/results/serve-hbf-backends/20261030-state-v2/gdn_state_update-winner.gtsir",
+      "sha256": "2f2edfef6e56c99c2bea4fc2fb0ff2018c251b637e4c05815d12df48a8d52b9e",
+      "label": "GDN rank-1 state update",
+      "MNK": [
+        128,
+        128,
+        1
+      ],
+      "expected_weight_bytes": 0,
+      "batch": 32,
+      "original_best_cycles": null,
+      "provenance": {
+        "selected_candidate": 7,
+        "selection": {
+          "output_tile": 64,
+          "reduction_tile": 128,
+          "warps": 2,
+          "stages": 1,
+          "inline": 1
+        },
+        "selection_result_sha256": "80b497646e23f55148a51c218a7f03566502e44866a69d88af5fce48784d1360",
+        "extraction": {
+          "source_sha256": "2566705eafdd52ec401b6b0285ef4fc64720fc68661eec73b27be9ca47979db4",
+          "retained_stages": [
+            "NextState"
+          ],
+          "operations": 131073,
+          "ctas": 8192,
+          "external_completed_dependencies_removed": 128,
+          "scope": "Unchanged selected stages from full-GDN winner; external activation/state inputs are resident HBM"
+        }
+      }
+    }
+  },
+  "measurement": "DAG completion cycles / 1410 MHz; memory drain recorded separately"
+}

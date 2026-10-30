@@ -1,0 +1,63 @@
+Test project /Users/kong/Documents/Github/GTSim/build-backends
+      Start  1: fa2_decode_semantics
+ 1/29 Test  #1: fa2_decode_semantics .............   Passed    3.34 sec
+      Start  2: serve_ir_boundary
+ 2/29 Test  #2: serve_ir_boundary ................   Passed    0.02 sec
+      Start  3: tile_ir_gemm_parity
+ 3/29 Test  #3: tile_ir_gemm_parity ..............   Passed    0.05 sec
+      Start  4: tile_ir_boundary
+ 4/29 Test  #4: tile_ir_boundary .................   Passed    0.03 sec
+      Start  5: tile_ir_smoke
+ 5/29 Test  #5: tile_ir_smoke ....................   Passed    0.06 sec
+      Start  6: gemm_smoke
+ 6/29 Test  #6: gemm_smoke .......................   Passed    0.26 sec
+      Start  7: fa3_smoke
+ 7/29 Test  #7: fa3_smoke ........................   Passed    0.16 sec
+      Start  8: arch_conf_parser
+ 8/29 Test  #8: arch_conf_parser .................   Passed    0.02 sec
+      Start  9: memory_address_identity
+ 9/29 Test  #9: memory_address_identity ..........   Passed    0.03 sec
+      Start 10: memory_topology_routes
+10/29 Test #10: memory_topology_routes ...........   Passed    0.04 sec
+      Start 11: kernel_swopt_semantics
+11/29 Test #11: kernel_swopt_semantics ...........   Passed    0.16 sec
+      Start 12: completion_queue_semantics
+12/29 Test #12: completion_queue_semantics .......   Passed    0.01 sec
+      Start 13: hbm_address_and_clock
+13/29 Test #13: hbm_address_and_clock ............   Passed    0.01 sec
+      Start 14: hbf_serving_matched_parameters
+14/29 Test #14: hbf_serving_matched_parameters ...   Passed    0.01 sec
+      Start 15: hbf_bank_plane_contract
+15/29 Test #15: hbf_bank_plane_contract ..........   Passed    0.01 sec
+      Start 16: mixed_workload_placement
+16/29 Test #16: mixed_workload_placement .........   Passed    0.13 sec
+      Start 17: ramulator_backend_contract
+17/29 Test #17: ramulator_backend_contract .......   Passed    0.26 sec
+      Start 18: ramulator_gemm_smoke
+18/29 Test #18: ramulator_gemm_smoke .............   Passed    0.13 sec
+      Start 19: ramulator_fa3_smoke
+19/29 Test #19: ramulator_fa3_smoke ..............   Passed    0.20 sec
+      Start 20: mixed_hbfine_smoke
+20/29 Test #20: mixed_hbfine_smoke ...............   Passed    0.84 sec
+      Start 21: tile_ir_persistent_parity
+21/29 Test #21: tile_ir_persistent_parity ........   Passed    0.14 sec
+      Start 22: workload_profile_boundary
+22/29 Test #22: workload_profile_boundary ........   Passed    0.02 sec
+      Start 23: v0_1_0_regression
+23/29 Test #23: v0_1_0_regression ................   Passed    0.34 sec
+      Start 24: tvm_serving_semantics
+24/29 Test #24: tvm_serving_semantics ............   Passed   29.07 sec
+      Start 25: tvm_tensor_placement
+25/29 Test #25: tvm_tensor_placement .............   Passed   29.00 sec
+      Start 26: tvm_gemm_frontend
+26/29 Test #26: tvm_gemm_frontend ................   Passed    2.32 sec
+      Start 27: tvm_auto_schedule
+27/29 Test #27: tvm_auto_schedule ................   Passed   11.78 sec
+      Start 28: tvm_memory_search
+28/29 Test #28: tvm_memory_search ................   Passed    2.50 sec
+      Start 29: hbfine_device_contract
+29/29 Test #29: hbfine_device_contract ...........   Passed    0.01 sec
+
+100% tests passed out of 29
+
+Total Test time (real) =  80.96 sec

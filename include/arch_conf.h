@@ -45,6 +45,24 @@ template <> struct meta<GTSim::MemoryTopology> {
                                               "Cascaded", Cascaded);
 };
 
+template <> struct meta<GTSim::HBMBackend> {
+    using enum GTSim::HBMBackend;
+    static constexpr auto value = enumerate("naive", Naive, "ramulator2", Ramulator2);
+};
+
+template <> struct meta<GTSim::HBFBackend> {
+    using enum GTSim::HBFBackend;
+    static constexpr auto value = enumerate("naive", Naive, "bank_plane", BankPlane);
+};
+template <> struct meta<GTSim::HBFGeometryProfile> {
+    using enum GTSim::HBFGeometryProfile;
+    static constexpr auto value = enumerate("ocp_reference", OCPReference, "hbflex_research", HBFlexResearch);
+};
+template <> struct meta<GTSim::TensorPlacementProfile> {
+    using enum GTSim::TensorPlacementProfile;
+    static constexpr auto value = enumerate("all_hbm", AllHBM, "gemm_b_hbf", GEMMBInHBF, "fa3_q_hbf", FA3QInHBF);
+};
+
 } // namespace glz
 
 namespace GTSim {
@@ -132,10 +150,15 @@ public:
                 "': " + glz::format_error(config_error, normalized_yaml));
         }
         try {
-            validate_memory_system_config(candidate.memory);
+            validate_memory_system_config(candidate.memory, candidate.core_frequency_mhz);
         } catch (const std::exception& error) {
             throw std::runtime_error("invalid memory configuration in '" +
                                      filename_.string() + "': " + error.what());
+        }
+        auto& ramulator_file = candidate.memory.hbm.ramulator.config_file;
+        if (!ramulator_file.empty() && std::filesystem::path(ramulator_file).is_relative()) {
+            ramulator_file = (std::filesystem::absolute(filename_).parent_path() /
+                              ramulator_file).lexically_normal().string();
         }
         conf = std::move(candidate);
     }
@@ -189,7 +212,7 @@ private:
     }
 
     static bool is_memory_config_field(std::string_view key) {
-        return key == "topology" || key == "hbm" || key == "hbf" ||
+        return key == "topology" || key == "placement" || key == "address_layout" || key == "hbm" || key == "hbf" ||
                key == "d2dlink";
     }
 
@@ -270,7 +293,7 @@ private:
             if (is_metadata(key)) continue;
 
             if (is_memory_config_field(key)) {
-                if (key == "topology") {
+                if (key == "topology" || key == "placement") {
                     add_member(memory_target, key, value);
                     continue;
                 }

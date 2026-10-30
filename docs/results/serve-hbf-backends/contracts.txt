@@ -1,0 +1,21 @@
+Test project /Users/kong/Documents/Github/GTSim/build-backends
+    Start  8: arch_conf_parser
+1/8 Test  #8: arch_conf_parser .................   Passed    0.01 sec
+    Start 12: completion_queue_semantics
+2/8 Test #12: completion_queue_semantics .......   Passed    0.00 sec
+    Start 13: hbm_address_and_clock
+3/8 Test #13: hbm_address_and_clock ............   Passed    0.00 sec
+    Start 14: hbf_serving_matched_parameters
+4/8 Test #14: hbf_serving_matched_parameters ...   Passed    0.01 sec
+    Start 15: hbf_bank_plane_contract
+5/8 Test #15: hbf_bank_plane_contract ..........   Passed    0.01 sec
+    Start 16: mixed_workload_placement
+6/8 Test #16: mixed_workload_placement .........   Passed    0.67 sec
+    Start 17: ramulator_backend_contract
+7/8 Test #17: ramulator_backend_contract .......   Passed    0.20 sec
+    Start 29: hbfine_device_contract
+8/8 Test #29: hbfine_device_contract ...........   Passed    0.00 sec
+
+100% tests passed out of 8
+
+Total Test time (real) =   0.91 sec

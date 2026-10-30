@@ -1,0 +1,86 @@
+# Research assumption, not a guaranteed Grade-1 NAND specification.
+# HBM: A100 5-stack aggregate scaled by 3/5 (311 GB/s per stack).
+# HBF: existing 16-Hi Simple rates 524.288/27.96 GB/s scaled by 8/16.
+# Two HBF stacks: 524.288 GB/s read, 27.96 GB/s write.
+# Grade-1 host-link ceiling: 384 GB/s per stack, 768 aggregate.
+# NAND read/program latency assumptions 4/75 us -> 5640/105750 cycles @1410 MHz.
+name: A100 3M2F matched 8-Hi - Simple HBM plus bank_plane HBF
+source: NVIDIA A100 product brief and Ampere tuning guide; uncalibrated timing assumptions documented in report
+sm_count: 108
+core_frequency_mhz: 1410
+shared_memory_per_sm_bytes: 167936
+shared_memory_per_cta_bytes: 166912
+register_file_per_sm_bytes: 262144
+max_warps_per_sm: 64
+max_concurrent_blocks_per_sm: 32
+tensor_core_throughput: 128
+tensor_core_latency_cycles: 16
+tensor_core_width: 16
+# GA100: 64 FP32 cores/SM, four subpartitions -> 16 FP32 FMA lanes/SP.
+# A 32-lane SIMD instruction occupies this pipeline for two cycles.
+# Nominal dense FP32: 108 * 4 * 16 * 2 * 1.410 GHz = 19.49184 TFLOP/s.
+simd_throughput: 32
+simd_width: 16
+l2_cache_size_bytes: 41943040
+l2_hit_latency_cycles: 300
+l2_bandwidth_bytes_per_cycle: 1853
+l2_write_bandwidth_bytes_per_cycle: 926
+sram_latency_cycles: 33
+sram_bandwidth_bytes_per_cycle: 128
+startup_delay_cycles: 0
+block_schedule_latency_cycles: 0
+topology: CoLocated
+hbm:
+  backend: naive
+  model_channels: false
+  stacks: 3
+  capacity_bytes_per_stack: 8589934592
+  read_bw_GBps: 933
+  write_max_bw_GBps: 466.5
+  read_latency_cycles: 270
+  write_latency_cycles: 270
+  capacity_bytes: 25769803776
+hbf:
+  backend: bank_plane
+  controller:
+    geometry: hbflex_research
+    stacks: 2
+    host_channels_per_stack: 16
+    virtual_axi_ports_per_channel: 1
+    dies_per_stack: 8
+    planes_per_die: 32
+    banks_per_channel: 16
+    planes_per_bank: 1
+    blocks_per_plane: 512
+    pages_per_block: 512
+    page_bytes: 4096
+    page_buffers_per_bank: 2
+    host_stripe_bytes: 4096
+    read_target_GBps_per_stack: 262.144
+    write_target_GBps_per_stack: 13.98
+    ucie_ceiling_GBps_per_stack: 384
+    sense_latency_us: 4
+    program_latency_us: 75
+    allow_program: false
+    base_die_sram_bytes_per_stack: 20000000
+    core_transfer_GBps_per_die: 0
+    ecc_GBps_per_stack: 0
+  read_bw_GBps: 524.288
+  write_bw_GBps: 27.96
+  read_latency_cycles: 5640
+  write_latency_cycles: 105750
+  capacity_bytes: 549755813888
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_GBps: 4608
+    latency_cycles: 10
+  gpu_to_hbf:
+    bandwidth_GBps: 768
+    latency_cycles: 10
+address_layout:
+  enabled: true
+  hbm_base: 0
+  hbm_capacity_bytes: 25769803776
+  hbf_base: 25769803776
+  hbf_capacity_bytes: 549755813888
+  hbm_allocation_offset: 0

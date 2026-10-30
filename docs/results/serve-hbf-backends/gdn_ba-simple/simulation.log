@@ -1,0 +1,89 @@
+Generated DAG with 410 nodes
+Starting simulation with 410 nodes...
+Warp distribution: 4:6 1:199 5:5 0:200
+Total warps in use: 4
+Warps per subpartition: 1 (SP0: warps 0,4,8,12... | SP1: 1,5,9,13... | SP2: 2,6,10,14... | SP3: 3,7,11,15...)
+
+Dynamic Allocation (O2): DISABLED
+Scheduling Policy: Per-Subpartition GTO (Greedy-Then-Oldest)
+  - Each subpartition schedules independently among its 4 warps
+  - Greedy: Continue from last issued warp if possible
+  - Oldest: Pick warp with longest stall time (oldest last_issue_cycle)
+Memory model: T_sum = T_frontend + T_queuing + T_data + T_bank_conflict
+Tensor throughput: 128 ops/inst
+SIMD throughput: 32 ops/inst
+SFU throughput: 32 ops/inst
+LS throughput: 128 bytes/inst
+Tensor width: 16 ops/cycle
+SIMD width: 16 ops/cycle
+SFU width: 4 ops/cycle
+LS width: 128 bytes/cycle
+Number of SMs: 108
+Cluster size: DISABLED
+Max concurrent blocks per SM: 32
+Workload type: GEMM
+SRAM read queue depth: 64
+SRAM write queue depth: 64
+TMEM read queue depth: 64
+TMEM write queue depth: 64
+TMEM read latency: 33 cycles
+TMEM write latency: 33 cycles
+TMEM read bandwidth: 128 bytes/cycle
+TMEM write bandwidth: 128 bytes/cycle
+L2 cache size: 41943040 bytes
+L2 line size: 128 bytes
+L2 hit latency: 300 cycles
+L2 bandwidth: 1853 bytes/cycle
+L2 write bandwidth: 926 bytes/cycle
+L2 queue depth: 65536
+L2 max transactions per cycle per subpartition: 1
+Core frequency: 1410 MHz
+Memory topology: CoLocated
+HBM backend: naive; read bandwidth: 933 GB/s, write max: 466.5 GB/s
+HBM read/write latency: 270/270 cycles
+HBF read/write bandwidth: 524.288/27.96 GB/s
+HBF read/write latency: 5640/105750 cycles
+gpu_to_hbm link: 4608 GB/s, 10 cycles
+gpu_to_hbf link: 768 GB/s, 10 cycles
+
+Progress: cycle 10000
+Progress: cycle 20000
+Progress: cycle 30000
+Progress: cycle 40000
+Progress: cycle 50000
+Progress: cycle 60000
+Progress: cycle 70000
+Progress: cycle 80000
+Progress: cycle 90000
+Progress: cycle 100000
+Progress: cycle 110000
+Progress: cycle 120000
+Progress: cycle 130000
+Progress: cycle 140000
+Progress: cycle 150000
+Progress: cycle 160000
+Progress: cycle 170000
+Progress: cycle 180000
+Progress: cycle 190000
+Progress: cycle 200000
+Progress: cycle 210000
+Progress: cycle 220000
+Memory drained at cycle: 222308
+
+✅ Simulation completed at cycle 222308
+
+Shared Memory Bank Conflict Stats:
+  Total ld.sram2reg with conflicts: 0
+  Total cycles added by conflicts: 0
+Off-chip memory statistics:
+  HBM requests: 69 (read 66, write 3), bytes: read 8448, write 384, average latency: 292.00 cycles
+  HBF requests: 4096 (read 4096, write 0), bytes: read 524288, write 0, average latency: 5662.00 cycles
+  gpu_to_hbm transferred bytes: GPU->memory 1440, memory->GPU 8496; utilization: 0.0%/0.0%
+  gpu_to_hbf transferred bytes: GPU->memory 65536, memory->GPU 524288; utilization: 0.1%/0.4%
+
+Total cycles: 222308
+Finished: 410/410
+Kernel time (last DRAM store issue cycle): 221704
+Kernel time (last output store issue cycle): 221704
+Stage timing: ba first 221087 complete 222308
+Stage timing: ba_acc first 1 complete 221086

@@ -11,15 +11,29 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/hbfine/CMakeLists.txt")
+  message(FATAL_ERROR "HBFine submodule is missing; initialize 3rdparty/hbfine before building")
+endif()
+add_subdirectory(3rdparty/hbfine)
+
 add_library(gtsim_core STATIC
   src/scheduler.cpp
   src/subpartition.cpp
   src/sm.cpp
   src/gpu.cpp
+  src/hbfine_backend.cpp
+  src/memory_backend.cpp
   src/simulator.cpp)
 target_include_directories(gtsim_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/glaze/include)
+
+target_link_libraries(gtsim_core PUBLIC HBFine::hbfine)
+
+option(GTSIM_ENABLE_RAMULATOR2 "Build the optional Ramulator2 HBM3 backend" OFF)
+if(GTSIM_ENABLE_RAMULATOR2)
+  include(cmake/Ramulator2.cmake)
+endif()
 
 add_executable(gtsim_gemm workloads/gemm/gemm_h100.cpp)
 target_link_libraries(gtsim_gemm PRIVATE gtsim_core)
@@ -82,8 +96,44 @@ if(BUILD_TESTING)
   add_executable(kernel_swopt_tests tests/kernel_swopt_tests.cpp)
   target_link_libraries(kernel_swopt_tests PRIVATE gtsim_core)
   add_test(NAME kernel_swopt_semantics COMMAND kernel_swopt_tests)
+  add_executable(completion_queue_tests tests/completion_queue_tests.cpp)
+  target_link_libraries(completion_queue_tests PRIVATE gtsim_core)
+  add_test(NAME completion_queue_semantics COMMAND completion_queue_tests)
+  add_executable(hbm_address_tests tests/hbm_address_tests.cpp)
+  target_link_libraries(hbm_address_tests PRIVATE gtsim_core)
+  add_test(NAME hbm_address_and_clock COMMAND hbm_address_tests)
+  add_executable(hbf_serving_tests tests/hbf_serving_tests.cpp)
+  target_link_libraries(hbf_serving_tests PRIVATE gtsim_core)
+  add_test(NAME hbf_serving_matched_parameters COMMAND hbf_serving_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/a100-pcie40-3m2f-grade1-simple-matched.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/a100-pcie40-3m2f-grade1-hbfine.yaml)
+  add_executable(hbf_backend_tests tests/hbf_backend_tests.cpp)
+  target_link_libraries(hbf_backend_tests PRIVATE gtsim_core)
+  add_test(NAME hbf_bank_plane_contract COMMAND hbf_backend_tests)
+  add_executable(workload_placement_tests tests/workload_placement_tests.cpp
+    workloads/gemm/gemm_h100.cpp workloads/fa3/fa3_h100.cpp)
+  target_compile_definitions(workload_placement_tests PRIVATE GTSIM_WORKLOAD_LIBRARY)
+  target_link_libraries(workload_placement_tests PRIVATE gtsim_core)
+  add_test(NAME mixed_workload_placement COMMAND workload_placement_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/configs/memconf/3F2M_bank_plane.yaml)
+  if(GTSIM_ENABLE_RAMULATOR2)
+    set(RAMULATOR_H100_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/ramulator/h100-sxm-ramulator.yaml)
+    add_executable(ramulator_backend_tests tests/ramulator_backend_tests.cpp)
+    target_link_libraries(ramulator_backend_tests PRIVATE gtsim_core)
+    add_test(NAME ramulator_backend_contract COMMAND ramulator_backend_tests ${RAMULATOR_H100_CONFIG})
+    add_test(NAME ramulator_gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG}
+             --memory-config ${RAMULATOR_H100_CONFIG} 128 256 64)
+    add_test(NAME ramulator_fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG}
+             --memory-config ${RAMULATOR_H100_CONFIG} 1 1 1 128 128)
+    set_tests_properties(ramulator_backend_contract ramulator_gemm_smoke ramulator_fa3_smoke
+                         PROPERTIES TIMEOUT 180)
+  endif()
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME mixed_hbfine_smoke
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/hbf/check_smoke.py
+              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(mixed_hbfine_smoke PROPERTIES TIMEOUT 180)
     add_test(NAME tile_ir_persistent_parity
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_manual_gemm.py
               --oracle $<TARGET_FILE:tile_ir_parity_tests>)

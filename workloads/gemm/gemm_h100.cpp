@@ -1,4 +1,5 @@
 #include "arch_conf.h"
+#include "../common/placement.h"
 #include "../common/workload_options.h"
 #include "../common/split_reduce.h"
 #include <cstdlib>
@@ -10,7 +11,10 @@
 using namespace GTSim;
 
 DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
-                     const KernelOptions& input_options = {}, const SimulatorConfig& hardware = make_h100_sxm_config()) {
+                     const KernelOptions& input_options = {}, const SimulatorConfig& hardware = make_h100_sxm_config(),
+                     const WorkloadMemoryOptions* memory = nullptr) {
+    if (memory && memory->placement == TensorPlacementProfile::FA3QInHBF)
+        throw std::invalid_argument("FA3 Q placement is not a GEMM placement");
     KernelOptions options = input_options;
     // Single-token decode: global tensors retain one live row, while the
     // Tensor Core consumer group executes a padded m64 tile.
@@ -19,6 +23,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
     if ((M != 1 && M % options.bm) || N % options.bn || K % (options.split * options.bk))
         throw std::invalid_argument("GEMM requires M=1 or complete M tiles, and aligned N/K");
     DAG* dag = new DAG();
+    if (memory) dag->tensor_registry = TensorRegistry(memory->layout);
     int node_id = 0;
 
     constexpr int TensorID_A { 0 };
@@ -31,7 +36,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
     dag->tensor_registry.allocate_tensor(TensorID_B, "B", {static_cast<std::uint64_t>(K),
                                            static_cast<std::uint64_t>(N)},
                                  {static_cast<std::uint64_t>(N), 1}, options.io_dtype,
-                                 MemoryTier::HBF);
+                                 memory ? (memory->placement == TensorPlacementProfile::GEMMBInHBF ? MemoryTier::HBF : MemoryTier::HBM) : MemoryTier::HBF, true, true);
     dag->tensor_registry.allocate_tensor(TensorID_C, "C", {static_cast<std::uint64_t>(M),
                                            static_cast<std::uint64_t>(N)},
                                  {static_cast<std::uint64_t>(N), 1}, options.io_dtype,
@@ -357,6 +362,11 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
     return dag;
 }
 
+DAG* build_gemm_h100(int M, int N, int K, WorkloadMemoryOptions memory) {
+    return build_gemm_h100(M, N, K, {}, make_h100_sxm_config(), &memory);
+}
+
+#ifndef GTSIM_WORKLOAD_LIBRARY
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: gtsim_gemm <architecture.yaml> [M N K] "
@@ -400,7 +410,13 @@ int main(int argc, char* argv[]) {
     std::cout << "=== H100 GEMM ===\n\n";
 
     DAG* dag = nullptr;
-    try { dag = build_gemm_h100(M, N, K, options, config); }
+    try {
+        const auto memory = workload_memory_options(config);
+        const bool segmented = config.memory.address_layout.enabled ||
+                               config.memory.placement != TensorPlacementProfile::AllHBM;
+        dag = build_gemm_h100(M, N, K, options, config, segmented ? &memory : nullptr);
+        if (segmented) print_workload_memory(dag->tensor_registry, memory.placement);
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
     std::cout << "Generated DAG with " << dag->nodes.size() << " nodes\n\n";
 
@@ -418,3 +434,4 @@ int main(int argc, char* argv[]) {
     delete dag;
     return complete ? 0 : 3;
 }
+#endif

@@ -1,0 +1,7 @@
+# Apply after the complete mixed package profile. Same H100 HBM3 timing per channel.
+hbm:
+  backend: ramulator2
+  stacks: 2
+  ramulator:
+    config_file: ../ramulator/h100_hbm3_2stack.yaml
+    stacks: 2
