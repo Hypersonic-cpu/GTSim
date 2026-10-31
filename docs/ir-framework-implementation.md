@@ -40,3 +40,32 @@ Generated graphs, stage JSON, raw logs, hashes and detailed per-case reports
 remain under ignored `validation/results/ir-framework/`. Small CSV/JSON/Markdown
 summaries are tracked. No simulation figures are presented as physical GPU
 measurements or numerical execution proof.
+
+## Structured refactor
+
+The architecture follow-up is implemented in the structured schema revision.
+Reference loop bodies are in `kernels/hopper/reference/templates.py`; typed
+geometry is centralized in `ir/profiles.py`. Flow verification is split between
+domain, tensor/coverage, mapping, SSA/event and lifetime checks under `verify/`.
+Native pattern verification checks instruction families, resource/layout records,
+collectives and async protocol. IR models contain data and delegate verification.
+
+The former flattened native DAG model is now the execution graph model in
+`ir/graph.py`. Full expansion lives under `passes/hopper/expand_*` and is invoked
+only by `lower_execution.py`. Early IR size is independent of CTA/iteration/warp
+counts apart from scalar loop bounds and tensor dimensions.
+
+`KernelExecutionSession` now owns initialization/retirement/rebind procedures for
+launch-local scheduling, scoreboards and admission. Both the legacy Simulator
+constructor and subsequent launches use that initialization seam. Simulator still
+owns the persistent GPU and clock; no second timing engine was introduced. Session
+retirement rejects pending pipeline, TMA, SRAM, retry or remote work. Tests cover
+both kernel orders, growing/shrinking CTA/warp ranges and varying IR-05 resources.
+
+**Runtime limitation:** every launch conservatively waits for the full memory
+system to drain. L2 lines and memory-controller state persist, but this is not a
+cross-kernel asynchronous prefetch or overlap protocol.
+
+The refactor report and before/after sizes are in `serving-ir/refactor-results/`.
+Formatting-only commits precede semantic changes; final checks use Ruff 0.14.4
+and clang-format 23.1.3, pinned in the developer extra and formatting CI workflow.

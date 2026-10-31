@@ -1,0 +1,252 @@
+{
+  "commit": "c425f65eb6e74707e28484174e1e7c972048fa5e",
+  "sizes": [
+    {
+      "after_execution_bytes": 26785892,
+      "after_flow_bytes": 63057,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100943,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 26785892,
+      "before_flow_bytes": 3228084,
+      "before_flow_operations": 3840,
+      "before_native_bytes": 26785884,
+      "before_native_instructions": 56192,
+      "case": "fa3-0",
+      "execution_nodes": 56192
+    },
+    {
+      "after_execution_bytes": 105735145,
+      "after_flow_bytes": 63063,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100949,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 105735145,
+      "before_flow_bytes": 12468116,
+      "before_flow_operations": 14848,
+      "before_native_bytes": 105735137,
+      "before_native_instructions": 219904,
+      "case": "fa3-1",
+      "execution_nodes": 219904
+    },
+    {
+      "after_execution_bytes": 237184679,
+      "after_flow_bytes": 63064,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100950,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 237184679,
+      "before_flow_bytes": 27766036,
+      "before_flow_operations": 33024,
+      "before_native_bytes": 237184671,
+      "before_native_instructions": 491136,
+      "case": "fa3-2",
+      "execution_nodes": 491136
+    },
+    {
+      "after_execution_bytes": 53789988,
+      "after_flow_bytes": 63063,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100949,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 53789988,
+      "before_flow_bytes": 6466436,
+      "before_flow_operations": 7680,
+      "before_native_bytes": 53789980,
+      "before_native_instructions": 112384,
+      "case": "fa3-3",
+      "execution_nodes": 112384
+    },
+    {
+      "after_execution_bytes": 212796645,
+      "after_flow_bytes": 63073,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100959,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 212796645,
+      "before_flow_bytes": 25014332,
+      "before_flow_operations": 29696,
+      "before_native_bytes": 212796637,
+      "before_native_instructions": 439808,
+      "case": "fa3-4",
+      "execution_nodes": 439808
+    },
+    {
+      "after_execution_bytes": 477057137,
+      "after_flow_bytes": 63074,
+      "after_flow_operations": 29,
+      "after_native_bytes": 100960,
+      "after_native_patterns": 29,
+      "before_execution_bytes": 477057137,
+      "before_flow_bytes": 55843238,
+      "before_flow_operations": 66048,
+      "before_native_bytes": 477057129,
+      "before_native_instructions": 982272,
+      "case": "fa3-5",
+      "execution_nodes": 982272
+    },
+    {
+      "after_execution_bytes": 6904053,
+      "after_flow_bytes": 19784,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31831,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 6904053,
+      "before_flow_bytes": 307237,
+      "before_flow_operations": 336,
+      "before_native_bytes": 6904045,
+      "before_native_instructions": 9568,
+      "case": "gemm-0",
+      "execution_nodes": 9568
+    },
+    {
+      "after_execution_bytes": 11818083,
+      "after_flow_bytes": 19788,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31835,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 11818083,
+      "before_flow_bytes": 598407,
+      "before_flow_operations": 656,
+      "before_native_bytes": 11818075,
+      "before_native_instructions": 18080,
+      "case": "gemm-1",
+      "execution_nodes": 18080
+    },
+    {
+      "after_execution_bytes": 14095321,
+      "after_flow_bytes": 19791,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31838,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 14095321,
+      "before_flow_bytes": 617095,
+      "before_flow_operations": 672,
+      "before_native_bytes": 14095313,
+      "before_native_instructions": 19136,
+      "case": "gemm-2",
+      "execution_nodes": 19136
+    },
+    {
+      "after_execution_bytes": 23910691,
+      "after_flow_bytes": 19795,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31842,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 23910691,
+      "before_flow_bytes": 1202953,
+      "before_flow_operations": 1312,
+      "before_native_bytes": 23910683,
+      "before_native_instructions": 36160,
+      "case": "gemm-3",
+      "execution_nodes": 36160
+    },
+    {
+      "after_execution_bytes": 14093915,
+      "after_flow_bytes": 19791,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31838,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 14093915,
+      "before_flow_bytes": 617059,
+      "before_flow_operations": 672,
+      "before_native_bytes": 14093907,
+      "before_native_instructions": 19136,
+      "case": "gemm-4",
+      "execution_nodes": 19136
+    },
+    {
+      "after_execution_bytes": 23907941,
+      "after_flow_bytes": 19795,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31842,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 23907941,
+      "before_flow_bytes": 1202885,
+      "before_flow_operations": 1312,
+      "before_native_bytes": 23907933,
+      "before_native_instructions": 36160,
+      "case": "gemm-5",
+      "execution_nodes": 36160
+    },
+    {
+      "after_execution_bytes": 28506879,
+      "after_flow_bytes": 19794,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31841,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 28506879,
+      "before_flow_bytes": 1239217,
+      "before_flow_operations": 1344,
+      "before_native_bytes": 28506871,
+      "before_native_instructions": 38272,
+      "case": "gemm-6",
+      "execution_nodes": 38272
+    },
+    {
+      "after_execution_bytes": 48129609,
+      "after_flow_bytes": 19798,
+      "after_flow_operations": 6,
+      "after_native_bytes": 31845,
+      "after_native_patterns": 6,
+      "before_execution_bytes": 48129609,
+      "before_flow_bytes": 2416755,
+      "before_flow_operations": 2624,
+      "before_native_bytes": 48129601,
+      "before_native_instructions": 72320,
+      "case": "gemm-7",
+      "execution_nodes": 72320
+    }
+  ],
+  "validation": {
+    "hardware": {
+      "max_warps_per_sm": 64,
+      "num_sms": 132,
+      "register_file_per_sm_bytes": 262144,
+      "shared_memory_per_cta_bytes": 232448,
+      "shared_memory_per_sm_bytes": 233472
+    },
+    "status": "PASS",
+    "suite": "h100-v0.1.0",
+    "workloads": {
+      "fa3": {
+        "candidate": {
+          "mape_percent": 4.953759564438511,
+          "max_ape_percent": 6.822141804047715,
+          "pearson_r": 0.9988018252180286
+        },
+        "cases": 6,
+        "mape_percentage_point_change": 0.0,
+        "max_ape_percentage_point_change": 0.0,
+        "reference": {
+          "mape_percent": 4.953759564438511,
+          "max_ape_percent": 6.822141804047715,
+          "pearson_r": 0.9988018252180286
+        },
+        "relative_alarm": {
+          "mape_percent": false,
+          "max_ape_percent": false
+        }
+      },
+      "gemm": {
+        "candidate": {
+          "mape_percent": 5.701982533931243,
+          "max_ape_percent": 10.796776337653705,
+          "pearson_r": 0.9889885311345739
+        },
+        "cases": 8,
+        "mape_percentage_point_change": 0.0,
+        "max_ape_percentage_point_change": 0.0,
+        "reference": {
+          "mape_percent": 5.701982533931243,
+          "max_ape_percent": 10.796776337653705,
+          "pearson_r": 0.9889885311345739
+        },
+        "relative_alarm": {
+          "mape_percent": false,
+          "max_ape_percent": false
+        }
+      }
+    }
+  }
+}

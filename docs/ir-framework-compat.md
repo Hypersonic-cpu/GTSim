@@ -63,3 +63,23 @@ C++ builders and requires exact same-build cycle parity before calculating
 measured-data MAPE, maxAPE and Pearson. Accuracy alarms are relative increases
 of 5% in MAPE or 10% in maxAPE, with percentage-point changes also recorded.
 The original measured CSVs and stored reference cycles are unchanged.
+
+## Refactor development checks
+
+The `.progir`, `.algoir`, `.flowir`, `.nvir` and `.gtsir` extensions are unchanged.
+The Algorithm/Flow/native JSON schemas are now revision 2. Regenerate old compiler
+intermediates; legacy text parsers and version-1 execution payloads remain valid.
+The compiler supports the fixed reference profiles; modified typed schedules or
+mapping/event protocols outside them fail explicitly instead of falling back.
+
+```bash
+python -m pip install -e './frontend[dev]'
+ruff format --check frontend/src/gtsim_frontend tests/ir_frontend tests/reference_parity
+ruff check --select E9,F63,F7,F82 frontend/src/gtsim_frontend tests/ir_frontend tests/reference_parity
+clang-format --dry-run --Werror include/runtime/kernel_execution_session.h src/runtime/kernel_execution_session.cpp include/simulator.h src/simulator.cpp include/tma.h src/runtime/program_executor.cpp
+```
+
+Ruff 0.14.4 and clang-format 23.1.3 are pinned. Lint checks intentionally enable
+only syntax/control-flow error rules. `.github/workflows/ir-format.yml` enforces
+these checks; it does not reformat unrelated legacy files. Markdown updates use
+Prettier 3.6.2; report JSON is produced by deterministic Python serialization.

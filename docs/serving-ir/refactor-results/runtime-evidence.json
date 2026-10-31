@@ -1,0 +1,426 @@
+{
+  "mixed_program": {
+    "total_cycles": 12528,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 5316,
+        "complete_cycle": 5316,
+        "device_cycles": 5316,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      },
+      {
+        "id": "fa30",
+        "state": "COMPLETED",
+        "launch_cycle": 5316,
+        "start_cycle": 5316,
+        "device_complete_cycle": 12528,
+        "complete_cycle": 12528,
+        "device_cycles": 7212,
+        "l2_lines_before": 768,
+        "l2_lines_after": 1536,
+        "hbm_read_bytes": 98304
+      }
+    ],
+    "events": {
+      "all_done": 12528,
+      "gemm_done": 5316
+    },
+    "state_history": {
+      "fa30": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 196608,
+      "HBM_write": 98304
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "varying_cta_program": {
+    "total_cycles": 17859,
+    "per_kernel": [
+      {
+        "id": "fa30",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 7212,
+        "complete_cycle": 7212,
+        "device_cycles": 7212,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      },
+      {
+        "id": "large",
+        "state": "COMPLETED",
+        "launch_cycle": 7212,
+        "start_cycle": 7212,
+        "device_complete_cycle": 12543,
+        "complete_cycle": 12543,
+        "device_cycles": 5331,
+        "l2_lines_before": 768,
+        "l2_lines_after": 2816,
+        "hbm_read_bytes": 262144
+      },
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 12543,
+        "start_cycle": 12543,
+        "device_complete_cycle": 17859,
+        "complete_cycle": 17859,
+        "device_cycles": 5316,
+        "l2_lines_before": 2816,
+        "l2_lines_after": 3584,
+        "hbm_read_bytes": 98304
+      }
+    ],
+    "events": {
+      "attention_done": 7212,
+      "large_done": 12543
+    },
+    "state_history": {
+      "fa30": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "large": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 458752,
+      "HBM_write": 622592
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "varying_resources": {
+    "total_cycles": 17859,
+    "per_kernel": [
+      {
+        "id": "fa30",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 7212,
+        "complete_cycle": 7212,
+        "device_cycles": 7212,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      },
+      {
+        "id": "large",
+        "state": "COMPLETED",
+        "launch_cycle": 7212,
+        "start_cycle": 7212,
+        "device_complete_cycle": 12543,
+        "complete_cycle": 12543,
+        "device_cycles": 5331,
+        "l2_lines_before": 768,
+        "l2_lines_after": 2816,
+        "hbm_read_bytes": 262144
+      },
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 12543,
+        "start_cycle": 12543,
+        "device_complete_cycle": 17859,
+        "complete_cycle": 17859,
+        "device_cycles": 5316,
+        "l2_lines_before": 2816,
+        "l2_lines_after": 3584,
+        "hbm_read_bytes": 98304
+      }
+    ],
+    "events": {
+      "attention_done": 7212,
+      "large_done": 12543
+    },
+    "state_history": {
+      "fa30": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "large": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 458752,
+      "HBM_write": 622592
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "warm_program": {
+    "total_cycles": 10340,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 5316,
+        "complete_cycle": 5316,
+        "device_cycles": 5316,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      },
+      {
+        "id": "gemm1",
+        "state": "COMPLETED",
+        "launch_cycle": 5316,
+        "start_cycle": 5316,
+        "device_complete_cycle": 10340,
+        "complete_cycle": 10340,
+        "device_cycles": 5024,
+        "l2_lines_before": 768,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 0
+      }
+    ],
+    "events": {},
+    "state_history": {
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "gemm1": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 98304,
+      "HBM_write": 131072
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "producer_consumer": {
+    "total_cycles": 12938,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 5316,
+        "complete_cycle": 5316,
+        "device_cycles": 5316,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      },
+      {
+        "id": "consumer",
+        "state": "COMPLETED",
+        "launch_cycle": 5316,
+        "start_cycle": 5316,
+        "device_complete_cycle": 12938,
+        "complete_cycle": 12938,
+        "device_cycles": 7622,
+        "l2_lines_before": 768,
+        "l2_lines_after": 2304,
+        "hbm_read_bytes": 196608
+      }
+    ],
+    "events": {},
+    "state_history": {
+      "consumer": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ],
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 294912,
+      "HBM_write": 131072
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "isolated_consumer": {
+    "total_cycles": 7622,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 7622,
+        "complete_cycle": 7622,
+        "device_cycles": 7622,
+        "l2_lines_before": 0,
+        "l2_lines_after": 1536,
+        "hbm_read_bytes": 196608
+      }
+    ],
+    "events": {},
+    "state_history": {
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 196608,
+      "HBM_write": 65536
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "cold_program": {
+    "total_cycles": 5316,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 0,
+        "device_complete_cycle": 5316,
+        "complete_cycle": 5316,
+        "device_cycles": 5316,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      }
+    ],
+    "events": {},
+    "state_history": {
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 98304,
+      "HBM_write": 65536
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "overhead_program": {
+    "total_cycles": 5333,
+    "per_kernel": [
+      {
+        "id": "gemm0",
+        "state": "COMPLETED",
+        "launch_cycle": 0,
+        "start_cycle": 17,
+        "device_complete_cycle": 5333,
+        "complete_cycle": 5333,
+        "device_cycles": 5316,
+        "l2_lines_before": 0,
+        "l2_lines_after": 768,
+        "hbm_read_bytes": 98304
+      }
+    ],
+    "events": {},
+    "state_history": {
+      "gemm0": [
+        "CREATED",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED"
+      ]
+    },
+    "traffic_bytes": {
+      "HBF_read": 0,
+      "HBF_write": 0,
+      "HBM_read": 98304,
+      "HBM_write": 65536
+    },
+    "persistent_gpu": true,
+    "persistent_memory": true,
+    "persistent_l2": true,
+    "stable_allocations": true
+  },
+  "rejected_graph_cases": 8
+}
