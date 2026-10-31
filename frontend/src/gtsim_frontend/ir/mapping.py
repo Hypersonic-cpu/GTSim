@@ -19,21 +19,59 @@ class Buffer:
 @dataclass(frozen=True)
 class Mapping:
     target: str = "sm90"
-    ctas: tuple[tuple[int,int], ...] = ()
-    execute: tuple[tuple[str,str], ...] = ()
-    store: tuple[tuple[str,str], ...] = ()
-    routes: tuple[tuple[str,str,str], ...] = (("HBM","SMEM","bulk_copy"),)
+    ctas: tuple[tuple[int, int], ...] = ()
+    execute: tuple[tuple[str, str], ...] = ()
+    store: tuple[tuple[str, str], ...] = ()
+    routes: tuple[tuple[str, str, str], ...] = (("HBM", "SMEM", "bulk_copy"),)
 
     def verify(self, executors, buffers):
-        require(self.target == "sm90", "mapping", "only Hopper reference target is supported")
-        require(len(dict(self.ctas)) == len(self.ctas) and all(type(c) is int and type(sm) is int and c >= 0 and sm >= 0 for c,sm in self.ctas), "mapping", "invalid CTA placement")
+        require(
+            self.target == "sm90",
+            "mapping",
+            "only Hopper reference target is supported",
+        )
+        require(
+            len(dict(self.ctas)) == len(self.ctas)
+            and all(
+                type(c) is int and type(sm) is int and c >= 0 and sm >= 0
+                for c, sm in self.ctas
+            ),
+            "mapping",
+            "invalid CTA placement",
+        )
         ex, st = dict(self.execute), dict(self.store)
-        require(len(ex) == len(self.execute) and set(ex) == {e.id for e in executors}, "mapping", "missing or duplicate executor binding")
-        require(len(st) == len(self.store) and set(st) == {b.id for b in buffers}, "mapping", "missing or duplicate buffer binding")
-        capabilities = {"producer":"TMA", "matrix":"WGMMA", "vector":"SIMD"}
+        require(
+            len(ex) == len(self.execute) and set(ex) == {e.id for e in executors},
+            "mapping",
+            "missing or duplicate executor binding",
+        )
+        require(
+            len(st) == len(self.store) and set(st) == {b.id for b in buffers},
+            "mapping",
+            "missing or duplicate buffer binding",
+        )
+        capabilities = {"producer": "TMA", "matrix": "WGMMA", "vector": "SIMD"}
         for e in executors:
-            require(e.role in capabilities and ex[e.id] == capabilities[e.role], e.id, "unsupported executor capability")
-            require(bool(e.warps) and len(set(e.warps)) == len(e.warps) and all(0 <= w < 12 for w in e.warps), e.id, "invalid warp binding")
+            require(
+                e.role in capabilities and ex[e.id] == capabilities[e.role],
+                e.id,
+                "unsupported executor capability",
+            )
+            require(
+                bool(e.warps)
+                and len(set(e.warps)) == len(e.warps)
+                and all(0 <= w < 12 for w in e.warps),
+                e.id,
+                "invalid warp binding",
+            )
         for b in buffers:
-            require(st[b.id] == "SMEM" and b.slots > 0 and b.bytes_per_slot > 0, b.id, "invalid staging allocation")
-        require(self.routes == (("HBM","SMEM","bulk_copy"),), "mapping", "unsupported memory route")
+            require(
+                st[b.id] == "SMEM" and b.slots > 0 and b.bytes_per_slot > 0,
+                b.id,
+                "invalid staging allocation",
+            )
+        require(
+            self.routes == (("HBM", "SMEM", "bulk_copy"),),
+            "mapping",
+            "unsupported memory route",
+        )
