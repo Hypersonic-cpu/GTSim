@@ -22,6 +22,8 @@ def main():
                       Command('LaunchKernel','fa30'),Command('StreamSynchronize'),Command('RecordEvent','all_done')))
         t=driver.run(p,Path(temporary)/'mixed',args.runner,args.architecture,args.memory_config)
         a,b=t['per_kernel']
+        assert all(history==['CREATED','QUEUED','RUNNING','COMPLETED'] for history in t['state_history'].values())
+        assert t['traffic_bytes']['HBM_read']>0 and t['traffic_bytes']['HBF_read']==0
         assert a['state']==b['state']=='COMPLETED'
         assert b['start_cycle']==a['complete_cycle'] and b['complete_cycle']>b['start_cycle']
         assert t['events']['gemm_done']==a['complete_cycle'] and t['events']['all_done']==t['total_cycles']

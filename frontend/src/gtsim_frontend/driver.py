@@ -80,5 +80,5 @@ def run(program,out_dir,runner,architecture,memory_config,launch_overhead_cycles
         if line.startswith('Program timing JSON: '):timing=json.loads(line.split(': ',1)[1])
     if timing is None:raise RuntimeError('runner produced no execution timing')
     (out/'kernel-timings.json').write_text(json.dumps(timing,indent=2)+'\n')
-    (out/'metrics.json').write_text(json.dumps({'program_cycles':timing['total_cycles'],'kernels':timing['per_kernel'],'outcome':'PASS'},indent=2)+'\n')
+    (out/'metrics.json').write_text(json.dumps({'program_cycles':timing['total_cycles'],'kernels':timing['per_kernel'],'per_tier_traffic_bytes':timing['traffic_bytes'],'outcome':'PASS'},indent=2)+'\n')
     return timing

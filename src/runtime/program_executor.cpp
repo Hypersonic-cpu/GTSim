@@ -20,12 +20,14 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                                  DataType::FP16, MemoryTier::HBM, t.preloaded,
                                  t.read_only);
     }
+    ProgramTiming timing;
     std::map<std::string, std::size_t> launches;
     std::vector<std::unique_ptr<DAG>> dags;
     for (const auto& l : p.launches) {
         if (l.id.empty() || launches.contains(l.id))
             throw std::invalid_argument("duplicate/empty launch identity");
         launches[l.id] = dags.size();
+        timing.state_history[l.id].push_back("CREATED");
         auto kernel = read_kernel(directory / l.kernel_file);
         std::vector<std::pair<int, int>> bindings;
         for (const auto& b : l.bindings) bindings.emplace_back(b[0], b[1]);
@@ -37,6 +39,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             if (!launches.contains(c.target) ||
                 !submitted.insert(c.target).second)
                 throw std::invalid_argument("unknown/duplicate kernel launch");
+            timing.state_history[c.target].push_back("QUEUED");
         } else if (c.kind == "RecordEvent") {
             if (c.target.empty() || !recorded.insert(c.target).second)
                 throw std::invalid_argument("empty/duplicate event");
@@ -49,7 +52,6 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
     }
     if (submitted.size() != launches.size())
         throw std::invalid_argument("unsubmitted kernel launch");
-    ProgramTiming timing;
     std::unique_ptr<Simulator> context;
     GPU* gpu = nullptr;
     MemorySystem* memory = nullptr;
@@ -66,7 +68,10 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 context->bind_kernel(dag);
             KernelTiming launch;
             launch.id = c.target;
+            if (timing.state_history.at(c.target).back() != "QUEUED")
+                throw std::logic_error("invalid launch transition");
             launch.state = "RUNNING";
+            timing.state_history[c.target].push_back("RUNNING");
             launch.launch_cycle = context->cycle;
             for (int i = 0; i < p.launch_overhead_cycles; ++i) {
                 if (context->cycle >= max_cycles)
@@ -90,6 +95,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 std::max(context->cycle, context->memory_drain_cycle);
             launch.device_cycles = context->cycle - launch.start_cycle;
             launch.state = "COMPLETED";
+            timing.state_history[c.target].push_back("COMPLETED");
             timing.per_kernel.push_back(launch);
             context->cycle = launch.complete_cycle;
             timing.total_cycles = launch.complete_cycle;
@@ -101,6 +107,21 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         else if (c.kind == "WaitEvent" &&
                  timing.events.at(c.target) > timing.total_cycles)
             throw std::logic_error("event completion clock is in the future");
+    }
+    if (context) {
+        const auto stats = memory->statistics(timing.total_cycles);
+        timing.traffic_bytes = {{"HBM_read", stats.hbm.read_bytes},
+                                {"HBM_write", stats.hbm.write_bytes},
+                                {"HBF_read", stats.hbf.read_bytes},
+                                {"HBF_write", stats.hbf.write_bytes}};
+        for (const auto& dag : dags)
+            for (const auto& [id, tensor] : registry.entries()) {
+                const auto& bound = dag->tensor_registry.at(id);
+                if (bound.global_base_address != tensor.global_base_address ||
+                    bound.shape != tensor.shape)
+                    throw std::logic_error(
+                        "program allocation changed across launches");
+            }
     }
     timing.persistent_gpu = timing.persistent_memory = timing.persistent_l2 =
         timing.stable_allocations = true;

@@ -29,6 +29,8 @@ struct ProgramTiming {
     int total_cycles{};
     std::vector<KernelTiming> per_kernel;
     std::map<std::string, int> events;
+    std::map<std::string, std::vector<std::string>> state_history;
+    std::map<std::string, std::uint64_t> traffic_bytes;
     bool persistent_gpu{}, persistent_memory{}, persistent_l2{},
         stable_allocations{};
 };
