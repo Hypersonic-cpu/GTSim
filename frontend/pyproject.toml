@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gtsim-frontend"
+version = "0.1.0"
+description = "Versioned layered IR for GTSim reference kernels"
+requires-python = ">=3.10"
+
+[project.scripts]
+gtsim-ir = "gtsim_frontend.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
