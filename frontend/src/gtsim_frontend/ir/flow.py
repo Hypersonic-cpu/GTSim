@@ -61,6 +61,7 @@ class FlowKernel(Header):
                 if op.capability == "load_async" and op.slot:
                     value_slots[value.id]=(op.slot.buffer,op.slot.slot,op.slot.generation)
             for region in op.reads+op.writes:region.verify(tensors)
+            require(all(not tensors[r.tensor].read_only for r in op.writes),op.id,"write to read-only tensor")
             if op.slot:
                 s=op.slot; key=(s.buffer,s.slot)
                 require(s.buffer in buffers and 0 <= s.slot < buffers[s.buffer].slots and s.generation >= 0,op.id,"invalid buffer slot")

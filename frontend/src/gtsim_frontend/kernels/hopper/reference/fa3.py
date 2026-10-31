@@ -55,11 +55,12 @@ def instantiate(algorithm, num_sms=132):
                         e,v=builder.emit(f'{p}.max{branch}.shuffle','compute',vector,inputs=(e,),operands=(v,),semantic='shfl_max',shape=(128,))
                         e,v=builder.emit(f'{p}.max{branch}.reduce','compute',vector,inputs=(e,),operands=(v,),semantic='reduce_max',shape=(128,))
                         max_events.append(e);maxima.append(v)
+                    previous_me,previous_m=me,mvalue
                     me,mvalue=builder.emit(p+'.max.merge','compute',vector,inputs=tuple(max_events)+(me,),operands=tuple(maxima)+(mvalue,),semantic='merge_max',shape=(128,))
-                    scale_event,scale=builder.emit(p+'.scale','compute',vector,inputs=(me,),operands=(mvalue,),semantic='scores_scale',shape=(128,))
+                    scale_event,scale=builder.emit(p+'.scale','compute',vector,inputs=(me,previous_me),operands=(mvalue,previous_m),semantic='scores_scale',shape=(128,2))
                     sums=[];sum_events=[];probabilities=[];prob_events=[]
                     for branch in range(2):
-                        e,v=builder.emit(f'{p}.exp{branch}','compute',vector,inputs=(scale_event,se),operands=(score,scale),semantic='exp2',shape=(128,64))
+                        e,v=builder.emit(f'{p}.exp{branch}','compute',vector,inputs=(scale_event,se,me),operands=(score,mvalue),semantic='exp2',shape=(128,64))
                         prob_events.append(e);probabilities.append(v)
                         e,v=builder.emit(f'{p}.sum{branch}.local','compute',vector,inputs=(e,),operands=(v,),semantic='local_sum',shape=(128,))
                         e,v=builder.emit(f'{p}.sum{branch}.shuffle','compute',vector,inputs=(e,),operands=(v,),semantic='shfl_sum',shape=(128,))

@@ -35,6 +35,12 @@ int main(int argc, char** argv) {
                       << n->sm_id << ' ' << n->thread_block_id << ' ' << n->warp_id << ' ' << n->matrix_id << ' '
                       << static_cast<int>(n->data_type) << ' ' << static_cast<int>(n->layout) << ' '
                       << n->matrix_leading_dim << ' ' << n->tile.r_off << ' ' << n->tile.c_off << ' ' << n->tile.r << ' ' << n->tile.c;
+            std::cout << " metadata " << n->register_change << ' ' << n->setup_latency << ' '
+                      << n->shared_bank_conflict_factor << ' ' << n->tma_setup_latency << ' '
+                      << n->tma_issue_interval << ' ' << n->tma_issue_rate_bytes_per_cycle << ' '
+                      << n->memory_coalesce_bytes << ' ' << n->memory_access_granularity_bytes << ' '
+                      << static_cast<int>(n->issue_group_kind) << ' ' << n->issue_group_size << ' '
+                      << n->issue_group_leader_warp << ' ' << n->issue_group_member_index;
             std::cout << " complete";
             for (auto d:n->depends_on) std::cout << ' ' << d;
             std::cout << " issue";
