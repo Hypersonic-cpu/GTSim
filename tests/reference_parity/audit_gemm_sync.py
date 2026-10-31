@@ -58,6 +58,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('oracle',type=Path)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--require-safe',action='store_true')
     args=parser.parse_args()
     report={'interpretation':'Required graph completion paths; not a measured runtime race',
             'cases':[audit(args.oracle,k) for k in (64,128,192,256)]}
@@ -65,6 +66,8 @@ def main():
     args.output.write_text(json.dumps(report,indent=2)+'\n')
     for c in report['cases']:
         print(f"K={c['K']}: {c['unguarded_loads']} loads without all required consumer-completion paths")
+    if args.require_safe and any(c['unguarded_loads'] for c in report['cases']):
+        raise SystemExit(1)
 
 
 if __name__=='__main__':main()

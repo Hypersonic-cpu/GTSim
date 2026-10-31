@@ -56,6 +56,10 @@ option(GTSIM_BUILD_IR_FRAMEWORK "Build the layered IR framework and its tests" O
 include(CTest)
 set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
+  if(GTSIM_BUILD_IR_FRAMEWORK)
+    add_executable(reference_graph_dump tests/reference_parity/reference_graph_dump.cpp)
+    target_link_libraries(reference_graph_dump PRIVATE gtsim_core)
+  endif()
   set(H100_ARCH_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/h100-sxm.yaml)
   set(MEMORY_FULL_HBM_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_full_hbm-0F5M.yaml)
   set(MEMORY_FULL_HBF_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/memory_full_hbf-5F0M.yaml)
@@ -133,6 +137,10 @@ if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     if(GTSIM_BUILD_IR_FRAMEWORK)
+      add_test(NAME gemm_buffer_sync
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/audit_gemm_sync.py
+                $<TARGET_FILE:reference_graph_dump> --require-safe
+                --output ${CMAKE_CURRENT_BINARY_DIR}/gemm-sync-audit.json)
       add_test(NAME ir_frontend_contracts
         COMMAND ${CMAKE_COMMAND} -E env
                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/frontend/src"

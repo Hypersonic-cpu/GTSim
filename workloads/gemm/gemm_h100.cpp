@@ -154,6 +154,14 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                                         cross_wgmma.end());
                     }
                 }
+                if (options.gemm_baseline() && k == 1 && (tiles_k % 2) == 0) {
+                    // Across output waves, buffer 1 still holds the previous
+                    // tile's final (odd-indexed) K stage. Waiting for buffer 0
+                    // at k=0 does not cover these later consumers.
+                    tma_deps.insert(tma_deps.end(),
+                                    prev_tile_last_wgmma.begin(),
+                                    prev_tile_last_wgmma.end());
+                }
                 if (options.gemm_baseline() && k > 1) {
                     tma_deps.insert(tma_deps.end(),
                                     wgmma_per_k[k - 2].begin(),

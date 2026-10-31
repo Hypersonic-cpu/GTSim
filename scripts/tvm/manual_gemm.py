@@ -46,6 +46,8 @@ def manual_gemm(m, n, k, sms=132):
             for step in range(k // 64):
                 # Buffer k%2 cannot be overwritten before all consumers finish.
                 reuse = (previous_compute if (k // 64) % 2 else previous_penultimate) if step == 0 else []
+                if step == 1 and (k // 64) % 2 == 0:
+                    reuse = previous_compute
                 if step >= 2:
                     reuse = compute[step - 2]
                 issue = previous_loads if step == 0 else loads[-1]

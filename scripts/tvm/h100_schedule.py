@@ -127,7 +127,7 @@ def scheduled_gemm(tvm, m, n, k, schedule=GemmSchedule(), sms=132, tensor_tiers=
                      tensor.shape[1] * 2, box[1], box[0], 1, 1, descriptor_dtype="float16", rank=2))]
     # The baseline's cross-wave buffer-zero rule is preserved literally. Tile
     # variants use the reference's general persistent buffer-consumer policy.
-    need_empty = (kk >= 2) | ((wave > 0) & ((kk == 0) if schedule.baseline else (kk < 2)))
+    need_empty = (kk >= 2) | ((wave > 0) & ((kk < 2)))
     load = seq([
         when(need_empty, ev(cuda.cuda_mbarrier_wait(t.address_of(empty[slot]), (full_generation - 1) % 2))),
         ev(ptx.mbarrier.arrive.expect_tx.shared.b64(t.address_of(full[slot]), t.const(2 * bk * (bm + bn), "uint32"))),
