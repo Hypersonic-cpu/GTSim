@@ -46,6 +46,11 @@ class ReferenceFlowTests(unittest.TestCase):
         variants = [
             replace(
                 op,
+                dependencies=(replace(op.dependencies[0], phase="complete"),)
+                + op.dependencies[1:],
+            ),
+            replace(
+                op,
                 dependencies=(replace(op.dependencies[0], phase=Phase.ISSUE),)
                 + op.dependencies[1:],
             ),

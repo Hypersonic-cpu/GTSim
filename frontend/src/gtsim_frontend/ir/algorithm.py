@@ -160,6 +160,9 @@ class Algorithm(Header):
             )
 
     def verify(self):
+        from ..verify.types import verify_types
+
+        verify_types(self, location=self.symbol)
         super().verify()
         require(
             self.family in ("gemm", "fa3"), self.symbol, "unknown algorithm template"

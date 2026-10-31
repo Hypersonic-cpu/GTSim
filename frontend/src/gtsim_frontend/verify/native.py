@@ -6,6 +6,9 @@ from ..passes.hopper.patterns import select, layouts, register_layout
 
 
 def verify_native(native):
+    from .types import verify_types
+
+    verify_types(native, location=native.symbol)
     Header.verify(native)
     require(native.target == "sm90", native.symbol, "unsupported native target")
     flow = FlowKernel(

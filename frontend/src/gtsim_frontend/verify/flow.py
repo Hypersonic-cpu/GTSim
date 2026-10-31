@@ -143,6 +143,9 @@ def verify_tensors(flow):
 
 
 def verify_flow(flow):
+    from .types import verify_types
+
+    verify_types(flow, location=flow.symbol)
     Header.verify(flow)
     require(flow.family in ("gemm", "fa3"), flow.symbol, "unknown algorithm family")
     require(
