@@ -21,7 +21,8 @@ struct TMARequest {
 
 class TMAUnit {
 public:
-    TMAUnit(int setup_latency, int issue_interval, int issue_rate_bytes_per_cycle)
+    TMAUnit(int setup_latency, int issue_interval,
+            int issue_rate_bytes_per_cycle)
         : setup_latency_cycles(setup_latency),
           issue_interval_cycles(issue_interval),
           issue_rate_bytes_per_cycle(issue_rate_bytes_per_cycle) {}
@@ -50,23 +51,22 @@ public:
         int node_issue_rate = node->tma_issue_rate_bytes_per_cycle >= 0
                                   ? node->tma_issue_rate_bytes_per_cycle
                                   : issue_rate_bytes_per_cycle;
-        TMARequest req{
-            node->id,
-            node->op_type == OpType::CP_SRAM2DRAM_TMA,
-            current_cycle + node_setup,
-            line_size,
-            node_issue_rate,
-            0.0,
-            0,
-            std::move(lines)
-        };
+        TMARequest req{node->id,
+                       node->op_type == OpType::CP_SRAM2DRAM_TMA,
+                       current_cycle + node_setup,
+                       line_size,
+                       node_issue_rate,
+                       0.0,
+                       0,
+                       std::move(lines)};
         setup_queue.push_back(std::move(req));
         return static_cast<int>(setup_queue.back().lines.size());
     }
 
     std::vector<int> step(int current_cycle, L2Cache* l2) {
         std::vector<int> issued_complete;
-        while (!setup_queue.empty() && setup_queue.front().ready_cycle <= current_cycle) {
+        while (!setup_queue.empty() &&
+               setup_queue.front().ready_cycle <= current_cycle) {
             pending_queue.push_back(std::move(setup_queue.front()));
             setup_queue.pop_front();
         }
@@ -81,12 +81,14 @@ public:
             return issued_complete;
         }
 
-        active.credit_bytes += static_cast<double>(active.issue_rate_bytes_per_cycle);
+        active.credit_bytes +=
+            static_cast<double>(active.issue_rate_bytes_per_cycle);
 
         while (active.next_line < active.lines.size() &&
                active.credit_bytes >= active.line_size_bytes) {
             const auto& line_key = active.lines[active.next_line];
-            if (!l2->enqueue_transaction_key(active.node_id, line_key, active.is_write)) {
+            if (!l2->enqueue_transaction_key(active.node_id, line_key,
+                                             active.is_write)) {
                 break;
             }
             active.credit_bytes -= active.line_size_bytes;

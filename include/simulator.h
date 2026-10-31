@@ -13,13 +13,7 @@
 
 namespace GTSim {
 
-enum class WorkloadType {
-    GEMM,
-    FA3,
-    FlashMLA,
-    FlashDecoding,
-    ClusterReduce
-};
+enum class WorkloadType { GEMM, FA3, FlashMLA, FlashDecoding, ClusterReduce };
 
 // Configuration for the simulator
 struct SimulatorConfig {
@@ -28,7 +22,7 @@ struct SimulatorConfig {
     int shared_memory_per_cta_bytes{227 * 1024};
     int register_file_per_sm_bytes{65536 * 4};
     int max_warps_per_sm{64};
-    int tensor_core_throughput{256};  // Tensor ops per instruction
+    int tensor_core_throughput{256}; // Tensor ops per instruction
     int tensor_core_latency_cycles{48};
     int simd_throughput{32};
     int simd_latency_cycles{4};
@@ -37,7 +31,7 @@ struct SimulatorConfig {
     int shfl_latency_cycles{4};
     int ls_throughput_bytes{128};
     int ls_latency_cycles{10};
-    int sram_latency_cycles{33};  // H100 local DSMEM access (microbenchmark)
+    int sram_latency_cycles{33}; // H100 local DSMEM access (microbenchmark)
     int sram_bandwidth_bytes_per_cycle{128};
     int sram_queue_depth{64};
     int tensor_core_width{32};
@@ -45,7 +39,8 @@ struct SimulatorConfig {
     int sfu_width{4};
     int ls_width_bytes{128};
     int num_sms{1};
-    int max_concurrent_blocks_per_sm{4};  // Maximum concurrent thread blocks per SM
+    int max_concurrent_blocks_per_sm{
+        4}; // Maximum concurrent thread blocks per SM
     bool O2_dynamic_allocation{false};
     bool aggressive_store_coalesce{false};
     bool silence_mode{false};
@@ -57,7 +52,8 @@ struct SimulatorConfig {
     int l2_line_size_bytes{128};
     int l2_hit_latency_cycles{300};
     int l2_bandwidth_bytes_per_cycle{1853};
-    int l2_write_bandwidth_bytes_per_cycle{926};  // Half of the default L2 bandwidth
+    int l2_write_bandwidth_bytes_per_cycle{
+        926}; // Half of the default L2 bandwidth
     int l2_queue_depth{65536};
     int l2_max_transactions_per_cycle_per_sp{1};
     bool l2_bypass_cache{false};
@@ -153,15 +149,16 @@ struct SimulatorConfig {
     // ========================================================================
     bool noc_enabled{false};
     NoCTopology noc_topology{NoCTopology::CROSSBAR};
-    int noc_latency_cycles{74};  // Crossbar one-way: (181 - 33) / 2
-    int noc_bandwidth_bytes_per_cycle{237};  // 3.28 TB/s / 7 GPCs @ 1980 MHz
+    int noc_latency_cycles{74};             // Crossbar one-way: (181 - 33) / 2
+    int noc_bandwidth_bytes_per_cycle{237}; // 3.28 TB/s / 7 GPCs @ 1980 MHz
     int noc_queue_depth{128};
-    int noc_mesh_rows{4};  // 4×4 mesh for 16-SM cluster
+    int noc_mesh_rows{4}; // 4×4 mesh for 16-SM cluster
     int noc_mesh_cols{4};
-    int noc_sms_per_cluster{16};  // H100: 16 SMs per GPC
-    int noc_link_bandwidth_bytes_per_cycle{30};  // Bisection equiv: 237/2/4 ≈ 30
-    int noc_mesh_base_latency_cycles{60};  // DSMEM protocol overhead (dominant term)
-    std::vector<int> noc_mesh_sm_mapping{};  // Empty means identity mapping
+    int noc_sms_per_cluster{16};                // H100: 16 SMs per GPC
+    int noc_link_bandwidth_bytes_per_cycle{30}; // Bisection equiv: 237/2/4 ≈ 30
+    int noc_mesh_base_latency_cycles{
+        60}; // DSMEM protocol overhead (dominant term)
+    std::vector<int> noc_mesh_sm_mapping{}; // Empty means identity mapping
 };
 
 // Shared H100 SXM kernel-simulation profile.  Workload builders must not
@@ -195,7 +192,8 @@ inline SimulatorConfig make_h100_sxm_config() {
 // Convert peak throughput in TB/s to simulator bytes/cycle at core clock.
 inline int bytes_per_cycle_from_tbps(double tbps, double core_frequency_mhz) {
     if (tbps <= 0.0 || core_frequency_mhz <= 0.0) return 0;
-    return static_cast<int>(std::lround((tbps * 1e12) / (core_frequency_mhz * 1e6)));
+    return static_cast<int>(
+        std::lround((tbps * 1e12) / (core_frequency_mhz * 1e6)));
 }
 
 // Apply Blackwell B200 defaults from the paper evaluation configuration.
@@ -216,7 +214,8 @@ inline void apply_blackwell_b200_defaults(SimulatorConfig& cfg,
     cfg.tma_setup_latency_cycles = 100;
     cfg.tma_issue_interval_cycles = 200;
 
-    int tmem_bw_bpc = bytes_per_cycle_from_tbps(tmem_peak_tbps, cfg.core_frequency_mhz);
+    int tmem_bw_bpc =
+        bytes_per_cycle_from_tbps(tmem_peak_tbps, cfg.core_frequency_mhz);
     if (tmem_bw_bpc > 0) {
         cfg.tmem_read_bandwidth_bytes_per_cycle = tmem_bw_bpc;
         cfg.tmem_write_bandwidth_bytes_per_cycle = tmem_bw_bpc;
@@ -239,7 +238,11 @@ public:
     std::size_t completed_node_count;
 
     Simulator(DAG* input_dag, const SimulatorConfig& cfg = SimulatorConfig())
-        : config(cfg), dag(input_dag), cycle(0), log_file(nullptr), output_stream(&std::cout),
+        : config(cfg),
+          dag(input_dag),
+          cycle(0),
+          log_file(nullptr),
+          output_stream(&std::cout),
           completed_node_count(0) {
 
         int max_warp_id = -1;
@@ -251,56 +254,38 @@ public:
         }
 
         if (config.cluster_size > 0) {
-            int active_sms = (config.num_sms / config.cluster_size) * config.cluster_size;
+            int active_sms =
+                (config.num_sms / config.cluster_size) * config.cluster_size;
             if (active_sms <= 0) {
                 active_sms = 0;
             }
             config.num_sms = active_sms;
         }
 
-        simulated_gpu = new GPU(config.num_sms, config.warp_count,
-                               config.tensor_core_throughput,
-                               config.simd_throughput,
-                               config.sfu_throughput,
-                               config.ls_throughput_bytes,
-                               config.tensor_core_latency_cycles,
-                               config.simd_latency_cycles,
-                               config.sfu_latency_cycles,
-                               config.shfl_latency_cycles,
-                               config.ls_latency_cycles,
-                               config.tensor_core_width,
-                               config.simd_width,
-                               config.sfu_width,
-                               config.ls_width_bytes,
-                               config.sram_latency_cycles,
-                               config.sram_bandwidth_bytes_per_cycle,
-                               config.sram_queue_depth,
-                               config.O2_dynamic_allocation,
-                               config.schedule_policy,
-                               config.max_concurrent_blocks_per_sm,
-                               config.l2_cache_size_bytes,
-                               config.l2_line_size_bytes,
-                               config.l2_hit_latency_cycles,
-                               config.l2_bandwidth_bytes_per_cycle,
-                               config.l2_write_bandwidth_bytes_per_cycle,
-                               config.l2_queue_depth,
-                               config.l2_max_transactions_per_cycle_per_sp,
-                               config.l2_bypass_cache,
-                               config.memory,
-                               config.core_frequency_mhz,
-                               config.tma_setup_latency_cycles,
-                               config.tma_issue_interval_cycles,
-                               config.tma_issue_rate_bytes_per_cycle,
-                               config.tmem_cols_per_cta,
-                               config.tmem_issue_interval_cycles,
-                               config.tmem_read_latency_cycles,
-                               config.tmem_read_bandwidth_bytes_per_cycle,
-                               config.tmem_write_latency_cycles,
-                               config.tmem_write_bandwidth_bytes_per_cycle,
-                               config.tmem_queue_depth,
-                               config.startup_delay_cycles,
-                               config.block_schedule_latency_cycles,
-                               dag->tensor_registry);
+        simulated_gpu = new GPU(
+            config.num_sms, config.warp_count, config.tensor_core_throughput,
+            config.simd_throughput, config.sfu_throughput,
+            config.ls_throughput_bytes, config.tensor_core_latency_cycles,
+            config.simd_latency_cycles, config.sfu_latency_cycles,
+            config.shfl_latency_cycles, config.ls_latency_cycles,
+            config.tensor_core_width, config.simd_width, config.sfu_width,
+            config.ls_width_bytes, config.sram_latency_cycles,
+            config.sram_bandwidth_bytes_per_cycle, config.sram_queue_depth,
+            config.O2_dynamic_allocation, config.schedule_policy,
+            config.max_concurrent_blocks_per_sm, config.l2_cache_size_bytes,
+            config.l2_line_size_bytes, config.l2_hit_latency_cycles,
+            config.l2_bandwidth_bytes_per_cycle,
+            config.l2_write_bandwidth_bytes_per_cycle, config.l2_queue_depth,
+            config.l2_max_transactions_per_cycle_per_sp, config.l2_bypass_cache,
+            config.memory, config.core_frequency_mhz,
+            config.tma_setup_latency_cycles, config.tma_issue_interval_cycles,
+            config.tma_issue_rate_bytes_per_cycle, config.tmem_cols_per_cta,
+            config.tmem_issue_interval_cycles, config.tmem_read_latency_cycles,
+            config.tmem_read_bandwidth_bytes_per_cycle,
+            config.tmem_write_latency_cycles,
+            config.tmem_write_bandwidth_bytes_per_cycle,
+            config.tmem_queue_depth, config.startup_delay_cycles,
+            config.block_schedule_latency_cycles, dag->tensor_registry);
 
         // Initialize schedulers with nodes
         int total_nodes = static_cast<int>(dag->nodes.size());
@@ -313,7 +298,8 @@ public:
 
         // Partition once, retaining DAG order within every SM. Unassigned nodes
         // deliberately retain the existing broadcast-to-all-SMs behavior.
-        std::vector<std::vector<DAGNode*>> nodes_by_sm(simulated_gpu->sms.size());
+        std::vector<std::vector<DAGNode*>> nodes_by_sm(
+            simulated_gpu->sms.size());
         for (auto* node : dag->nodes) {
             if (node->sm_id == -1) {
                 for (auto& nodes : nodes_by_sm) nodes.push_back(node);
@@ -337,7 +323,8 @@ public:
                         node_id_to_sm[node->id] = sm_inst->sm_id;
                     }
                 }
-                sp->sp_scheduler->init_with_nodes(sp_nodes, total_nodes, sp->subpartition_id,
+                sp->sp_scheduler->init_with_nodes(sp_nodes, total_nodes,
+                                                  sp->subpartition_id,
                                                   &global_scoreboard);
                 sp->set_node_to_sp_map(&node_id_to_sp);
                 sp->set_completed_node_counter(&completed_node_count);
@@ -348,14 +335,15 @@ public:
 
         // Initialize NoC if enabled
         if (config.noc_enabled) {
-            int cluster_size = config.noc_sms_per_cluster;  // 0 = no restriction
+            int cluster_size = config.noc_sms_per_cluster; // 0 = no restriction
             if (config.noc_topology == NoCTopology::MESH) {
                 int rows = config.noc_mesh_rows;
                 int cols = config.noc_mesh_cols;
                 // Auto-compute mesh dimensions if not specified
                 // When clustering is active, mesh covers one cluster; otherwise all SMs
                 if (rows <= 0 || cols <= 0) {
-                    int mesh_sms = (cluster_size > 0) ? cluster_size : config.num_sms;
+                    int mesh_sms =
+                        (cluster_size > 0) ? cluster_size : config.num_sms;
                     cols = static_cast<int>(std::ceil(std::sqrt(mesh_sms)));
                     rows = (mesh_sms + cols - 1) / cols;
                 }
@@ -378,16 +366,13 @@ public:
                     config.noc_mesh_base_latency_cycles,
                     config.noc_latency_cycles,
                     config.noc_bandwidth_bytes_per_cycle,
-                    config.noc_queue_depth,
-                    rows, cols, cluster_size,
-                    link_bw,
+                    config.noc_queue_depth, rows, cols, cluster_size, link_bw,
                     config.noc_mesh_sm_mapping);
             } else {
-                simulated_gpu->noc = new CrossbarNoC(
-                    config.noc_latency_cycles,
-                    config.noc_bandwidth_bytes_per_cycle,
-                    config.noc_queue_depth,
-                    cluster_size);
+                simulated_gpu->noc =
+                    new CrossbarNoC(config.noc_latency_cycles,
+                                    config.noc_bandwidth_bytes_per_cycle,
+                                    config.noc_queue_depth, cluster_size);
             }
             for (auto* sm : simulated_gpu->sms) {
                 sm->set_noc(simulated_gpu->noc);
@@ -405,7 +390,6 @@ public:
             sm_inst->initialize_tb_scheduler(nodes_by_sm[sm_inst->sm_id]);
         }
         admission_guard.release();
-
     }
 
     ~Simulator() {

@@ -10,7 +10,8 @@ namespace GTSim {
 void Simulator::print_configuration(bool verbose) {
     if (!verbose) return;
 
-    *output_stream << "Starting simulation with " << dag->nodes.size() << " nodes...\n";
+    *output_stream << "Starting simulation with " << dag->nodes.size()
+                   << " nodes...\n";
 
     // Show warp distribution
     std::unordered_map<int, int> warp_distribution;
@@ -23,27 +24,43 @@ void Simulator::print_configuration(bool verbose) {
         *output_stream << warp_id << ":" << count << " ";
     }
     *output_stream << "\n";
-    *output_stream << "Total warps in use: " << warp_distribution.size() << "\n";
+    *output_stream << "Total warps in use: " << warp_distribution.size()
+                   << "\n";
     *output_stream << "Warps per subpartition: " << config.warp_count / 4
-              << " (SP0: warps 0,4,8,12... | SP1: 1,5,9,13... | SP2: 2,6,10,14... | SP3: 3,7,11,15...)\n";
+                   << " (SP0: warps 0,4,8,12... | SP1: 1,5,9,13... | SP2: "
+                      "2,6,10,14... | SP3: 3,7,11,15...)\n";
     *output_stream << "\n";
 
-    *output_stream << "Dynamic Allocation (O2): " << (config.O2_dynamic_allocation ? "ENABLED" : "DISABLED") << "\n";
+    *output_stream << "Dynamic Allocation (O2): "
+                   << (config.O2_dynamic_allocation ? "ENABLED" : "DISABLED")
+                   << "\n";
     if (config.O2_dynamic_allocation) {
-        *output_stream << "  O2 Behavior: Scan entire warp for ready nodes before switching warps\n";
-        *output_stream << "  Pipeline fairness: Prefer different pipeline than last issued\n";
+        *output_stream << "  O2 Behavior: Scan entire warp for ready nodes "
+                          "before switching warps\n";
+        *output_stream << "  Pipeline fairness: Prefer different pipeline than "
+                          "last issued\n";
     }
 
-    *output_stream << "Scheduling Policy: Per-Subpartition GTO (Greedy-Then-Oldest)\n";
-    *output_stream << "  - Each subpartition schedules independently among its 4 warps\n";
-    *output_stream << "  - Greedy: Continue from last issued warp if possible\n";
-    *output_stream << "  - Oldest: Pick warp with longest stall time (oldest last_issue_cycle)\n";
-    *output_stream << "Memory model: T_sum = T_frontend + T_queuing + T_data + T_bank_conflict\n";
-    *output_stream << "Tensor throughput: " << config.tensor_core_throughput << " ops/inst\n";
-    *output_stream << "SIMD throughput: " << config.simd_throughput << " ops/inst\n";
-    *output_stream << "SFU throughput: " << config.sfu_throughput << " ops/inst\n";
-    *output_stream << "LS throughput: " << config.ls_throughput_bytes << " bytes/inst\n";
-    *output_stream << "Tensor width: " << config.tensor_core_width << " ops/cycle\n";
+    *output_stream
+        << "Scheduling Policy: Per-Subpartition GTO (Greedy-Then-Oldest)\n";
+    *output_stream
+        << "  - Each subpartition schedules independently among its 4 warps\n";
+    *output_stream
+        << "  - Greedy: Continue from last issued warp if possible\n";
+    *output_stream << "  - Oldest: Pick warp with longest stall time (oldest "
+                      "last_issue_cycle)\n";
+    *output_stream << "Memory model: T_sum = T_frontend + T_queuing + T_data + "
+                      "T_bank_conflict\n";
+    *output_stream << "Tensor throughput: " << config.tensor_core_throughput
+                   << " ops/inst\n";
+    *output_stream << "SIMD throughput: " << config.simd_throughput
+                   << " ops/inst\n";
+    *output_stream << "SFU throughput: " << config.sfu_throughput
+                   << " ops/inst\n";
+    *output_stream << "LS throughput: " << config.ls_throughput_bytes
+                   << " bytes/inst\n";
+    *output_stream << "Tensor width: " << config.tensor_core_width
+                   << " ops/cycle\n";
     *output_stream << "SIMD width: " << config.simd_width << " ops/cycle\n";
     *output_stream << "SFU width: " << config.sfu_width << " ops/cycle\n";
     *output_stream << "LS width: " << config.ls_width_bytes << " bytes/cycle\n";
@@ -58,50 +75,75 @@ void Simulator::print_configuration(bool verbose) {
     } else {
         *output_stream << "Cluster size: DISABLED\n";
     }
-    *output_stream << "Max concurrent blocks per SM: " << config.max_concurrent_blocks_per_sm << "\n";
+    *output_stream << "Max concurrent blocks per SM: "
+                   << config.max_concurrent_blocks_per_sm << "\n";
     const char* workload_name = "Unknown";
     switch (config.workload_type) {
-        case WorkloadType::GEMM: workload_name = "GEMM"; break;
-        case WorkloadType::FA3: workload_name = "FA3"; break;
-        case WorkloadType::FlashMLA: workload_name = "FlashMLA"; break;
-        case WorkloadType::FlashDecoding: workload_name = "FlashDecoding"; break;
-        case WorkloadType::ClusterReduce: workload_name = "ClusterReduce"; break;
+    case WorkloadType::GEMM: workload_name = "GEMM"; break;
+    case WorkloadType::FA3: workload_name = "FA3"; break;
+    case WorkloadType::FlashMLA: workload_name = "FlashMLA"; break;
+    case WorkloadType::FlashDecoding: workload_name = "FlashDecoding"; break;
+    case WorkloadType::ClusterReduce: workload_name = "ClusterReduce"; break;
     }
     *output_stream << "Workload type: " << workload_name << "\n";
     if (!simulated_gpu->sms.empty()) {
-        *output_stream << "SRAM read queue depth: " << simulated_gpu->sms[0]->sram->memory_queue_depth << "\n";
-        *output_stream << "SRAM write queue depth: " << simulated_gpu->sms[0]->sram->memory_write_queue_depth << "\n";
-        *output_stream << "TMEM read queue depth: " << simulated_gpu->sms[0]->tmem_mem->memory_queue_depth << "\n";
-        *output_stream << "TMEM write queue depth: " << simulated_gpu->sms[0]->tmem_mem->memory_write_queue_depth << "\n";
-        *output_stream << "TMEM read latency: " << config.tmem_read_latency_cycles << " cycles\n";
-        *output_stream << "TMEM write latency: " << config.tmem_write_latency_cycles << " cycles\n";
-        *output_stream << "TMEM read bandwidth: " << config.tmem_read_bandwidth_bytes_per_cycle << " bytes/cycle\n";
-        *output_stream << "TMEM write bandwidth: " << config.tmem_write_bandwidth_bytes_per_cycle << " bytes/cycle\n";
+        *output_stream << "SRAM read queue depth: "
+                       << simulated_gpu->sms[0]->sram->memory_queue_depth
+                       << "\n";
+        *output_stream << "SRAM write queue depth: "
+                       << simulated_gpu->sms[0]->sram->memory_write_queue_depth
+                       << "\n";
+        *output_stream << "TMEM read queue depth: "
+                       << simulated_gpu->sms[0]->tmem_mem->memory_queue_depth
+                       << "\n";
+        *output_stream
+            << "TMEM write queue depth: "
+            << simulated_gpu->sms[0]->tmem_mem->memory_write_queue_depth
+            << "\n";
+        *output_stream << "TMEM read latency: "
+                       << config.tmem_read_latency_cycles << " cycles\n";
+        *output_stream << "TMEM write latency: "
+                       << config.tmem_write_latency_cycles << " cycles\n";
+        *output_stream << "TMEM read bandwidth: "
+                       << config.tmem_read_bandwidth_bytes_per_cycle
+                       << " bytes/cycle\n";
+        *output_stream << "TMEM write bandwidth: "
+                       << config.tmem_write_bandwidth_bytes_per_cycle
+                       << " bytes/cycle\n";
     }
-    *output_stream << "L2 cache size: " << config.l2_cache_size_bytes << " bytes\n";
-    *output_stream << "L2 line size: " << config.l2_line_size_bytes << " bytes\n";
-    *output_stream << "L2 hit latency: " << config.l2_hit_latency_cycles << " cycles\n";
-    *output_stream << "L2 bandwidth: " << config.l2_bandwidth_bytes_per_cycle << " bytes/cycle\n";
-    *output_stream << "L2 write bandwidth: " << config.l2_write_bandwidth_bytes_per_cycle
+    *output_stream << "L2 cache size: " << config.l2_cache_size_bytes
+                   << " bytes\n";
+    *output_stream << "L2 line size: " << config.l2_line_size_bytes
+                   << " bytes\n";
+    *output_stream << "L2 hit latency: " << config.l2_hit_latency_cycles
+                   << " cycles\n";
+    *output_stream << "L2 bandwidth: " << config.l2_bandwidth_bytes_per_cycle
+                   << " bytes/cycle\n";
+    *output_stream << "L2 write bandwidth: "
+                   << config.l2_write_bandwidth_bytes_per_cycle
                    << " bytes/cycle\n";
     *output_stream << "L2 queue depth: " << config.l2_queue_depth << "\n";
     *output_stream << "L2 max transactions per cycle per subpartition: "
                    << config.l2_max_transactions_per_cycle_per_sp << "\n";
-    *output_stream << "Core frequency: " << config.core_frequency_mhz << " MHz\n";
+    *output_stream << "Core frequency: " << config.core_frequency_mhz
+                   << " MHz\n";
     *output_stream << "Memory topology: "
                    << memory_topology_name(config.memory.topology) << "\n";
     if (config.memory.hbm.backend == HBMBackend::Naive) {
-        *output_stream << "HBM backend: naive; read bandwidth: " << config.memory.hbm.read_bw_GBps
-                       << " GB/s, write max: " << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
-        *output_stream << "HBM read/write latency: " << config.memory.hbm.read_latency_cycles
-                       << "/" << config.memory.hbm.write_latency_cycles << " cycles\n";
+        *output_stream << "HBM backend: naive; read bandwidth: "
+                       << config.memory.hbm.read_bw_GBps << " GB/s, write max: "
+                       << config.memory.hbm.write_max_bw_GBps << " GB/s\n";
+        *output_stream << "HBM read/write latency: "
+                       << config.memory.hbm.read_latency_cycles << "/"
+                       << config.memory.hbm.write_latency_cycles << " cycles\n";
     } else {
         *output_stream << "HBM backend: ramulator2; timing profile: "
                        << config.memory.hbm.ramulator.config_file << "\n";
         const int stacks = config.memory.hbm.ramulator.stacks;
-        *output_stream << "HBM topology: " << stacks << " stacks, " << stacks * 2
-                       << " logical MC groups, " << stacks * 16 << " physical channels, "
-                       << stacks * 32 << " pseudochannels\n";
+        *output_stream << "HBM topology: " << stacks << " stacks, "
+                       << stacks * 2 << " logical MC groups, " << stacks * 16
+                       << " physical channels, " << stacks * 32
+                       << " pseudochannels\n";
     }
     *output_stream << "HBF read/write bandwidth: "
                    << config.memory.hbf.read_bw_GBps << "/"
@@ -112,36 +154,44 @@ void Simulator::print_configuration(bool verbose) {
     if (config.memory.hbf.backend == HBFBackend::BankPlane) {
         const auto& c = config.memory.hbf.controller;
         *output_stream << "HBF backend: bank_plane; profile "
-                       << (c.geometry == HBFGeometryProfile::OCPReference ? "ocp_reference" : "hbflex_research")
-                       << "; stacks " << c.stacks << "; Host Channels " << c.stacks * 16
-                       << "; Banks " << c.stacks * 16 * c.banks_per_channel
-                       << "; Planes " << c.stacks * c.dies_per_stack * c.planes_per_die << "; buffers/Bank 2; sense engines/Bank 1\n";
-        *output_stream << "HBF per-stack target read/write GB/s: " << c.read_target_GBps_per_stack
-                       << "/" << c.write_target_GBps_per_stack << "; array read/program ceilings: "
-                       << hbf_array_read_ceiling_GBps(c) << "/" << hbf_array_write_ceiling_GBps(c)
+                       << (c.geometry == HBFGeometryProfile::OCPReference
+                               ? "ocp_reference"
+                               : "hbflex_research")
+                       << "; stacks " << c.stacks << "; Host Channels "
+                       << c.stacks * 16 << "; Banks "
+                       << c.stacks * 16 * c.banks_per_channel << "; Planes "
+                       << c.stacks * c.dies_per_stack * c.planes_per_die
+                       << "; buffers/Bank 2; sense engines/Bank 1\n";
+        *output_stream << "HBF per-stack target read/write GB/s: "
+                       << c.read_target_GBps_per_stack << "/"
+                       << c.write_target_GBps_per_stack
+                       << "; array read/program ceilings: "
+                       << hbf_array_read_ceiling_GBps(c) << "/"
+                       << hbf_array_write_ceiling_GBps(c)
                        << "; UCIe ceiling: " << c.ucie_ceiling_GBps_per_stack
-                       << "; SRAM latency hiding: disabled; page caches: initially empty\n";
+                       << "; SRAM latency hiding: disabled; page caches: "
+                          "initially empty\n";
     }
     const auto print_link_config = [&](const char* name,
                                        const D2DLinkConfig& link) {
-        *output_stream << name << " link: " << link.bandwidth_GBps
-                       << " GB/s, " << link.latency_cycles << " cycles\n";
+        *output_stream << name << " link: " << link.bandwidth_GBps << " GB/s, "
+                       << link.latency_cycles << " cycles\n";
     };
     switch (config.memory.topology) {
-        case MemoryTopology::FullHBM:
-            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
-            break;
-        case MemoryTopology::FullHBF:
-            print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
-            break;
-        case MemoryTopology::CoLocated:
-            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
-            print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
-            break;
-        case MemoryTopology::Cascaded:
-            print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
-            print_link_config("hbm_to_hbf", config.memory.hbm_to_hbf);
-            break;
+    case MemoryTopology::FullHBM:
+        print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+        break;
+    case MemoryTopology::FullHBF:
+        print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
+        break;
+    case MemoryTopology::CoLocated:
+        print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+        print_link_config("gpu_to_hbf", config.memory.gpu_to_hbf);
+        break;
+    case MemoryTopology::Cascaded:
+        print_link_config("gpu_to_hbm", config.memory.gpu_to_hbm);
+        print_link_config("hbm_to_hbf", config.memory.hbm_to_hbf);
+        break;
     }
     *output_stream << "\n";
 }
@@ -160,12 +210,16 @@ void Simulator::print_statistics(bool verbose) {
     }
 
     *output_stream << "Shared Memory Bank Conflict Stats:\n";
-    *output_stream << "  Total ld.sram2reg with conflicts: " << total_conflicts << "\n";
-    *output_stream << "  Total cycles added by conflicts: " << total_conflict_cycles << "\n";
+    *output_stream << "  Total ld.sram2reg with conflicts: " << total_conflicts
+                   << "\n";
+    *output_stream << "  Total cycles added by conflicts: "
+                   << total_conflict_cycles << "\n";
     if (total_conflicts > 0) {
-        double avg_conflict = static_cast<double>(total_conflict_cycles) / total_conflicts;
+        double avg_conflict =
+            static_cast<double>(total_conflict_cycles) / total_conflicts;
         *output_stream << "  Average conflict cycles per conflicted load: "
-                  << std::fixed << std::setprecision(2) << avg_conflict << "\n";
+                       << std::fixed << std::setprecision(2) << avg_conflict
+                       << "\n";
     }
     const auto memory_stats = simulated_gpu->memory_system->statistics(cycle);
     const auto print_tier_stats = [&](const char* name,
@@ -175,32 +229,41 @@ void Simulator::print_statistics(bool verbose) {
                        << stats.write_requests << "), bytes: read "
                        << stats.read_bytes << ", write " << stats.write_bytes
                        << ", average latency: " << std::fixed
-                       << std::setprecision(2)
-                       << stats.average_latency_cycles() << " cycles\n";
+                       << std::setprecision(2) << stats.average_latency_cycles()
+                       << " cycles\n";
     };
     *output_stream << "Off-chip memory statistics:\n";
     print_tier_stats("  HBM", memory_stats.hbm);
     print_tier_stats("  HBF", memory_stats.hbf);
     const auto backend = simulated_gpu->memory_system->hbm_backend_statistics();
     if (config.memory.hbm.backend == HBMBackend::Ramulator2) {
-        const auto channels_used = std::count_if(backend.channel_transactions.begin(),
-                                                backend.channel_transactions.end(),
-                                                [](auto count) { return count > 0; });
-        *output_stream << "Ramulator HBM3 parents: " << backend.accepted_requests
-                       << "/" << backend.completed_requests << " accepted/completed; bursts: "
-                       << backend.submitted_transactions << "/" << backend.completed_transactions
-                       << "; bytes: " << backend.transaction_bytes << "; admission retries: "
-                       << backend.admission_retries << "; DRAM ticks: " << backend.dram_ticks
+        const auto channels_used =
+            std::count_if(backend.channel_transactions.begin(),
+                          backend.channel_transactions.end(),
+                          [](auto count) { return count > 0; });
+        *output_stream << "Ramulator HBM3 parents: "
+                       << backend.accepted_requests << "/"
+                       << backend.completed_requests
+                       << " accepted/completed; bursts: "
+                       << backend.submitted_transactions << "/"
+                       << backend.completed_transactions
+                       << "; bytes: " << backend.transaction_bytes
+                       << "; admission retries: " << backend.admission_retries
+                       << "; DRAM ticks: " << backend.dram_ticks
                        << "; channels used: " << channels_used << "/"
                        << backend.channel_transactions.size() << "\n";
-        const auto [min_channel, max_channel] = std::minmax_element(
-            backend.channel_transactions.begin(), backend.channel_transactions.end());
-        *output_stream << "Ramulator controllers: read/write accepted " << backend.controller_reads
-                       << "/" << backend.controller_writes << ", served "
-                       << backend.controller_served_reads << "/" << backend.controller_served_writes
+        const auto [min_channel, max_channel] =
+            std::minmax_element(backend.channel_transactions.begin(),
+                                backend.channel_transactions.end());
+        *output_stream << "Ramulator controllers: read/write accepted "
+                       << backend.controller_reads << "/"
+                       << backend.controller_writes << ", served "
+                       << backend.controller_served_reads << "/"
+                       << backend.controller_served_writes
                        << "; row hit/miss/conflict " << backend.row_hits << "/"
                        << backend.row_misses << "/" << backend.row_conflicts
-                       << "; channel burst min/max " << *min_channel << "/" << *max_channel << "\n";
+                       << "; channel burst min/max " << *min_channel << "/"
+                       << *max_channel << "\n";
     }
     if (config.memory.hbf.backend == HBFBackend::BankPlane) {
         const auto hbf = simulated_gpu->memory_system->hbf_backend_statistics();
@@ -211,9 +274,13 @@ void Simulator::print_statistics(bool verbose) {
             first = false;
             *output_stream << "\"" << name << "\":";
         };
-        const auto scalar = [&](const char* name, auto value) { field(name); *output_stream << value; };
+        const auto scalar = [&](const char* name, auto value) {
+            field(name);
+            *output_stream << value;
+        };
         const auto array = [&](const char* name, const auto& values) {
-            field(name); *output_stream << "[";
+            field(name);
+            *output_stream << "[";
             for (std::size_t i = 0; i < values.size(); ++i) {
                 if (i) *output_stream << ",";
                 *output_stream << values[i];
@@ -256,8 +323,8 @@ void Simulator::print_statistics(bool verbose) {
                                       const D2DLinkStatistics& stats) {
         *output_stream << "  " << name << " transferred bytes: GPU->memory "
                        << stats.forward_bytes << ", memory->GPU "
-                       << stats.reverse_bytes << "; utilization: "
-                       << std::fixed << std::setprecision(1)
+                       << stats.reverse_bytes << "; utilization: " << std::fixed
+                       << std::setprecision(1)
                        << (stats.forward_utilization * 100.0) << "%/"
                        << (stats.reverse_utilization * 100.0) << "%\n";
     };
@@ -291,15 +358,18 @@ bool Simulator::run(int max_cycles, bool verbose) {
             // traffic separately, including dirty eviction writebacks, without
             // adding an implicit L2 flush or changing reference kernel cycles.
             int drain_cycle = cycle;
-            while (!simulated_gpu->memory_system->idle() && drain_cycle < max_cycles) {
+            while (!simulated_gpu->memory_system->idle() &&
+                   drain_cycle < max_cycles) {
                 simulated_gpu->memory_system->step(++drain_cycle);
             }
             if (!simulated_gpu->memory_system->idle()) {
-                *output_stream << "Memory drain timed out at cycle " << drain_cycle << "\n";
+                *output_stream << "Memory drain timed out at cycle "
+                               << drain_cycle << "\n";
                 return false;
             }
             memory_drain_cycle = drain_cycle;
-            *output_stream << "Memory drained at cycle: " << drain_cycle << "\n";
+            *output_stream << "Memory drained at cycle: " << drain_cycle
+                           << "\n";
             print_statistics(verbose);
             print_results();
             return true;
@@ -317,16 +387,12 @@ void Simulator::print_results() {
     if (!config.silence_mode) {
         const int kLineWidth = 160;
         *output_stream << std::string(kLineWidth, '=') << "\n";
-        *output_stream << std::left << std::setw(6) << "ID"
-                  << std::setw(40) << "Name"
-                  << std::setw(8) << "Type"
-                  << std::setw(24) << "Op"
-                  << std::setw(6) << "Warp"
-                  << std::setw(6) << "SM"
-                  << std::setw(6) << "TB"
-                  << std::setw(8) << "Start"
-                  << std::setw(8) << "End"
-                  << std::setw(6) << "Dur" << "\n";
+        *output_stream << std::left << std::setw(6) << "ID" << std::setw(40)
+                       << "Name" << std::setw(8) << "Type" << std::setw(24)
+                       << "Op" << std::setw(6) << "Warp" << std::setw(6) << "SM"
+                       << std::setw(6) << "TB" << std::setw(8) << "Start"
+                       << std::setw(8) << "End" << std::setw(6) << "Dur"
+                       << "\n";
         *output_stream << std::string(kLineWidth, '=') << "\n";
 
         // Find max warp_id
@@ -347,32 +413,34 @@ void Simulator::print_results() {
 
             std::sort(warp_nodes.begin(), warp_nodes.end(),
                       [](const DAGNode* a, const DAGNode* b) {
-                          int a_issue = (a->issue_cycle >= 0) ? a->issue_cycle
-                                                              : std::numeric_limits<int>::max();
-                          int b_issue = (b->issue_cycle >= 0) ? b->issue_cycle
-                                                              : std::numeric_limits<int>::max();
+                          int a_issue = (a->issue_cycle >= 0)
+                                            ? a->issue_cycle
+                                            : std::numeric_limits<int>::max();
+                          int b_issue = (b->issue_cycle >= 0)
+                                            ? b->issue_cycle
+                                            : std::numeric_limits<int>::max();
                           if (a_issue != b_issue) return a_issue < b_issue;
                           if (a->start != b->start) return a->start < b->start;
                           return a->id < b->id;
                       });
 
-            *output_stream << "\n--- Warp " << warp_id << " (" << warp_nodes.size() << " nodes) ---\n";
+            *output_stream << "\n--- Warp " << warp_id << " ("
+                           << warp_nodes.size() << " nodes) ---\n";
 
             for (auto* node : warp_nodes) {
-                int duration = (node->end != -1 && node->start != -1) ? (node->end - node->start) : -1;
+                int duration = (node->end != -1 && node->start != -1)
+                                   ? (node->end - node->start)
+                                   : -1;
                 std::string status = node->finished ? "✓" : "✗";
 
-                *output_stream << std::left << std::setw(6) << node->id
-                          << std::setw(40) << node->name
-                          << std::setw(8) << node->pipeline_type
-                          << std::setw(24) << node->op
-                          << std::setw(6) << node->warp_id
-                          << std::setw(6) << node->sm_id
-                          << std::setw(6) << node->thread_block_id
-                          << std::setw(8) << node->start
-                          << std::setw(8) << node->end
-                          << std::setw(6) << duration
-                          << status << "\n";
+                *output_stream
+                    << std::left << std::setw(6) << node->id << std::setw(40)
+                    << node->name << std::setw(8) << node->pipeline_type
+                    << std::setw(24) << node->op << std::setw(6)
+                    << node->warp_id << std::setw(6) << node->sm_id
+                    << std::setw(6) << node->thread_block_id << std::setw(8)
+                    << node->start << std::setw(8) << node->end << std::setw(6)
+                    << duration << status << "\n";
             }
         }
 
@@ -393,23 +461,26 @@ void Simulator::print_results() {
         }
         if (node->op_type == OpType::CP_SRAM2DRAM_TMA &&
             node->tma_issue_complete_cycle >= 0) {
-            last_tma_issue = std::max(last_tma_issue, node->tma_issue_complete_cycle);
+            last_tma_issue =
+                std::max(last_tma_issue, node->tma_issue_complete_cycle);
         }
         if ((node->op_type == OpType::CP_SRAM2DRAM_TMA ||
              node->op_type == OpType::CP_SRAM2DRAM ||
              node->op_type == OpType::ST_REG2DRAM) &&
             node->issue_cycle >= 0) {
-            last_output_store_issue = std::max(last_output_store_issue, node->issue_cycle);
+            last_output_store_issue =
+                std::max(last_output_store_issue, node->issue_cycle);
         }
-        if (node->op_type == OpType::ST_REG2DRAM &&
-            node->issue_cycle >= 0) {
-            last_dram_store_issue = std::max(last_dram_store_issue, node->issue_cycle);
+        if (node->op_type == OpType::ST_REG2DRAM && node->issue_cycle >= 0) {
+            last_dram_store_issue =
+                std::max(last_dram_store_issue, node->issue_cycle);
         }
     }
     int total_cycles = cycle;
     std::string kernel_time_line;
     if (last_tma_issue != std::numeric_limits<int>::min()) {
-        kernel_time_line = "Kernel time (last TMA issue cycle): " + std::to_string(last_tma_issue);
+        kernel_time_line = "Kernel time (last TMA issue cycle): " +
+                           std::to_string(last_tma_issue);
     }
 
     struct TBStats {
@@ -484,8 +555,12 @@ void Simulator::print_results() {
             : min_load_start(std::numeric_limits<int>::max()),
               max_mma_end(std::numeric_limits<int>::min()) {}
     };
-    std::unordered_map<TileKey, std::unordered_map<int, RoundCpStats>, TileKeyHash> tile_cp_rounds;
-    std::unordered_map<TileKey, std::unordered_map<int, RoundComputeStats>, TileKeyHash> tile_compute_rounds;
+    std::unordered_map<TileKey, std::unordered_map<int, RoundCpStats>,
+                       TileKeyHash>
+        tile_cp_rounds;
+    std::unordered_map<TileKey, std::unordered_map<int, RoundComputeStats>,
+                       TileKeyHash>
+        tile_compute_rounds;
     auto parse_outer_id = [](const std::string& name) -> int {
         std::size_t pos = name.find("_outer");
         if (pos == std::string::npos) {
@@ -519,15 +594,18 @@ void Simulator::print_results() {
             if (stats.first_sm_id < 0 && node->sm_id >= 0) {
                 stats.first_sm_id = node->sm_id;
             }
-            if (node->start >= 0) stats.min_start = std::min(stats.min_start, node->start);
-            if (node->end >= 0) stats.max_end = std::max(stats.max_end, node->end);
+            if (node->start >= 0)
+                stats.min_start = std::min(stats.min_start, node->start);
+            if (node->end >= 0)
+                stats.max_end = std::max(stats.max_end, node->end);
             if (node->start >= 0) {
                 if (node->op_type == OpType::WGMMA && node->issue_cycle >= 0) {
                     stats.first_wgmma_issue =
                         std::min(stats.first_wgmma_issue, node->issue_cycle);
                 }
                 if (node->op_type == OpType::ST_REG2SRAM) {
-                    stats.first_st_start = std::min(stats.first_st_start, node->start);
+                    stats.first_st_start =
+                        std::min(stats.first_st_start, node->start);
                 }
                 if (node->op_type == OpType::CP_SRAM2DRAM_TMA) {
                     stats.first_tma_store_start =
@@ -551,30 +629,24 @@ void Simulator::print_results() {
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 }
-                if (node->op_type == OpType::WGMMA &&
-                    node->end >= 0) {
+                if (node->op_type == OpType::WGMMA && node->end >= 0) {
                     auto& round = tile_compute_rounds[key][outer_id];
-                    round.min_load_start = std::min(round.min_load_start, node->start);
+                    round.min_load_start =
+                        std::min(round.min_load_start, node->start);
                     round.max_mma_end = std::max(round.max_mma_end, node->end);
                 }
             }
         }
         if (!tile_stats.empty()) {
             *output_stream << "\nTile Stats:\n";
-            *output_stream << std::left << std::setw(8) << "TB"
-                      << std::setw(6) << "SM"
-                      << std::setw(8) << "Tile"
-                      << std::setw(10) << "Start"
-                      << std::setw(10) << "End"
-                      << std::setw(10) << "Latency"
-                      << std::setw(12) << "PreSt"
-                      << std::setw(10) << "St"
-                      << std::setw(10) << "Store"
-                      << std::setw(12) << "CpAvg"
-                      << std::setw(12) << "Mma"
-                      << std::setw(12) << "MmaStart"
-                      << std::setw(12) << "Finished"
-                      << std::setw(8) << "Nodes" << "\n";
+            *output_stream << std::left << std::setw(8) << "TB" << std::setw(6)
+                           << "SM" << std::setw(8) << "Tile" << std::setw(10)
+                           << "Start" << std::setw(10) << "End" << std::setw(10)
+                           << "Latency" << std::setw(12) << "PreSt"
+                           << std::setw(10) << "St" << std::setw(10) << "Store"
+                           << std::setw(12) << "CpAvg" << std::setw(12) << "Mma"
+                           << std::setw(12) << "MmaStart" << std::setw(12)
+                           << "Finished" << std::setw(8) << "Nodes" << "\n";
             *output_stream << std::string(140, '-') << "\n";
             std::vector<TileKey> keys;
             keys.reserve(tile_stats.size());
@@ -586,21 +658,27 @@ void Simulator::print_results() {
                       });
             for (const auto& key : keys) {
                 const auto& stats = tile_stats[key];
-                int latency = (stats.min_start != std::numeric_limits<int>::max() &&
-                               stats.max_end != std::numeric_limits<int>::min())
-                                  ? (stats.max_end - stats.min_start)
-                                  : -1;
-                int pre_st = (stats.min_start != std::numeric_limits<int>::max() &&
-                              stats.first_st_start != std::numeric_limits<int>::max())
-                                 ? (stats.first_st_start - stats.min_start)
-                                 : -1;
-                int st_span = (stats.first_st_start != std::numeric_limits<int>::max() &&
-                               stats.last_st_end != std::numeric_limits<int>::min())
-                                  ? (stats.last_st_end - stats.first_st_start)
-                                  : -1;
-                int store_span = (stats.first_tma_store_start != std::numeric_limits<int>::max() &&
-                                  stats.last_tma_store_end != std::numeric_limits<int>::min())
-                                     ? (stats.last_tma_store_end - stats.first_tma_store_start)
+                int latency =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.max_end != std::numeric_limits<int>::min())
+                        ? (stats.max_end - stats.min_start)
+                        : -1;
+                int pre_st =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.first_st_start != std::numeric_limits<int>::max())
+                        ? (stats.first_st_start - stats.min_start)
+                        : -1;
+                int st_span =
+                    (stats.first_st_start != std::numeric_limits<int>::max() &&
+                     stats.last_st_end != std::numeric_limits<int>::min())
+                        ? (stats.last_st_end - stats.first_st_start)
+                        : -1;
+                int store_span = (stats.first_tma_store_start !=
+                                      std::numeric_limits<int>::max() &&
+                                  stats.last_tma_store_end !=
+                                      std::numeric_limits<int>::min())
+                                     ? (stats.last_tma_store_end -
+                                        stats.first_tma_store_start)
                                      : -1;
                 double cp_avg = 0.0;
                 int cp_count = 0;
@@ -608,7 +686,8 @@ void Simulator::print_results() {
                 if (cp_it != tile_cp_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : cp_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             cp_count++;
@@ -625,33 +704,43 @@ void Simulator::print_results() {
                 if (comp_it != tile_compute_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : comp_it->second) {
-                        if (round.min_load_start != std::numeric_limits<int>::max() &&
-                            round.max_mma_end != std::numeric_limits<int>::min()) {
+                        if (round.min_load_start !=
+                                std::numeric_limits<int>::max() &&
+                            round.max_mma_end !=
+                                std::numeric_limits<int>::min()) {
                             sum += (round.max_mma_end - round.min_load_start);
                             load_mma_count++;
                         }
                     }
                     if (load_mma_count > 0) {
-                        load_mma_avg = static_cast<double>(sum) / load_mma_count;
+                        load_mma_avg =
+                            static_cast<double>(sum) / load_mma_count;
                     }
                 }
-            *output_stream << std::left << std::setw(8) << key.tb_id
-                      << std::setw(6) << stats.first_sm_id
-                      << std::setw(8) << key.tile_id
-                      << std::setw(10) << (stats.min_start == std::numeric_limits<int>::max() ? -1 : stats.min_start)
-                      << std::setw(10) << (stats.max_end == std::numeric_limits<int>::min() ? -1 : stats.max_end)
-                      << std::setw(10) << latency
-                          << std::setw(12) << pre_st
-                          << std::setw(10) << st_span
-                          << std::setw(10) << store_span
-                          << std::setw(12) << std::fixed << std::setprecision(2) << cp_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << load_mma_avg
-                          << std::setw(12) << (stats.first_wgmma_issue == std::numeric_limits<int>::max()
-                                                  ? -1
-                                                  : stats.first_wgmma_issue)
-                          << std::setw(12) << (std::to_string(stats.finished_count) + "/" +
-                                               std::to_string(stats.node_count))
-                          << std::setw(8) << stats.node_count << "\n";
+                *output_stream
+                    << std::left << std::setw(8) << key.tb_id << std::setw(6)
+                    << stats.first_sm_id << std::setw(8) << key.tile_id
+                    << std::setw(10)
+                    << (stats.min_start == std::numeric_limits<int>::max()
+                            ? -1
+                            : stats.min_start)
+                    << std::setw(10)
+                    << (stats.max_end == std::numeric_limits<int>::min()
+                            ? -1
+                            : stats.max_end)
+                    << std::setw(10) << latency << std::setw(12) << pre_st
+                    << std::setw(10) << st_span << std::setw(10) << store_span
+                    << std::setw(12) << std::fixed << std::setprecision(2)
+                    << cp_avg << std::setw(12) << std::fixed
+                    << std::setprecision(2) << load_mma_avg << std::setw(12)
+                    << (stats.first_wgmma_issue ==
+                                std::numeric_limits<int>::max()
+                            ? -1
+                            : stats.first_wgmma_issue)
+                    << std::setw(12)
+                    << (std::to_string(stats.finished_count) + "/" +
+                        std::to_string(stats.node_count))
+                    << std::setw(8) << stats.node_count << "\n";
             }
         }
     } else if (config.workload_type == WorkloadType::FA3 ||
@@ -675,13 +764,20 @@ void Simulator::print_results() {
                   max_end(std::numeric_limits<int>::min()) {}
         };
         std::unordered_map<TBKey, TBStats, TBKeyHash> tb_stats;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_wgmma1_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_mid_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_wgmma2_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_kload_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_vload_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_cons_loop_start_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_cons_loop_end_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_wgmma1_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_mid_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_wgmma2_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_kload_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_vload_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_cons_loop_start_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_cons_loop_end_rounds;
         const bool is_flashdecoding =
             (config.workload_type == WorkloadType::FlashDecoding);
         for (auto* node : dag->nodes) {
@@ -693,19 +789,24 @@ void Simulator::print_results() {
             if (stats.first_sm_id < 0 && node->sm_id >= 0) {
                 stats.first_sm_id = node->sm_id;
             }
-            if (node->start >= 0) stats.min_start = std::min(stats.min_start, node->start);
-            if (node->end >= 0) stats.max_end = std::max(stats.max_end, node->end);
+            if (node->start >= 0)
+                stats.min_start = std::min(stats.min_start, node->start);
+            if (node->end >= 0)
+                stats.max_end = std::max(stats.max_end, node->end);
             if (node->start >= 0) {
                 if (node->op_type == OpType::ST_REG2SRAM) {
-                    stats.first_st_start = std::min(stats.first_st_start, node->start);
+                    stats.first_st_start =
+                        std::min(stats.first_st_start, node->start);
                 }
                 if (node->op == "acc_o_div") {
-                    stats.first_div_start = std::min(stats.first_div_start, node->start);
+                    stats.first_div_start =
+                        std::min(stats.first_div_start, node->start);
                 }
-                if ((!is_flashdecoding && node->op_type == OpType::CP_SRAM2DRAM_TMA) ||
-                    (is_flashdecoding &&
-                     node->op_type == OpType::ST_REG2DRAM &&
-                     node->name.find("_OutPartial_Store_") != std::string::npos)) {
+                if ((!is_flashdecoding &&
+                     node->op_type == OpType::CP_SRAM2DRAM_TMA) ||
+                    (is_flashdecoding && node->op_type == OpType::ST_REG2DRAM &&
+                     node->name.find("_OutPartial_Store_") !=
+                         std::string::npos)) {
                     stats.first_tma_store_start =
                         std::min(stats.first_tma_store_start, node->start);
                 }
@@ -715,12 +816,14 @@ void Simulator::print_results() {
                     stats.last_st_end = std::max(stats.last_st_end, node->end);
                 }
                 if (node->op == "acc_o_div") {
-                    stats.last_div_end = std::max(stats.last_div_end, node->end);
+                    stats.last_div_end =
+                        std::max(stats.last_div_end, node->end);
                 }
-                if ((!is_flashdecoding && node->op_type == OpType::CP_SRAM2DRAM_TMA) ||
-                    (is_flashdecoding &&
-                     node->op_type == OpType::ST_REG2DRAM &&
-                     node->name.find("_OutPartial_Store_") != std::string::npos)) {
+                if ((!is_flashdecoding &&
+                     node->op_type == OpType::CP_SRAM2DRAM_TMA) ||
+                    (is_flashdecoding && node->op_type == OpType::ST_REG2DRAM &&
+                     node->name.find("_OutPartial_Store_") !=
+                         std::string::npos)) {
                     stats.last_tma_store_end =
                         std::max(stats.last_tma_store_end, node->end);
                 }
@@ -730,32 +833,42 @@ void Simulator::print_results() {
             if (outer_id >= 0 && node->start >= 0 && node->end >= 0) {
                 if (node->op_type == OpType::WGMMA &&
                     node->name.find("_WGMMA_SS_") != std::string::npos) {
-                    auto& round = tb_wgmma1_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_wgmma1_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->op_type == OpType::WGMMA &&
                            node->name.find("_WGMMA_RS_") != std::string::npos) {
-                    auto& round = tb_wgmma2_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_wgmma2_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->name.find("_Softmax_") != std::string::npos) {
-                    auto& round = tb_mid_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_mid_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->name.find("_K_Load") != std::string::npos) {
-                    auto& round = tb_kload_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_kload_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->name.find("_V_Load") != std::string::npos) {
-                    auto& round = tb_vload_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_vload_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
-                } else if (node->name.find("_ConsumerLoopStart_") != std::string::npos) {
-                    auto& round = tb_cons_loop_start_rounds[node->thread_block_id][outer_id];
+                } else if (node->name.find("_ConsumerLoopStart_") !=
+                           std::string::npos) {
+                    auto& round =
+                        tb_cons_loop_start_rounds[node->thread_block_id]
+                                                 [outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
-                } else if (node->name.find("_ConsumerLoopEnd_") != std::string::npos) {
-                    auto& round = tb_cons_loop_end_rounds[node->thread_block_id][outer_id];
+                } else if (node->name.find("_ConsumerLoopEnd_") !=
+                           std::string::npos) {
+                    auto& round = tb_cons_loop_end_rounds[node->thread_block_id]
+                                                         [outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 }
@@ -765,24 +878,18 @@ void Simulator::print_results() {
             *output_stream << "\nBlock Stats ("
                            << (is_flashdecoding ? "FlashDecoding" : "FA3")
                            << "):\n";
-            *output_stream << std::left << std::setw(8) << "TB"
-                      << std::setw(6) << "SM"
-                      << std::setw(10) << "Start"
-                      << std::setw(10) << "End"
-                      << std::setw(10) << "Latency"
-                      << std::setw(12) << "LoopStart"
-                      << std::setw(12) << "LoopEnd"
-                      << std::setw(12) << "KLoad"
-                      << std::setw(12) << "VLoad"
-                      << std::setw(12) << "Wgmma1"
-                      << std::setw(12) << "Mid"
-                      << std::setw(12) << "Wgmma2"
-                      << std::setw(12) << "PreDiv"
-                      << std::setw(10) << "Div"
-                      << std::setw(10) << "St"
-                      << std::setw(10) << "Store"
-                      << std::setw(12) << "Finished"
-                      << std::setw(8) << "Nodes" << "\n";
+            *output_stream << std::left << std::setw(8) << "TB" << std::setw(6)
+                           << "SM" << std::setw(10) << "Start" << std::setw(10)
+                           << "End" << std::setw(10) << "Latency"
+                           << std::setw(12) << "LoopStart" << std::setw(12)
+                           << "LoopEnd" << std::setw(12) << "KLoad"
+                           << std::setw(12) << "VLoad" << std::setw(12)
+                           << "Wgmma1" << std::setw(12) << "Mid"
+                           << std::setw(12) << "Wgmma2" << std::setw(12)
+                           << "PreDiv" << std::setw(10) << "Div"
+                           << std::setw(10) << "St" << std::setw(10) << "Store"
+                           << std::setw(12) << "Finished" << std::setw(8)
+                           << "Nodes" << "\n";
             *output_stream << std::string(168, '-') << "\n";
             std::vector<TBKey> keys;
             keys.reserve(tb_stats.size());
@@ -793,17 +900,19 @@ void Simulator::print_results() {
                       });
             for (const auto& key : keys) {
                 const auto& stats = tb_stats[key];
-                int latency = (stats.min_start != std::numeric_limits<int>::max() &&
-                               stats.max_end != std::numeric_limits<int>::min())
-                                  ? (stats.max_end - stats.min_start)
-                                  : -1;
+                int latency =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.max_end != std::numeric_limits<int>::min())
+                        ? (stats.max_end - stats.min_start)
+                        : -1;
                 double kload_avg = 0.0;
                 int kload_count = 0;
                 auto k_it = tb_kload_rounds.find(key.tb_id);
                 if (k_it != tb_kload_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : k_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             kload_count++;
@@ -820,7 +929,8 @@ void Simulator::print_results() {
                 if (v_it != tb_vload_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : v_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             vload_count++;
@@ -836,7 +946,8 @@ void Simulator::print_results() {
                 if (w1_it != tb_wgmma1_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : w1_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             wgmma1_count++;
@@ -853,7 +964,8 @@ void Simulator::print_results() {
                 if (mid_it != tb_mid_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : mid_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             mid_count++;
@@ -870,7 +982,8 @@ void Simulator::print_results() {
                 if (w2_it != tb_wgmma2_rounds.end()) {
                     long long sum = 0;
                     for (const auto& [_, round] : w2_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             wgmma2_count++;
@@ -884,7 +997,8 @@ void Simulator::print_results() {
                 auto ls_it = tb_cons_loop_start_rounds.find(key.tb_id);
                 if (ls_it != tb_cons_loop_start_rounds.end()) {
                     for (const auto& [_, round] : ls_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max()) {
+                        if (round.min_start !=
+                            std::numeric_limits<int>::max()) {
                             loop_start = std::min(loop_start, round.min_start);
                         }
                     }
@@ -904,41 +1018,52 @@ void Simulator::print_results() {
                 if (loop_end == std::numeric_limits<int>::min()) {
                     loop_end = -1;
                 }
-                int pre_div = (stats.min_start != std::numeric_limits<int>::max() &&
-                               stats.first_div_start != std::numeric_limits<int>::max())
-                                  ? (stats.first_div_start - stats.min_start)
-                                  : -1;
-                int div_span = (stats.first_div_start != std::numeric_limits<int>::max() &&
-                                stats.last_div_end != std::numeric_limits<int>::min())
-                                   ? (stats.last_div_end - stats.first_div_start)
-                                   : -1;
-                int st_span = (stats.first_st_start != std::numeric_limits<int>::max() &&
-                               stats.last_st_end != std::numeric_limits<int>::min())
-                                  ? (stats.last_st_end - stats.first_st_start)
-                                  : -1;
-                int store_span = (stats.first_tma_store_start != std::numeric_limits<int>::max() &&
-                                  stats.last_tma_store_end != std::numeric_limits<int>::min())
-                                     ? (stats.last_tma_store_end - stats.first_tma_store_start)
+                int pre_div =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.first_div_start != std::numeric_limits<int>::max())
+                        ? (stats.first_div_start - stats.min_start)
+                        : -1;
+                int div_span =
+                    (stats.first_div_start != std::numeric_limits<int>::max() &&
+                     stats.last_div_end != std::numeric_limits<int>::min())
+                        ? (stats.last_div_end - stats.first_div_start)
+                        : -1;
+                int st_span =
+                    (stats.first_st_start != std::numeric_limits<int>::max() &&
+                     stats.last_st_end != std::numeric_limits<int>::min())
+                        ? (stats.last_st_end - stats.first_st_start)
+                        : -1;
+                int store_span = (stats.first_tma_store_start !=
+                                      std::numeric_limits<int>::max() &&
+                                  stats.last_tma_store_end !=
+                                      std::numeric_limits<int>::min())
+                                     ? (stats.last_tma_store_end -
+                                        stats.first_tma_store_start)
                                      : -1;
-                *output_stream << std::left << std::setw(8) << key.tb_id
-                          << std::setw(6) << stats.first_sm_id
-                          << std::setw(10) << (stats.min_start == std::numeric_limits<int>::max() ? -1 : stats.min_start)
-                          << std::setw(10) << (stats.max_end == std::numeric_limits<int>::min() ? -1 : stats.max_end)
-                          << std::setw(10) << latency
-                          << std::setw(12) << loop_start
-                          << std::setw(12) << loop_end
-                          << std::setw(12) << std::fixed << std::setprecision(2) << kload_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << vload_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << wgmma1_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << mid_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << wgmma2_avg
-                          << std::setw(12) << pre_div
-                          << std::setw(10) << div_span
-                          << std::setw(10) << st_span
-                          << std::setw(10) << store_span
-                          << std::setw(12) << (std::to_string(stats.finished_count) + "/" +
-                                               std::to_string(stats.node_count))
-                          << std::setw(8) << stats.node_count << "\n";
+                *output_stream
+                    << std::left << std::setw(8) << key.tb_id << std::setw(6)
+                    << stats.first_sm_id << std::setw(10)
+                    << (stats.min_start == std::numeric_limits<int>::max()
+                            ? -1
+                            : stats.min_start)
+                    << std::setw(10)
+                    << (stats.max_end == std::numeric_limits<int>::min()
+                            ? -1
+                            : stats.max_end)
+                    << std::setw(10) << latency << std::setw(12) << loop_start
+                    << std::setw(12) << loop_end << std::setw(12) << std::fixed
+                    << std::setprecision(2) << kload_avg << std::setw(12)
+                    << std::fixed << std::setprecision(2) << vload_avg
+                    << std::setw(12) << std::fixed << std::setprecision(2)
+                    << wgmma1_avg << std::setw(12) << std::fixed
+                    << std::setprecision(2) << mid_avg << std::setw(12)
+                    << std::fixed << std::setprecision(2) << wgmma2_avg
+                    << std::setw(12) << pre_div << std::setw(10) << div_span
+                    << std::setw(10) << st_span << std::setw(10) << store_span
+                    << std::setw(12)
+                    << (std::to_string(stats.finished_count) + "/" +
+                        std::to_string(stats.node_count))
+                    << std::setw(8) << stats.node_count << "\n";
             }
         }
     } else if (config.workload_type == WorkloadType::ClusterReduce) {
@@ -981,13 +1106,14 @@ void Simulator::print_results() {
             auto& stats = reduce_stats[key];
             stats.node_count++;
             if (node->finished) stats.finished_count++;
-            if (node->start >= 0) stats.min_start = std::min(stats.min_start, node->start);
-            if (node->end >= 0) stats.max_end = std::max(stats.max_end, node->end);
+            if (node->start >= 0)
+                stats.min_start = std::min(stats.min_start, node->start);
+            if (node->end >= 0)
+                stats.max_end = std::max(stats.max_end, node->end);
         }
 
         const std::vector<std::string> reduce_order = {
-            "RMS", "QKV", "SoftmaxStats", "AttnOut"
-        };
+            "RMS", "QKV", "SoftmaxStats", "AttnOut"};
         long long total_reduce_cycles = 0;
         for (const auto& key : reduce_order) {
             auto it = reduce_stats.find(key);
@@ -1009,10 +1135,8 @@ void Simulator::print_results() {
             }
             total_reduce_cycles += cycles;
             *output_stream << "[ClusterReduceStats] " << key
-                           << " start=" << start
-                           << " end=" << end
-                           << " cycles=" << cycles
-                           << " nodes=" << nodes
+                           << " start=" << start << " end=" << end
+                           << " cycles=" << cycles << " nodes=" << nodes
                            << " finished=" << finished_nodes << "\n";
         }
         *output_stream << "[ClusterReduceStats] total_cycles="
@@ -1037,9 +1161,12 @@ void Simulator::print_results() {
                   max_end(std::numeric_limits<int>::min()) {}
         };
         std::unordered_map<TBKey, TBStats, TBKeyHash> tb_stats;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_wgmma1_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_mid_rounds;
-        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>> tb_wgmma2_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_wgmma1_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_mid_rounds;
+        std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>
+            tb_wgmma2_rounds;
 
         for (auto* node : dag->nodes) {
             if (node->thread_block_id < 0) continue;
@@ -1050,15 +1177,19 @@ void Simulator::print_results() {
             if (stats.first_sm_id < 0 && node->sm_id >= 0) {
                 stats.first_sm_id = node->sm_id;
             }
-            if (node->start >= 0) stats.min_start = std::min(stats.min_start, node->start);
-            if (node->end >= 0) stats.max_end = std::max(stats.max_end, node->end);
+            if (node->start >= 0)
+                stats.min_start = std::min(stats.min_start, node->start);
+            if (node->end >= 0)
+                stats.max_end = std::max(stats.max_end, node->end);
             if (node->start >= 0) {
                 if (node->op_type == OpType::ST_REG2SRAM &&
                     node->name.find("_ST_acco_") != std::string::npos) {
-                    stats.first_st_start = std::min(stats.first_st_start, node->start);
+                    stats.first_st_start =
+                        std::min(stats.first_st_start, node->start);
                 }
                 if (node->op == "acc_o_norm") {
-                    stats.first_div_start = std::min(stats.first_div_start, node->start);
+                    stats.first_div_start =
+                        std::min(stats.first_div_start, node->start);
                 }
                 if (node->op_type == OpType::CP_SRAM2DRAM_TMA) {
                     stats.first_tma_store_start =
@@ -1071,7 +1202,8 @@ void Simulator::print_results() {
                     stats.last_st_end = std::max(stats.last_st_end, node->end);
                 }
                 if (node->op == "acc_o_norm") {
-                    stats.last_div_end = std::max(stats.last_div_end, node->end);
+                    stats.last_div_end =
+                        std::max(stats.last_div_end, node->end);
                 }
                 if (node->op_type == OpType::CP_SRAM2DRAM_TMA) {
                     stats.last_tma_store_end =
@@ -1084,16 +1216,19 @@ void Simulator::print_results() {
                 if (node->op_type == OpType::WGMMA &&
                     (node->name.find("_WGMMA_QK_") != std::string::npos ||
                      node->name.find("_WGMMA_QpeKpe_") != std::string::npos)) {
-                    auto& round = tb_wgmma1_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_wgmma1_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->op_type == OpType::WGMMA &&
                            node->name.find("_WGMMA_PV_") != std::string::npos) {
-                    auto& round = tb_wgmma2_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_wgmma2_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 } else if (node->name.find("_Softmax_") != std::string::npos) {
-                    auto& round = tb_mid_rounds[node->thread_block_id][outer_id];
+                    auto& round =
+                        tb_mid_rounds[node->thread_block_id][outer_id];
                     round.min_start = std::min(round.min_start, node->start);
                     round.max_end = std::max(round.max_end, node->end);
                 }
@@ -1101,21 +1236,16 @@ void Simulator::print_results() {
         }
         if (!tb_stats.empty()) {
             *output_stream << "\nBlock Stats (FlashMLA):\n";
-            *output_stream << std::left << std::setw(8) << "TB"
-                      << std::setw(6) << "SM"
-                      << std::setw(10) << "Start"
-                      << std::setw(10) << "End"
-                      << std::setw(10) << "Latency"
-                      << std::setw(14) << "MainLoopStart"
-                      << std::setw(12) << "Wgmma1"
-                      << std::setw(12) << "Mid"
-                      << std::setw(12) << "Wgmma2"
-                      << std::setw(12) << "PreNorm"
-                      << std::setw(10) << "Norm"
-                      << std::setw(10) << "St"
-                      << std::setw(10) << "Store"
-                      << std::setw(12) << "Finished"
-                      << std::setw(8) << "Nodes" << "\n";
+            *output_stream << std::left << std::setw(8) << "TB" << std::setw(6)
+                           << "SM" << std::setw(10) << "Start" << std::setw(10)
+                           << "End" << std::setw(10) << "Latency"
+                           << std::setw(14) << "MainLoopStart" << std::setw(12)
+                           << "Wgmma1" << std::setw(12) << "Mid"
+                           << std::setw(12) << "Wgmma2" << std::setw(12)
+                           << "PreNorm" << std::setw(10) << "Norm"
+                           << std::setw(10) << "St" << std::setw(10) << "Store"
+                           << std::setw(12) << "Finished" << std::setw(8)
+                           << "Nodes" << "\n";
             *output_stream << std::string(168, '-') << "\n";
             std::vector<TBKey> keys;
             keys.reserve(tb_stats.size());
@@ -1126,19 +1256,24 @@ void Simulator::print_results() {
                       });
             for (const auto& key : keys) {
                 const auto& stats = tb_stats[key];
-                int latency = (stats.min_start != std::numeric_limits<int>::max() &&
-                               stats.max_end != std::numeric_limits<int>::min())
-                                  ? (stats.max_end - stats.min_start)
-                                  : -1;
+                int latency =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.max_end != std::numeric_limits<int>::min())
+                        ? (stats.max_end - stats.min_start)
+                        : -1;
 
-                auto avg_span = [&](const std::unordered_map<int, std::unordered_map<int, RoundSpanStats>>& rounds,
-                                    int tb_id) -> double {
+                auto avg_span =
+                    [&](const std::unordered_map<
+                            int, std::unordered_map<int, RoundSpanStats>>&
+                            rounds,
+                        int tb_id) -> double {
                     auto it = rounds.find(tb_id);
                     if (it == rounds.end()) return 0.0;
                     long long sum = 0;
                     int count = 0;
                     for (const auto& [_, round] : it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max() &&
+                        if (round.min_start !=
+                                std::numeric_limits<int>::max() &&
                             round.max_end != std::numeric_limits<int>::min()) {
                             sum += (round.max_end - round.min_start);
                             count++;
@@ -1154,8 +1289,10 @@ void Simulator::print_results() {
                 auto w1_it = tb_wgmma1_rounds.find(key.tb_id);
                 if (w1_it != tb_wgmma1_rounds.end()) {
                     for (const auto& [_, round] : w1_it->second) {
-                        if (round.min_start != std::numeric_limits<int>::max()) {
-                            main_loop_start = std::min(main_loop_start, round.min_start);
+                        if (round.min_start !=
+                            std::numeric_limits<int>::max()) {
+                            main_loop_start =
+                                std::min(main_loop_start, round.min_start);
                         }
                     }
                 }
@@ -1163,56 +1300,68 @@ void Simulator::print_results() {
                     main_loop_start = -1;
                 }
 
-                int prenorm = (stats.min_start != std::numeric_limits<int>::max() &&
-                               stats.first_div_start != std::numeric_limits<int>::max())
-                                  ? (stats.first_div_start - stats.min_start)
-                                  : -1;
-                int norm_span = (stats.first_div_start != std::numeric_limits<int>::max() &&
-                                 stats.last_div_end != std::numeric_limits<int>::min())
-                                    ? (stats.last_div_end - stats.first_div_start)
-                                    : -1;
-                int st_span = (stats.first_st_start != std::numeric_limits<int>::max() &&
-                               stats.last_st_end != std::numeric_limits<int>::min())
-                                  ? (stats.last_st_end - stats.first_st_start)
-                                  : -1;
-                int store_span = (stats.first_tma_store_start != std::numeric_limits<int>::max() &&
-                                  stats.last_tma_store_end != std::numeric_limits<int>::min())
-                                     ? (stats.last_tma_store_end - stats.first_tma_store_start)
+                int prenorm =
+                    (stats.min_start != std::numeric_limits<int>::max() &&
+                     stats.first_div_start != std::numeric_limits<int>::max())
+                        ? (stats.first_div_start - stats.min_start)
+                        : -1;
+                int norm_span =
+                    (stats.first_div_start != std::numeric_limits<int>::max() &&
+                     stats.last_div_end != std::numeric_limits<int>::min())
+                        ? (stats.last_div_end - stats.first_div_start)
+                        : -1;
+                int st_span =
+                    (stats.first_st_start != std::numeric_limits<int>::max() &&
+                     stats.last_st_end != std::numeric_limits<int>::min())
+                        ? (stats.last_st_end - stats.first_st_start)
+                        : -1;
+                int store_span = (stats.first_tma_store_start !=
+                                      std::numeric_limits<int>::max() &&
+                                  stats.last_tma_store_end !=
+                                      std::numeric_limits<int>::min())
+                                     ? (stats.last_tma_store_end -
+                                        stats.first_tma_store_start)
                                      : -1;
 
-                *output_stream << std::left << std::setw(8) << key.tb_id
-                          << std::setw(6) << stats.first_sm_id
-                          << std::setw(10) << (stats.min_start == std::numeric_limits<int>::max() ? -1 : stats.min_start)
-                          << std::setw(10) << (stats.max_end == std::numeric_limits<int>::min() ? -1 : stats.max_end)
-                          << std::setw(10) << latency
-                          << std::setw(14) << main_loop_start
-                          << std::setw(12) << std::fixed << std::setprecision(2) << wgmma1_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << mid_avg
-                          << std::setw(12) << std::fixed << std::setprecision(2) << wgmma2_avg
-                          << std::setw(12) << prenorm
-                          << std::setw(10) << norm_span
-                          << std::setw(10) << st_span
-                          << std::setw(10) << store_span
-                          << std::setw(12) << (std::to_string(stats.finished_count) + "/" +
-                                               std::to_string(stats.node_count))
-                          << std::setw(8) << stats.node_count << "\n";
+                *output_stream
+                    << std::left << std::setw(8) << key.tb_id << std::setw(6)
+                    << stats.first_sm_id << std::setw(10)
+                    << (stats.min_start == std::numeric_limits<int>::max()
+                            ? -1
+                            : stats.min_start)
+                    << std::setw(10)
+                    << (stats.max_end == std::numeric_limits<int>::min()
+                            ? -1
+                            : stats.max_end)
+                    << std::setw(10) << latency << std::setw(14)
+                    << main_loop_start << std::setw(12) << std::fixed
+                    << std::setprecision(2) << wgmma1_avg << std::setw(12)
+                    << std::fixed << std::setprecision(2) << mid_avg
+                    << std::setw(12) << std::fixed << std::setprecision(2)
+                    << wgmma2_avg << std::setw(12) << prenorm << std::setw(10)
+                    << norm_span << std::setw(10) << st_span << std::setw(10)
+                    << store_span << std::setw(12)
+                    << (std::to_string(stats.finished_count) + "/" +
+                        std::to_string(stats.node_count))
+                    << std::setw(8) << stats.node_count << "\n";
             }
         }
     }
 
     *output_stream << "Total cycles: " << total_cycles << "\n";
-    *output_stream << "Finished: " << finished << "/" << dag->nodes.size() << "\n";
+    *output_stream << "Finished: " << finished << "/" << dag->nodes.size()
+                   << "\n";
     if (last_dram_store_issue != std::numeric_limits<int>::min()) {
-        *output_stream << "Kernel time (last DRAM store issue cycle): " << last_dram_store_issue << "\n";
+        *output_stream << "Kernel time (last DRAM store issue cycle): "
+                       << last_dram_store_issue << "\n";
     }
     if (last_output_store_issue != std::numeric_limits<int>::min()) {
-        *output_stream << "Kernel time (last output store issue cycle): " << last_output_store_issue << "\n";
+        *output_stream << "Kernel time (last output store issue cycle): "
+                       << last_output_store_issue << "\n";
     }
     if (!kernel_time_line.empty()) {
         *output_stream << kernel_time_line << "\n";
     }
-
-
 
     if (!config.silence_mode) {
         *output_stream << "\nRegister Usage:\n";
@@ -1221,19 +1370,22 @@ void Simulator::print_results() {
                 // Check active warps for this subpartition
                 std::vector<int> active_warps;
                 for (int w = 0; w < sp->sp_scheduler->scheduler_warp_num; ++w) {
-                    if (w % 4 == sp->subpartition_id && sp->sp_scheduler->warp_head_index[w] > 0) {
+                    if (w % 4 == sp->subpartition_id &&
+                        sp->sp_scheduler->warp_head_index[w] > 0) {
                         active_warps.push_back(w);
                     }
                 }
                 if (!active_warps.empty()) {
-                    *output_stream << "  SM" << sm_inst->sm_id << " SP" << sp->subpartition_id
-                              << " (Warps ";
+                    *output_stream << "  SM" << sm_inst->sm_id << " SP"
+                                   << sp->subpartition_id << " (Warps ";
                     for (size_t i = 0; i < active_warps.size(); ++i) {
                         *output_stream << active_warps[i];
                         if (i < active_warps.size() - 1) *output_stream << ",";
                     }
-                    *output_stream << "): " << sp->sp_register->register_totally_used
-                              << " / " << sp->sp_register->register_size << " bytes\n";
+                    *output_stream
+                        << "): " << sp->sp_register->register_totally_used
+                        << " / " << sp->sp_register->register_size
+                        << " bytes\n";
                 }
             }
         }
