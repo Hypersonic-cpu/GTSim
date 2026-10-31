@@ -23,7 +23,8 @@ add_library(gtsim_core STATIC
   src/gpu.cpp
   src/hbfine_backend.cpp
   src/memory_backend.cpp
-  src/simulator.cpp)
+  src/simulator.cpp
+  src/runtime/kernel_execution_session.cpp)
 target_include_directories(gtsim_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/glaze/include)

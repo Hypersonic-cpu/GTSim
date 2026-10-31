@@ -75,6 +75,64 @@ def main():
                 "stable_allocations",
             )
         )
+        # Reverse order, then grow/shrink CTA IDs and warp ranges on one GPU.
+        large = gemm(512, 512, 128)
+        large_tensors = tuple(replace(t, id="large_" + t.id) for t in large.tensors)
+        large_launch = Invocation(
+            "large",
+            large.launches[0].algorithm,
+            tuple((name, "large_" + name) for name in ("A", "B", "C")),
+        )
+        varying = Program(
+            symbol="varying",
+            tensors=f.tensors + large_tensors + g.tensors,
+            launches=f.launches + (large_launch,) + g.launches,
+            commands=(
+                Command("LaunchKernel", "fa30"),
+                Command("RecordEvent", "attention_done"),
+                Command("LaunchKernel", "large"),
+                Command("RecordEvent", "large_done"),
+                Command("LaunchKernel", "gemm0"),
+                Command("StreamSynchronize"),
+            ),
+        )
+        varying_dir = Path(temporary) / "varying"
+        varied = driver.run(
+            varying, varying_dir, args.runner, args.architecture, args.memory_config
+        )
+        for before, after in zip(varied["per_kernel"], varied["per_kernel"][1:]):
+            assert after["start_cycle"] == before["complete_cycle"]
+            assert after["l2_lines_before"] == before["l2_lines_after"]
+        assert varied["stable_allocations"] and varied["persistent_gpu"]
+        evidence["varying_cta_program"] = varied
+        large_graph = json.loads((varying_dir / "large/kernel.gtsir").read_text())
+        assert (
+            len(large_graph["ctas"]) == 8
+            and max(o["warp"] for o in large_graph["ops"]) >= 84
+        )
+        # The generic IR-05 runtime must rebind resource footprints as well.
+        for cta in large_graph["ctas"]:
+            cta["shared_bytes"] += 4096
+            cta["register_bytes"] += 4096
+        (varying_dir / "large/kernel.gtsir").write_text(json.dumps(large_graph))
+        altered = subprocess.run(
+            [
+                args.runner,
+                args.architecture,
+                "--memory-config",
+                args.memory_config,
+                str(varying_dir / "program.gtsir"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert altered.returncode == 0, altered.stderr
+        line = next(
+            line
+            for line in altered.stdout.splitlines()
+            if line.startswith("Program timing JSON: ")
+        )
+        evidence["varying_resources"] = json.loads(line.split(": ", 1)[1])
         warm = replace(
             g,
             symbol="warm",

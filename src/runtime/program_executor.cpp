@@ -94,6 +94,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             launch.complete_cycle =
                 std::max(context->cycle, context->memory_drain_cycle);
             launch.device_cycles = context->cycle - launch.start_cycle;
+            KernelExecutionSession::retire(*context);
             launch.state = "COMPLETED";
             timing.state_history[c.target].push_back("COMPLETED");
             timing.per_kernel.push_back(launch);

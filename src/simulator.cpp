@@ -1397,69 +1397,7 @@ void Simulator::print_results() {
 
 namespace GTSim {
 void Simulator::bind_kernel(DAG* next) {
-    if (!next || completed_node_count != dag->nodes.size() ||
-        !simulated_gpu->memory_system->idle())
-        throw std::logic_error(
-            "cannot bind a launch before prior output/memory completion");
-    cycle = std::max(cycle, memory_drain_cycle);
-    dag = next;
-    completed_node_count = 0;
-    dag->build_dependency_graph();
-    const int count = static_cast<int>(dag->nodes.size());
-    global_scoreboard.assign(count, 0);
-    node_id_to_sp.assign(count, nullptr);
-    node_id_to_sm.assign(count, -1);
-    int warps = 1;
-    for (auto* n : dag->nodes) warps = std::max(warps, n->warp_id + 1);
-    config.warp_count = warps;
-    std::vector<std::vector<DAGNode*>> by_sm(simulated_gpu->sms.size());
-    for (auto* n : dag->nodes) {
-        if (n->sm_id < 0 || n->sm_id >= static_cast<int>(by_sm.size()))
-            throw std::invalid_argument(
-                "program kernel has invalid SM binding");
-        by_sm[n->sm_id].push_back(n);
-    }
-    for (auto* sm : simulated_gpu->sms) {
-        sm->all_tb_ids.clear();
-        sm->resident_tb_ids.clear();
-        sm->tb_to_nodes.clear();
-        sm->tb_remaining_count.clear();
-        sm->node_id_to_tb_id.clear();
-        sm->tb_dispatch_ready.clear();
-        sm->waiting_tb_queue = {};
-        sm->shared_used = sm->registers_used = sm->warps_used = 0;
-        sm->tmem->init_warp_state(warps);
-        sm->cta_resources = dag->cta_resources;
-        for (auto* sp : sm->sps) {
-            if (!sp->pending_memory_ops.empty() || !sp->barrier_queue.empty() ||
-                !sp->retry_queue_sram.empty() || !sp->retry_queue_l2.empty())
-                throw std::logic_error(
-                    "launch retired with pending subpartition work");
-            delete sp->sp_scheduler;
-            sp->sp_scheduler = new Scheduler(
-                warps, config.O2_dynamic_allocation, config.schedule_policy);
-            sm->sp_schedulers[sp->subpartition_id] = sp->sp_scheduler;
-            auto* scheduler = sp->sp_scheduler;
-            scheduler->set_pipelines(&sp->pipelines);
-            scheduler->set_tma_unit(sm->tma);
-            scheduler->set_tmem_unit(sm->tmem);
-            scheduler->set_peer_schedulers(&sm->sp_schedulers);
-            std::vector<DAGNode*> nodes;
-            for (auto* n : by_sm[sm->sm_id])
-                if (n->warp_id % 4 == sp->subpartition_id) {
-                    nodes.push_back(n);
-                    node_id_to_sp[n->id] = sp;
-                    node_id_to_sm[n->id] = sm->sm_id;
-                }
-            scheduler->init_with_nodes(nodes, count, sp->subpartition_id,
-                                       &global_scoreboard);
-            sp->set_node_to_sp_map(&node_id_to_sp);
-            sp->set_completed_node_counter(&completed_node_count);
-            sp->sp_register->register_totally_used = 0;
-        }
-        sm->initialize_tb_scheduler(by_sm[sm->sm_id]);
-    }
-    simulated_gpu->set_node_to_sp_map(&node_id_to_sp);
-    simulated_gpu->set_node_to_sm_map(&node_id_to_sm);
+    if (!next) throw std::invalid_argument("missing next kernel");
+    KernelExecutionSession::rebind(*this, *next);
 }
 } // namespace GTSim

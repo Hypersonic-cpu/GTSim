@@ -102,6 +102,10 @@ public:
         return issued_complete;
     }
 
+    bool idle() const {
+        return setup_queue.empty() && pending_queue.empty() && !active_valid;
+    }
+
 private:
     int setup_latency_cycles;
     int issue_interval_cycles;
