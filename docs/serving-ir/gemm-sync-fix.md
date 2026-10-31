@@ -21,3 +21,27 @@ No stored reference cycles were updated: 512-cubed remains 12249; FA3 smoke
 remains 7212. Raw test/validation logs are `/tmp/gtsim-sync-ctest.log` and
 `/tmp/gtsim-sync-validation.log`; corrected results are under the ignored
 `validation/results/ir-framework/corrected/` directory.
+
+## Same-backend two-SM old/new experiment
+
+Both builders ran against the same current core and unchanged YAMLs. The
+pre-fix builder was loaded from commit `84b4d81`. Each case is M=N=512.
+
+| K | Before cycles | Corrected cycles | Added completion edges |
+|---:|---:|---:|---:|
+| 64 | 13373 | 13373 | 0 |
+| 128 | 17469 | 17469 | 3840 |
+| 192 | 23185 | 23185 | 0 |
+| 256 | 25919 | 25919 | 3840 |
+
+The dependency gap is closed without a cycle change in these observed runs.
+The previous timing equality was therefore insufficient to prove the graph's
+buffer-lifetime contract. No claim of an observed numerical/runtime race is made.
+The correction retains legal asynchronous TMA issue ordering; it does not
+restore upstream's broader TMA completion serialization.
+
+Reproduce using `tests/reference_parity/compare_sync_snapshots.py` as documented
+in `docs/ir-framework-compat.md`. The small comparison JSON is tracked under
+`docs/serving-ir/results/`. Original graph fingerprints predate the expanded
+metadata dump; compare named nodes/edges rather than attributing raw dump-hash
+changes solely to synchronization.

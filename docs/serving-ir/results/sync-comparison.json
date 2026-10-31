@@ -1,0 +1,36 @@
+{
+  "before_ref": "84b4d81",
+  "before_source_sha256": "8fd88ab3c3ec8edb18439d6f6c78d70d3ae33f9b9c355008df6e2e142ad51c18",
+  "after_source_sha256": "014624047dafcee7ef72062344359e21c3daba373fbb7cfbde9f25a1f74bec43",
+  "shape_M_N": [
+    512,
+    512
+  ],
+  "sms": 2,
+  "cases": [
+    {
+      "K": 64,
+      "before_cycles": 13373,
+      "after_cycles": 13373,
+      "added_completion_edges": 0
+    },
+    {
+      "K": 128,
+      "before_cycles": 17469,
+      "after_cycles": 17469,
+      "added_completion_edges": 3840
+    },
+    {
+      "K": 192,
+      "before_cycles": 23185,
+      "after_cycles": 23185,
+      "added_completion_edges": 0
+    },
+    {
+      "K": 256,
+      "before_cycles": 25919,
+      "after_cycles": 25919,
+      "added_completion_edges": 3840
+    }
+  ]
+}

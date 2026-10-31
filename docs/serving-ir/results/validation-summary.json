@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "hardware": {
+    "num_sms": 132,
+    "shared_memory_per_cta_bytes": 232448,
+    "shared_memory_per_sm_bytes": 233472,
+    "register_file_per_sm_bytes": 262144,
+    "max_warps_per_sm": 64
+  },
+  "suite": "h100-v0.1.0",
+  "workloads": {
+    "gemm": {
+      "cases": 8,
+      "reference": {
+        "mape_percent": 5.701982533931243,
+        "max_ape_percent": 10.796776337653705,
+        "pearson_r": 0.9889885311345739
+      },
+      "candidate": {
+        "mape_percent": 5.701982533931243,
+        "max_ape_percent": 10.796776337653705,
+        "pearson_r": 0.9889885311345739
+      },
+      "relative_alarm": {
+        "mape_percent": false,
+        "max_ape_percent": false
+      },
+      "mape_percentage_point_change": 0.0,
+      "max_ape_percentage_point_change": 0.0
+    },
+    "fa3": {
+      "cases": 6,
+      "reference": {
+        "mape_percent": 4.953759564438511,
+        "max_ape_percent": 6.822141804047715,
+        "pearson_r": 0.9988018252180286
+      },
+      "candidate": {
+        "mape_percent": 4.953759564438511,
+        "max_ape_percent": 6.822141804047715,
+        "pearson_r": 0.9988018252180286
+      },
+      "relative_alarm": {
+        "mape_percent": false,
+        "max_ape_percent": false
+      },
+      "mape_percentage_point_change": 0.0,
+      "max_ape_percentage_point_change": 0.0
+    }
+  }
+}

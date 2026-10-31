@@ -1,0 +1,72 @@
+{
+  "fa3-0": {
+    "status": "PASS",
+    "nodes": 56192,
+    "unapproved_differences": 0
+  },
+  "fa3-1": {
+    "status": "PASS",
+    "nodes": 219904,
+    "unapproved_differences": 0
+  },
+  "fa3-2": {
+    "status": "PASS",
+    "nodes": 491136,
+    "unapproved_differences": 0
+  },
+  "fa3-3": {
+    "status": "PASS",
+    "nodes": 112384,
+    "unapproved_differences": 0
+  },
+  "fa3-4": {
+    "status": "PASS",
+    "nodes": 439808,
+    "unapproved_differences": 0
+  },
+  "fa3-5": {
+    "status": "PASS",
+    "nodes": 982272,
+    "unapproved_differences": 0
+  },
+  "gemm-0": {
+    "status": "PASS",
+    "nodes": 9568,
+    "unapproved_differences": 0
+  },
+  "gemm-1": {
+    "status": "PASS",
+    "nodes": 18080,
+    "unapproved_differences": 0
+  },
+  "gemm-2": {
+    "status": "PASS",
+    "nodes": 19136,
+    "unapproved_differences": 0
+  },
+  "gemm-3": {
+    "status": "PASS",
+    "nodes": 36160,
+    "unapproved_differences": 0
+  },
+  "gemm-4": {
+    "status": "PASS",
+    "nodes": 19136,
+    "unapproved_differences": 0
+  },
+  "gemm-5": {
+    "status": "PASS",
+    "nodes": 36160,
+    "unapproved_differences": 0
+  },
+  "gemm-6": {
+    "status": "PASS",
+    "nodes": 38272,
+    "unapproved_differences": 0
+  },
+  "gemm-7": {
+    "status": "PASS",
+    "nodes": 72320,
+    "unapproved_differences": 0
+  }
+}

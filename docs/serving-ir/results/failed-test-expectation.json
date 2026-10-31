@@ -1,0 +1,8 @@
+{
+  "test": "producer-consumer cache assumption",
+  "initial_expectation": "Consumer reads of a previously cold output would reduce HBM read bytes",
+  "observed_dependent_and_isolated_read_bytes": 196608,
+  "cause": "L2 write misses are no-write-allocate; insert_line requires any_read",
+  "resolution": "No cache-policy change. Verify stable output/input allocation binding, ordered completion and 131072 HBM write bytes; retain the separate warm-read cache test.",
+  "status": "Corrected expectation; all active tests pass"
+}

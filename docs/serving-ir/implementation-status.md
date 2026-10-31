@@ -1,82 +1,43 @@
 # Layered IR implementation status
 
-The baseline is recorded in `baseline/provenance.json` and the two per-case
-CSVs. Raw configure/build/CTest/reference/validation logs remain under
-`validation/results/ir-framework/baseline/` (ignored generated artifacts).
-The baseline commit is the documentation commit `84b4d81` on `serve-sim`;
-implementation proceeds on `feature/layered-serving-ir`.
+The supplied P0–P6 plan is implemented for its H100 reference scope.
+See [implementation](../ir-framework-implementation.md),
+[wire contracts](../ir-framework-spec.md),
+[commands and supported inputs](../ir-framework-compat.md), and
+[the final validation report](results/report.md).
 
-## P0 baseline
+| Acceptance item | Result |
+|---|---|
+| Existing baseline captured before code changes | PASS; `baseline/` |
+| Typed IR-01/02/03/04/05, deterministic codecs and inspection | PASS |
+| Independent fixed GEMM/FA3 schedules and native lowering | PASS |
+| Generic JSON execution graph materializer, actual FA3 op set | PASS |
+| One persistent GPU/L2/MemorySystem, sequential launch/event/sync | PASS |
+| Mixed GEMM→FA3 and shared-allocation/warm-cache tests | PASS |
+| Explicit launch state transitions, overhead and memory-drain clocks | PASS |
+| GEMM odd/even multiwave dependency audit and minimal correction | PASS |
+| All 8 GEMM + 6 FA3 graph and cycle comparisons | PASS; zero unapproved differences |
+| Same-fork accuracy comparison and relative alarms | PASS; zero changes |
+| Active regression tests | 23/23 PASS |
+| Workload profile text scanner | Explicitly skipped at user request; false positive |
+| Previous TVM compatibility tests | Opt-in; excluded from final acceptance per user direction |
 
-Release build succeeded. 24/25 existing CTests passed; the preexisting
-`workload_profile_boundary` check rejects read-only `config.memory` expressions
-in both reference CLIs. The standalone profile check reports the same failure.
-Both reference checks pass: GEMM 12,249 cycles and FA3 7,212 cycles.
-The complete measured suite ran: GEMM 8 cases, MAPE 5.7019825%, Pearson
-0.9889885; FA3 6 cases, MAPE 4.9537596%, Pearson 0.9988018.
-Both measured CSV SHA256 hashes match the local pinned upstream revision.
-Reference graph fingerprints and the focused two-SM buffer-lifetime audit are
-recorded in `baseline/graph-sync-audit.json`. The audit finds 30 unguarded TMA
-loads each for K=128 and K=256; K=64 and K=192 have none. This proves missing
-graph completion paths, not a measured runtime race. The first affected load
-and missing consumer identities are retained; full details are in the ignored
-`baseline/gemm-sync-audit.json` runtime artifact.
+GEMM MAPE is 5.7019825%, maxAPE 10.7967763%; FA3 MAPE is 4.9537596%,
+maxAPE 6.8221418%. These are modeled timing comparisons with supplied measured
+CSV targets, not numerical execution or new physical GPU measurements.
 
-Reproduce the isolated graph audit:
+`Simulator::bind_kernel` separates launch-local scheduler/scoreboard lifetime
+from the persistent GPU/memory lifetime. Program-global tensor allocations
+remain stable; output completion includes issued memory drain without an L2
+flush. Native output coverage, four-warp collectives and supported operations
+are checked before launch. Unsupported reference shapes/options fail closed.
 
-```bash
-c++ -std=c++23 -O1 -Iinclude -I3rdparty/glaze/include -I3rdparty/hbfine/include \
-  tests/reference_parity/reference_graph_dump.cpp -o /tmp/gtsim-reference-graph-dump
-python3 tests/reference_parity/audit_gemm_sync.py /tmp/gtsim-reference-graph-dump \
-  --output validation/results/ir-framework/baseline/gemm-sync-audit.json
-```
+The corrected even-K GEMM dependency adds the missing prior buffer-1 consumer
+completion edges. It does not change timing constants, arithmetic or traffic.
+See [the dedicated sync report](gemm-sync-fix.md) for edge and cycle evidence.
+The earlier baseline's passing cycle check was not treated as correctness proof.
 
-## P1 IR skeleton
-
-Immutable Python dataclasses represent Program, Algorithm, scheduled Flow,
-Mapping, Hopper native instructions, and Execution kernel/program records.
-The deterministic JSON codec validates required fields and format/version
-identities. Parameterized GEMM and FA3 program builders reject unsupported
-reference geometry, dtype and GQA bindings. Inspection and validation are
-available through `python -m gtsim_frontend.cli` with `PYTHONPATH=frontend/src`.
-
-Run `PYTHONPATH=frontend/src python3 -m unittest discover -s tests/ir_frontend -v`.
-Ten tests cover stage round trips, deterministic hashes, streams/events,
-tensor bindings, slot ownership, unsupported routes and dependency cycles.
-The frontend is not yet an executable compiler: native lowerers,
-full resource/collective verification, C++ persistent runtime and new-runner
-parity/accuracy validation remain to be implemented. Existing CLI binaries
-and legacy parsers are unchanged.
-
-## P2 logical reference schedules
-
-Independent GEMM and FA3 schedules now instantiate typed Flow operations,
-SSA tiles, per-CTA executors/buffers and explicit CTA-to-SM placement. GEMM
-uses original grouped-column ordering and persistent two-stage slot generations.
-FA3 preserves GQA input identities and separate QK, local/shuffle/reduce max,
-exponentiation, sum, online scaling, PV and normalization operations. Output
-coverage and logical operation multiplicities are tested with hand-computed
-expectations. Slot releases require the completion events of all known consumers;
-SSA operands require producer readiness/completion dependencies.
-
-These are logical schedules, not native instruction graphs or parity proof.
-The native WGMMA collective expansion, resource legalization and full reference
-comparison remain P3/P4 work. No candidate simulated-cycle claims are made.
-`ir_frontend_contracts` is registered in CTest without a TVM dependency when
-`GTSIM_BUILD_IR_FRAMEWORK=ON` and a Python interpreter is available.
-
-## Synchronization audit observations (not a proven fix)
-
-The fork orders prior TMA stages with issue edges; buffer reuse waits on
-completion of the consumers two K iterations earlier. Cross-wave buffer 0
-reuse selects the prior last or penultimate K-stage according to K parity.
-Cross-wave buffer 1 reuse still needs an independent reachability check.
-Output staging awaits the final WGMMA round; output TMA awaits staging.
-These observations do not prove hazard freedom.
-
-`Simulator::run` drains issued memory using a local `drain_cycle`, leaving
-`Simulator::cycle` at DAG completion. A persistent runtime must advance its
-global clock through the drain before admitting another launch, while
-preserving the legacy API's reported device-cycle semantics. Each constructor
-currently creates a new GPU; repeated constructors cannot implement the
-required persistent-context program runtime.
+No external Uniform code was copied and production compilation does not import
+TVM, reference C++ builders or precomputed DAG fixtures. Generated multi-MB
+artifacts stay under ignored `validation/results/ir-framework/`; small final
+CSV/JSON reports and reproducibility utilities are tracked.
