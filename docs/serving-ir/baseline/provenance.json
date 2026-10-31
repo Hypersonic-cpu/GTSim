@@ -1,0 +1,39 @@
+{
+  "fork_commit": "84b4d81dd142078909d616a93c6e07dc5cd1fd02",
+  "upstream_commit": "45a996c1585e60e98194057d94f7e664d41150ba",
+  "sha256": {
+    "configs/v0.1.0/h100-sxm.yaml": "e0131e7aae5c35b54054cadaa7108577098e26b7789e0c483e9b8437e778002a",
+    "configs/v0.1.0/memory_full_hbm-0F5M.yaml": "967e430a2f1bdefedc6d7367c002dc8d42765a27bbfa250974338c8eecae2d14",
+    "validation/data/h100_gemm.csv": "f4a0cc5bf126552e01a5ebd58962ac8ee241b500a7f2585db0531e59e5647e79",
+    "validation/data/h100_fa3.csv": "606c1095ca13cdafe91df656f5fc09347e13fa7bf35320ce608d628b54d5b9b4",
+    "workloads/gemm/gemm_h100.cpp": "8fd88ab3c3ec8edb18439d6f6c78d70d3ae33f9b9c355008df6e2e142ad51c18",
+    "workloads/fa3/fa3_h100.cpp": "805c14cc1a6ffe294f260ea6744d5f0e48333e4f5238ae966afa769dd8b8b363"
+  },
+  "reference_cycles": {
+    "gemm": 12249,
+    "fa3": 7212
+  },
+  "ctest": {
+    "passed": 24,
+    "total": 25,
+    "preexisting_failures": [
+      "workload_profile_boundary"
+    ]
+  },
+  "validation": {
+    "gemm": {
+      "workload": "gemm",
+      "cases": 8,
+      "mape_percent": 5.701982533931243,
+      "pearson_r": 0.9889885311345739,
+      "max_ape_percent": 10.796776337653705
+    },
+    "fa3": {
+      "workload": "fa3",
+      "cases": 6,
+      "mape_percent": 4.953759564438511,
+      "pearson_r": 0.9988018252180286,
+      "max_ape_percent": 6.822141804047714
+    }
+  }
+}
