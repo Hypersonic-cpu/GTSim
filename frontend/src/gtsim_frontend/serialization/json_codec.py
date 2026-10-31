@@ -3,25 +3,58 @@
 import dataclasses
 import hashlib
 import json
-from ..ir import common, algorithm, program, mapping, flow, arch, execution
+from enum import Enum
+from ..ir import (
+    common,
+    algorithm,
+    program,
+    mapping,
+    flow,
+    arch,
+    execution,
+    profiles,
+    schedule,
+    graph,
+)
 
 _TYPES = {
     c.__name__: c
-    for module in (common, algorithm, program, mapping, flow, arch, execution)
+    for module in (
+        common,
+        algorithm,
+        program,
+        mapping,
+        flow,
+        arch,
+        execution,
+        profiles,
+        schedule,
+        graph,
+    )
     for c in vars(module).values()
     if isinstance(c, type) and dataclasses.is_dataclass(c)
 }
 _FORMATS = {
     "Program": "prog-ir/0.1",
-    "Algorithm": "algo-ir/0.1",
-    "FlowKernel": "flow-ir/0.1",
-    "ArchKernel": "arch-ir/0.1",
+    "Algorithm": "algo-ir/0.2",
+    "FlowKernel": "flow-ir/0.2",
+    "ArchKernel": "arch-ir/0.2",
     "ExecKernel": "gtsim.exec.kernel/1",
     "ExecProgram": "gtsim.exec.program/1",
 }
 
 
+_ENUMS = {
+    c.__name__: c
+    for module in (algorithm, schedule)
+    for c in vars(module).values()
+    if isinstance(c, type) and issubclass(c, Enum) and c is not Enum
+}
+
+
 def encode(value):
+    if isinstance(value, Enum):
+        return {"enum": type(value).__name__, "value": value.value}
     if dataclasses.is_dataclass(value):
         return {
             "record": type(value).__name__,
@@ -41,6 +74,10 @@ def decode(value):
     if isinstance(value, list):
         return tuple(decode(v) for v in value)
     if isinstance(value, dict):
+        if set(value) == {"enum", "value"}:
+            if value["enum"] not in _ENUMS:
+                raise ValueError("unknown typed enum")
+            return _ENUMS[value["enum"]](value["value"])
         name = value.get("record")
         if name not in _TYPES:
             raise ValueError(f"unknown record: {name}")

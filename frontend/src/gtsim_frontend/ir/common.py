@@ -82,7 +82,16 @@ class Header:
 
     def verify(self):
         require(bool(self.symbol), "header", "empty symbol")
-        require(self.schema_version == 1, self.symbol, "unsupported schema version")
+        require(
+            self.schema_version
+            == (
+                2
+                if type(self).__name__ in ("FlowKernel", "ArchKernel", "Algorithm")
+                else 1
+            ),
+            self.symbol,
+            "unsupported schema version",
+        )
         require(
             self.source_hash == ""
             or (

@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from .arch import ArchKernel, KernelTensor
+from .graph import FlatKernel, KernelTensor
 from .program import Command
 from .common import Header, require
 
 
 @dataclass(frozen=True)
-class ExecKernel(ArchKernel):
+class ExecKernel(FlatKernel):
     """IR-05 explicit kernel graph with no timing constants or addresses."""
 
 

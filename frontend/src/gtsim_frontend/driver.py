@@ -35,13 +35,14 @@ def compile_program(program, out_dir, profile, launch_overhead_cycles=0):
     kernels = {}
     files = {}
     manifest = []
+    stage_statistics = {}
     for invocation in program.launches:
         directory = out if len(program.launches) == 1 else out / invocation.id
         directory.mkdir(parents=True, exist_ok=True)
         algo = invocation.algorithm
         flow = instantiate(algo, profile["num_sms"])
         arch = (gemm_lower if algo.family == "gemm" else fa3_lower)(flow)
-        for c in arch.ctas:
+        for c in (arch.resources,):
             if (
                 c.shared_bytes > profile["shared_memory_per_cta_bytes"]
                 or c.register_bytes > profile["register_file_per_sm_bytes"]
@@ -56,6 +57,15 @@ def compile_program(program, out_dir, profile, launch_overhead_cycles=0):
             ("kernel.gtsir", kernel),
         ):
             (directory / name).write_text(dumps(obj))
+        stage_statistics[invocation.id] = {
+            "flow_operations": len(flow.ops),
+            "native_patterns": len(arch.ops),
+            "execution_nodes": len(kernel.ops),
+            "bytes": {
+                name: (directory / name).stat().st_size
+                for name in ("kernel.flowir", "kernel.nvir", "kernel.gtsir")
+            },
+        }
         manifest.extend(
             {
                 "pass": name,
@@ -89,6 +99,7 @@ def compile_program(program, out_dir, profile, launch_overhead_cycles=0):
     summary = {
         key: {
             "nodes": len(k.ops),
+            "ir_statistics": stage_statistics[key],
             "ctas": len(k.ctas),
             "op_counts": dict(Counter(o.op for o in k.ops)),
             "cta_resources": [asdict(c) for c in k.ctas],

@@ -29,32 +29,37 @@ def print_ir(value):
         ]
         lines += [f"  algo.stage {stage}" for stage in value.stages]
         lines += [f'  algo.contract "{formula}"' for formula in value.computation]
-    elif isinstance(value, FlowKernel):
-        lines = [f"flow.kernel @{value.symbol} schedule<{value.schedule_id}> {{"]
+    elif isinstance(value, (FlowKernel, ArchKernel)):
+        prefix = "flow" if isinstance(value, FlowKernel) else "arch"
+        lines = [f"{prefix}.kernel @{value.symbol} schedule<{value.schedule_id}> {{"]
         lines += [
-            f"  flow.buffer @{b.id} slots({b.slots}) bytes_per_slot({b.bytes_per_slot})"
-            for b in value.buffers
+            f"  {prefix}.loop {loop.variable.value} count({loop.count}) predicate<{loop.predicate.value}>"
+            for loop in value.domain.loops
         ]
+        pipeline = value.domain.pipeline
         lines += [
-            f"  flow.{o.capability} @{o.id} executor<{o.executor}> semantic<{o.semantic}> inputs{o.inputs} operands{o.operands} slot<{o.slot}>"
-            for o in value.ops
+            f"  {prefix}.pipeline k count({pipeline.loop.count}) depth({pipeline.depth}) stage<{pipeline.stage}>"
         ]
+        if isinstance(value, FlowKernel):
+            lines += [
+                f"  {op.kind.value} @{op.id} role<{op.role.value}> executor<{op.executor.value}> deps{op.dependencies} region<{op.region}>"
+                for op in value.ops
+            ]
+        else:
+            lines += [
+                f"  arch.pattern @{pattern.source.id} role<{pattern.source.role.value}> steps{pattern.steps}"
+                for pattern in value.ops
+            ]
+            lines += [f"  arch.async {value.async_protocol} resources{value.resources}"]
         lines += [
-            f"  map.execute @{e} -> {engine}" for e, engine in value.mapping.execute
+            f"  map.execute {executor.value} -> {engine}"
+            for executor, engine in value.mapping.execute
         ]
-        lines += [f"  map.cta {cta} -> sm{sm}" for cta, sm in value.mapping.ctas]
-    elif isinstance(value, ArchKernel):
-        prefix = "exec" if isinstance(value, ExecKernel) else "arch"
-        lines = [
-            f"{prefix}.kernel @{value.symbol} target<{value.target}> sync<{value.sync_semantics_version}> {{"
-        ]
+    elif isinstance(value, ExecKernel):
+        lines = [f"exec.kernel @{value.symbol} {{"]
         lines += [
-            f"  {prefix}.cta {c.id} sm({c.sm}) warps({c.warps}) shared({c.shared_bytes}) registers({c.register_bytes})"
-            for c in value.ctas
-        ]
-        lines += [
-            f"  %{o.id} = {o.op} cta({o.cta}) warp({o.warp}) tensor({o.tensor}) tile{o.tile} after_issue{o.after_issue} after_complete{o.after_complete}"
-            for o in value.ops
+            f"  %{op.id} = {op.op} cta({op.cta}) warp({op.warp}) tile{op.tile} after_issue{op.after_issue} after_complete{op.after_complete}"
+            for op in value.ops
         ]
     elif isinstance(value, ExecProgram):
         lines = [f"exec.program @{value.symbol} stream<{value.streams[0]}> {{"]

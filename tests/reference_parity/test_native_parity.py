@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frontend/src"))
 from gtsim_frontend.programs.gemm_single import build as gemm
 from gtsim_frontend.programs.fa3_single import build as fa3
 from gtsim_frontend.passes.instantiate import instantiate
+from gtsim_frontend.passes.lower_execution import lower as expand_execution
 from gtsim_frontend.passes.lower_hopper_gemm import lower as lower_gemm
 from gtsim_frontend.passes.lower_hopper_fa3 import lower as lower_fa3
 
@@ -17,7 +18,7 @@ from gtsim_frontend.passes.lower_hopper_fa3 import lower as lower_fa3
 def compare(executable, kind, dimensions, sms):
     p = gemm(*dimensions) if kind == "gemm" else fa3(*dimensions)
     flow = instantiate(p.launches[0].algorithm, sms)
-    kernel = (lower_gemm if kind == "gemm" else lower_fa3)(flow)
+    kernel = expand_execution((lower_gemm if kind == "gemm" else lower_fa3)(flow))
     raw = subprocess.check_output(
         [str(executable), kind, *map(str, dimensions), str(sms)], text=True
     )
@@ -80,7 +81,7 @@ def compare(executable, kind, dimensions, sms):
         len(reference),
         len(kernel.ops),
     )
-    sm = dict(flow.mapping.ctas)
+    sm = {c.id: c.sm for c in kernel.ctas}
     for r, o in zip(reference, kernel.ops):
         candidate = (
             o.id,
