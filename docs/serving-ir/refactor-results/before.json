@@ -1,0 +1,196 @@
+{
+  "commit": "9031d1aa8acff0e14705f9fc7eeb20c3b5579fcb",
+  "validation": {
+    "status": "PASS",
+    "hardware": {
+      "num_sms": 132,
+      "shared_memory_per_cta_bytes": 232448,
+      "shared_memory_per_sm_bytes": 233472,
+      "register_file_per_sm_bytes": 262144,
+      "max_warps_per_sm": 64
+    },
+    "suite": "h100-v0.1.0",
+    "workloads": {
+      "gemm": {
+        "cases": 8,
+        "reference": {
+          "mape_percent": 5.701982533931243,
+          "max_ape_percent": 10.796776337653705,
+          "pearson_r": 0.9889885311345739
+        },
+        "candidate": {
+          "mape_percent": 5.701982533931243,
+          "max_ape_percent": 10.796776337653705,
+          "pearson_r": 0.9889885311345739
+        },
+        "relative_alarm": {
+          "mape_percent": false,
+          "max_ape_percent": false
+        },
+        "mape_percentage_point_change": 0.0,
+        "max_ape_percentage_point_change": 0.0
+      },
+      "fa3": {
+        "cases": 6,
+        "reference": {
+          "mape_percent": 4.953759564438511,
+          "max_ape_percent": 6.822141804047715,
+          "pearson_r": 0.9988018252180286
+        },
+        "candidate": {
+          "mape_percent": 4.953759564438511,
+          "max_ape_percent": 6.822141804047715,
+          "pearson_r": 0.9988018252180286
+        },
+        "relative_alarm": {
+          "mape_percent": false,
+          "max_ape_percent": false
+        },
+        "mape_percentage_point_change": 0.0,
+        "max_ape_percentage_point_change": 0.0
+      }
+    }
+  },
+  "cases": {
+    "fa3-0": {
+      "bytes": {
+        "kernel.flowir": 3228084,
+        "kernel.nvir": 26785884,
+        "kernel.gtsir": 26785892
+      },
+      "flow_operations": 3840,
+      "native_instructions": 56192,
+      "execution_nodes": 56192
+    },
+    "fa3-1": {
+      "bytes": {
+        "kernel.flowir": 12468116,
+        "kernel.nvir": 105735137,
+        "kernel.gtsir": 105735145
+      },
+      "flow_operations": 14848,
+      "native_instructions": 219904,
+      "execution_nodes": 219904
+    },
+    "fa3-2": {
+      "bytes": {
+        "kernel.flowir": 27766036,
+        "kernel.nvir": 237184671,
+        "kernel.gtsir": 237184679
+      },
+      "flow_operations": 33024,
+      "native_instructions": 491136,
+      "execution_nodes": 491136
+    },
+    "fa3-3": {
+      "bytes": {
+        "kernel.flowir": 6466436,
+        "kernel.nvir": 53789980,
+        "kernel.gtsir": 53789988
+      },
+      "flow_operations": 7680,
+      "native_instructions": 112384,
+      "execution_nodes": 112384
+    },
+    "fa3-4": {
+      "bytes": {
+        "kernel.flowir": 25014332,
+        "kernel.nvir": 212796637,
+        "kernel.gtsir": 212796645
+      },
+      "flow_operations": 29696,
+      "native_instructions": 439808,
+      "execution_nodes": 439808
+    },
+    "fa3-5": {
+      "bytes": {
+        "kernel.flowir": 55843238,
+        "kernel.nvir": 477057129,
+        "kernel.gtsir": 477057137
+      },
+      "flow_operations": 66048,
+      "native_instructions": 982272,
+      "execution_nodes": 982272
+    },
+    "gemm-0": {
+      "bytes": {
+        "kernel.flowir": 307237,
+        "kernel.nvir": 6904045,
+        "kernel.gtsir": 6904053
+      },
+      "flow_operations": 336,
+      "native_instructions": 9568,
+      "execution_nodes": 9568
+    },
+    "gemm-1": {
+      "bytes": {
+        "kernel.flowir": 598407,
+        "kernel.nvir": 11818075,
+        "kernel.gtsir": 11818083
+      },
+      "flow_operations": 656,
+      "native_instructions": 18080,
+      "execution_nodes": 18080
+    },
+    "gemm-2": {
+      "bytes": {
+        "kernel.flowir": 617095,
+        "kernel.nvir": 14095313,
+        "kernel.gtsir": 14095321
+      },
+      "flow_operations": 672,
+      "native_instructions": 19136,
+      "execution_nodes": 19136
+    },
+    "gemm-3": {
+      "bytes": {
+        "kernel.flowir": 1202953,
+        "kernel.nvir": 23910683,
+        "kernel.gtsir": 23910691
+      },
+      "flow_operations": 1312,
+      "native_instructions": 36160,
+      "execution_nodes": 36160
+    },
+    "gemm-4": {
+      "bytes": {
+        "kernel.flowir": 617059,
+        "kernel.nvir": 14093907,
+        "kernel.gtsir": 14093915
+      },
+      "flow_operations": 672,
+      "native_instructions": 19136,
+      "execution_nodes": 19136
+    },
+    "gemm-5": {
+      "bytes": {
+        "kernel.flowir": 1202885,
+        "kernel.nvir": 23907933,
+        "kernel.gtsir": 23907941
+      },
+      "flow_operations": 1312,
+      "native_instructions": 36160,
+      "execution_nodes": 36160
+    },
+    "gemm-6": {
+      "bytes": {
+        "kernel.flowir": 1239217,
+        "kernel.nvir": 28506871,
+        "kernel.gtsir": 28506879
+      },
+      "flow_operations": 1344,
+      "native_instructions": 38272,
+      "execution_nodes": 38272
+    },
+    "gemm-7": {
+      "bytes": {
+        "kernel.flowir": 2416755,
+        "kernel.nvir": 48129601,
+        "kernel.gtsir": 48129609
+      },
+      "flow_operations": 2624,
+      "native_instructions": 72320,
+      "execution_nodes": 72320
+    }
+  }
+}
