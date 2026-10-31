@@ -68,3 +68,16 @@ class Header:
         require(self.schema_version == 1, self.symbol, "unsupported schema version")
         require(self.source_hash == "" or (len(self.source_hash) == 64 and
                 all(c in "0123456789abcdef" for c in self.source_hash)), self.symbol, "invalid SHA256")
+
+
+@dataclass(frozen=True)
+class TileValue:
+    id: str
+    producer: str
+    shape: tuple[int, ...]
+    dtype: str = "fp32"
+
+    def verify(self):
+        require(bool(self.id) and bool(self.producer), "value", "missing identity or producer")
+        require(bool(self.shape) and all(type(d) is int and d > 0 for d in self.shape), self.id, "invalid value shape")
+        require(self.dtype in ("fp16", "fp32"), self.id, "unsupported value dtype")

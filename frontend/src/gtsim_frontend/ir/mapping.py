@@ -19,12 +19,14 @@ class Buffer:
 @dataclass(frozen=True)
 class Mapping:
     target: str = "sm90"
+    ctas: tuple[tuple[int,int], ...] = ()
     execute: tuple[tuple[str,str], ...] = ()
     store: tuple[tuple[str,str], ...] = ()
     routes: tuple[tuple[str,str,str], ...] = (("HBM","SMEM","bulk_copy"),)
 
     def verify(self, executors, buffers):
         require(self.target == "sm90", "mapping", "only Hopper reference target is supported")
+        require(len(dict(self.ctas)) == len(self.ctas) and all(type(c) is int and type(sm) is int and c >= 0 and sm >= 0 for c,sm in self.ctas), "mapping", "invalid CTA placement")
         ex, st = dict(self.execute), dict(self.store)
         require(len(ex) == len(self.execute) and set(ex) == {e.id for e in executors}, "mapping", "missing or duplicate executor binding")
         require(len(st) == len(self.store) and set(st) == {b.id for b in buffers}, "mapping", "missing or duplicate buffer binding")

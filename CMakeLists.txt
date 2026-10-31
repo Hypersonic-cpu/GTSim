@@ -51,6 +51,8 @@ target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
 add_executable(gtsim_fa2 workloads/fa2/fa2_a100.cpp)
 target_link_libraries(gtsim_fa2 PRIVATE gtsim_core)
 
+option(GTSIM_BUILD_IR_FRAMEWORK "Build the layered IR framework and its tests" ON)
+
 include(CTest)
 set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
@@ -130,6 +132,13 @@ if(BUILD_TESTING)
   endif()
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    if(GTSIM_BUILD_IR_FRAMEWORK)
+      add_test(NAME ir_frontend_contracts
+        COMMAND ${CMAKE_COMMAND} -E env
+                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/frontend/src"
+                ${Python3_EXECUTABLE} -m unittest discover
+                -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_frontend -v)
+    endif()
     add_test(NAME mixed_hbfine_smoke
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/hbf/check_smoke.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR})
