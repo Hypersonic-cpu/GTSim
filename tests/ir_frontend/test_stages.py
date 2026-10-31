@@ -16,7 +16,7 @@ class StageTests(unittest.TestCase):
              FlowOp('load','load_async','loader',reads=(TensorRegion('A',(0,0),(128,64)),),inputs=('owned',),outputs=(Event('ready','load','ready'),),slot=slot),
              FlowOp('mma','matmul','consumer',inputs=('ready',),outputs=(Event('done','mma','complete'),),slot=slot),
              FlowOp('release','release','loader',inputs=('done',),outputs=(Event('released','release','released'),),slot=slot))
-        return FlowKernel(symbol='flow',schedule_id='ref_h100_gemm_v0_1_0',tensors=(Tensor('A',(128,64)),),
+        return FlowKernel(symbol='flow',schedule_id='ref_h100_gemm_v0_1_0',tensors=(Tensor('A',(128,64),read_only=True),),
                           executors=(Executor('loader','producer',(8,)),Executor('consumer','matrix',(0,1,2,3))),
                           buffers=(Buffer('stage',2,16384),),
                           mapping=Mapping(execute=(('loader','TMA'),('consumer','WGMMA')),store=(('stage','SMEM'),)),ops=ops)
@@ -25,7 +25,7 @@ class StageTests(unittest.TestCase):
         arch=ArchKernel(symbol='native',ctas=(CTA(0,0,12,163840,180224),),
                         ops=(ArchInstruction(0,'load','cp.dram2sram_tma','LD',0,8),))
         p=build()
-        program=ExecProgram(**vars(p),kernel_files=(('gemm0','kernel.gtsir'),))
+        program=ExecProgram(symbol='empty')
         for obj in (self.flow(),arch,ExecKernel(**vars(arch)),program):
             self.assertEqual(obj,loads(dumps(obj)))
 

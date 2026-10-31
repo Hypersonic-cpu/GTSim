@@ -81,3 +81,11 @@ class FlowKernel(Header):
                 require(e.id not in events and e.producer == op.id,op.id,"invalid event producer or duplicate event")
                 events[e.id]=e
         require(not owners,self.symbol,"unreleased buffer slots")
+        for tensor in self.tensors:
+            if tensor.read_only:continue
+            regions=[r for op in self.ops for r in op.writes if r.tensor==tensor.id]
+            require(len(tensor.shape)==2 and sum(r.shape[0]*r.shape[1] for r in regions)==tensor.shape[0]*tensor.shape[1],tensor.id,"incomplete output coverage")
+            for i,a in enumerate(regions):
+                for b in regions[i+1:]:
+                    overlap=all(max(x,y)<min(x+dx,y+dy) for x,dx,y,dy in zip(a.offsets,a.shape,b.offsets,b.shape))
+                    require(not overlap,tensor.id,"overlapping output regions")

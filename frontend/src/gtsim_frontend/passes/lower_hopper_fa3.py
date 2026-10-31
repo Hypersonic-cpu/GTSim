@@ -104,6 +104,6 @@ def lower(flow):
                 stores.append(emit(f'{p}_StSram_g{g}_w{gw}_c{col}','st.reg2sram',warp,(base_r+g*64+(warp%4)*16,col*16,16,16),divisions,tensor=5,ld=128))
         for g in range(2):
             emit(f'{p}_Out_Store_g{g}','cp.sram2dram_tma',8,(base_r+g*64,0,64,128),stores,tensor=(b*hq+h)*4+3,ld=128)
-    kernel=ArchKernel(symbol=flow.symbol,source_hash=digest(flow),sync_semantics_version='ref-fa3-v1',tensors=tuple(tensors),ctas=tuple(ctas),ops=tuple(ops))
+    kernel=ArchKernel(symbol=flow.symbol,source_hash=digest(flow),sync_semantics_version='ref-fa3-v1',tensors=tuple(tensors),ctas=tuple(ctas),ops=tuple(ops),outputs=tuple((b*hq+h)*4+3 for b in range(batch) for h in range(hq)))
     kernel.verify()
     return kernel

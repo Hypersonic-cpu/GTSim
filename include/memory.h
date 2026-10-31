@@ -565,6 +565,7 @@ public:
     }
 
     int get_line_size_bytes() const { return line_size_bytes; }
+    std::size_t resident_line_count() const { return cache.size(); }
 
     int get_transaction_count(const DAGNode& node) const {
         return get_total_transaction_count(node);

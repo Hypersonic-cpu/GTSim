@@ -56,6 +56,7 @@ class ArchKernel(Header):
     tensors: tuple[KernelTensor, ...] = ()
     ctas: tuple[CTA, ...] = ()
     ops: tuple[ArchInstruction, ...] = ()
+    outputs: tuple[int, ...] = ()
 
     def verify(self):
         super().verify()
@@ -77,6 +78,18 @@ class ArchKernel(Header):
             require(c.id >= 0 and c.sm >= 0 and c.warps == 12 and 0 < c.shared_bytes <= 228*1024 and
                     0 < c.register_bytes <= 256*1024,self.symbol,"invalid reference CTA resources")
         require(tuple(o.id for o in self.ops)==tuple(range(len(self.ops))),self.symbol,"operation IDs must be dense")
+        require(len(set(self.outputs))==len(self.outputs),self.symbol,"duplicate output tensor")
+        tensors={t.id:t for t in self.tensors}
+        writes={o.tensor for o in self.ops if o.op=='cp.sram2dram_tma'}
+        require(writes==set(self.outputs),self.symbol,"missing or undeclared output store")
+        for output in self.outputs:
+            require(output in tensors,self.symbol,"unknown output tensor")
+            tensor=tensors[output]
+            regions=[o.tile for o in self.ops if o.op=='cp.sram2dram_tma' and o.tensor==output]
+            require(sum(r[2]*r[3] for r in regions)==tensor.shape[0]*tensor.shape[1],self.symbol,"incomplete native output coverage")
+            for i,a in enumerate(regions):
+                for b in regions[i+1:]:
+                    require(not (max(a[0],b[0])<min(a[0]+a[2],b[0]+b[2]) and max(a[1],b[1])<min(a[1]+a[3],b[1]+b[3])),self.symbol,"overlapping native output stores")
         edges={o.id:set(o.after_issue+o.after_complete) for o in self.ops}
         children={o.id:[] for o in self.ops}
         for o in self.ops:

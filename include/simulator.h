@@ -230,6 +230,7 @@ public:
     GPU* simulated_gpu;
     DAG* dag;
     int cycle;
+    int memory_drain_cycle{0};
     std::ofstream* log_file;
     std::ostream* output_stream;
     std::vector<std::uint8_t> global_scoreboard;
@@ -414,6 +415,9 @@ public:
             delete log_file;
         }
     }
+
+    // Rebind launch-local scheduling on the existing GPU after full completion.
+    void bind_kernel(DAG* next);
 
     // Set log file for output
     bool set_log_file(const std::string& filename) {

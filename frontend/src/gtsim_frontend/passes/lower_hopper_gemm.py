@@ -38,8 +38,13 @@ def lower(flow):
             output=stores[0].writes[0]
             r,c=output.offsets
             if output.shape!=(128,256):raise ValueError('unsupported GEMM output geometry')
+            initial=[o for o in logical if o.semantic=='zero_accumulator']
+            if len(initial)!=1 or initial[0].results[0].shape!=(128,256):raise ValueError('missing GEMM accumulator initialization')
+            accumulator=initial[0].results[0].id
             stage_loads=[];compute=[];last=[None]*8
             for k,(a,b,matmul) in enumerate(zip(loads_a,loads_b,matrices)):
+                if matmul.operands!=(a.results[0].id,b.results[0].id,accumulator) or matmul.results[0].shape!=(128,256):raise ValueError('invalid GEMM accumulator/operand contract')
+                accumulator=matmul.results[0].id
                 if a.reads[0].shape!=(128,64) or b.reads[0].shape!=(64,256):raise ValueError('invalid GEMM operand coverage')
                 deps=[]
                 if k>=2:deps=compute[k-2]
@@ -64,6 +69,7 @@ def lower(flow):
                                     'wgmma.m64n64k16',warp,2,(r+half*64+(warp%4)*16,c+chunk*64,16,64),ready,dtype='fp32')
                                 current_compute.append(nid);last[warp]=nid
                 compute.append(current_compute)
+            if stores[0].operands!=(accumulator,):raise ValueError("store does not consume final accumulator")
             staging=[]
             for warp in range(8):
                 for half in range(2):
@@ -76,6 +82,6 @@ def lower(flow):
                          previous_stores[-1:] if previous_stores else (),ld=tensors['C'].shape[1])
                 previous_stores.append(nid)
             previous_loads=stage_loads[-1];previous_compute=compute
-    kernel=ArchKernel(symbol=flow.symbol,source_hash=digest(flow),sync_semantics_version='pingpong-cross-wave-v2',tensors=tuple(KernelTensor(i,t.id,t.shape,(t.shape[1],1),preloaded=(i==1),read_only=(i==1)) for i,t in enumerate(flow.tensors)),ctas=tuple(ctas),ops=tuple(ops))
+    kernel=ArchKernel(symbol=flow.symbol,source_hash=digest(flow),sync_semantics_version='pingpong-cross-wave-v2',tensors=tuple(KernelTensor(i,t.id,t.shape,(t.shape[1],1),preloaded=(i==1),read_only=(i==1)) for i,t in enumerate(flow.tensors)),ctas=tuple(ctas),ops=tuple(ops),outputs=(2,))
     kernel.verify()
     return kernel

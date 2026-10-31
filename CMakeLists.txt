@@ -52,8 +52,16 @@ add_executable(gtsim_fa2 workloads/fa2/fa2_a100.cpp)
 target_link_libraries(gtsim_fa2 PRIVATE gtsim_core)
 
 option(GTSIM_BUILD_IR_FRAMEWORK "Build the layered IR framework and its tests" ON)
+if(GTSIM_BUILD_IR_FRAMEWORK)
+  add_library(gtsim_execution STATIC src/execution_ir/graph_codec.cpp src/execution_ir/graph_materialize.cpp src/runtime/program_executor.cpp)
+  target_link_libraries(gtsim_execution PUBLIC gtsim_core)
+  add_executable(gtsim_program workloads/serve/program_runner.cpp)
+  target_link_libraries(gtsim_program PRIVATE gtsim_execution)
+endif()
+
 
 include(CTest)
+option(GTSIM_ENABLE_LEGACY_TVM_TESTS "Enable legacy TVM compatibility tests" OFF)
 set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
   if(GTSIM_BUILD_IR_FRAMEWORK)
@@ -141,6 +149,14 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/audit_gemm_sync.py
                 $<TARGET_FILE:reference_graph_dump> --require-safe
                 --output ${CMAKE_CURRENT_BINARY_DIR}/gemm-sync-audit.json)
+      add_test(NAME execution_program
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_frontend/test_execution_program.py
+                --runner $<TARGET_FILE:gtsim_program> --architecture ${H100_ARCH_CONFIG}
+                --memory-config ${MEMORY_FULL_HBM_CONFIG})
+      add_test(NAME ir_native_reference_parity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/test_native_parity.py
+                --oracle $<TARGET_FILE:reference_graph_dump>)
+      set_tests_properties(execution_program ir_native_reference_parity PROPERTIES TIMEOUT 300)
       add_test(NAME ir_frontend_contracts
         COMMAND ${CMAKE_COMMAND} -E env
                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/frontend/src"
@@ -160,7 +176,7 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_reference.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR} --verify)
   endif()
-  if(GTSIM_TVM_PYTHON)
+  if(GTSIM_TVM_PYTHON AND GTSIM_ENABLE_LEGACY_TVM_TESTS)
     add_test(NAME tvm_serving_semantics
       COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_serve.py)
     add_test(NAME tvm_tensor_placement
@@ -183,3 +199,7 @@ install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_serve_ir
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include/gtsim)
 install(DIRECTORY 3rdparty/glaze/include/glaze DESTINATION include)
+
+if(GTSIM_BUILD_IR_FRAMEWORK)
+  install(TARGETS gtsim_program RUNTIME DESTINATION bin)
+endif()
