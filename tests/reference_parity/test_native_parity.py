@@ -2,6 +2,7 @@
 """Compare independently lowered graphs to separately compiled C++ oracles."""
 
 import argparse
+import csv
 from pathlib import Path
 import subprocess
 import sys
@@ -109,7 +110,18 @@ def compare(executable, kind, dimensions, sms):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--oracle", type=Path, required=True)
+    parser.add_argument("--full-validation-matrix", action="store_true")
     args = parser.parse_args()
+    if args.full_validation_matrix:
+        root = Path(__file__).resolve().parents[2]
+        for kind, fields in (
+            ("gemm", ("M", "N", "K")),
+            ("fa3", ("batch", "heads_q", "heads_kv", "seq_q", "seq_kv")),
+        ):
+            with (root / "validation/data" / f"h100_{kind}.csv").open() as source:
+                for row in csv.DictReader(source):
+                    compare(args.oracle, kind, tuple(int(row[f]) for f in fields), 132)
+        return
     for k in (64, 128, 192, 256, 512):
         compare(args.oracle, "gemm", (512, 512, k), 2)
     compare(args.oracle, "gemm", (512, 512, 512), 132)

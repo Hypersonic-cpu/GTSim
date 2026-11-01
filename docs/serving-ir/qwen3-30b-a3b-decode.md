@@ -1,6 +1,6 @@
 # Qwen3-30B-A3B single-step decode in GTSim
 
-Correction status: the reviewed `f554d79` implementation still has a parallel decode compiler and unresolved attention, RoPE, and vector-operation fidelity problems. The residual dataflow has been corrected, but the canonical IR migration and corrected six-case execution have not yet been completed. Previous decode timing reports are historical results of the reviewed implementation, not acceptance evidence for the corrected workload.
+Correction status: the parallel Decode IR/compiler classes have been removed. Every workload kernel uses canonical Algorithm → FlowKernel → ArchKernel → ExecKernel lowering. Residual identities, attention/RoPE/vector semantics and expert row mapping have structural and independent numerical-oracle coverage. All six corrected B=1/8/16 × one/two-layer Programs have executed successfully; the final artifact/hash/stream audit passed. Previous decode reports are historical and are not acceptance evidence for the corrected workload.
 
 This workload models one autoregressive decode token for each request, through one or two Qwen3 MoE Transformer layers on a single H100 stream. It does not model prefill, sampling, the LM head, or later generation steps.
 
@@ -22,7 +22,7 @@ PYTHONPATH=frontend/src python3 -m gtsim_frontend.cli decode \
 
 Use `--batch-size 8` or `16`, and `--layers 2` for the other configurations. Supply exactly one context length per request; each must be from 10000 through 32000. Defaults cycle through `[10000, 16384, 24576, 32000]`. The attention length is always the request context plus its appended token. `--split-count` overrides the attention split count; default dispatch uses four splits for B=1 and one non-split CTA per query head for B=8/16.
 
-By default, B=1 uses direct execution for its eight selected experts. B=8/16 run an explicit histogram/prefix/gather assignment kernel followed by grouped Expert GEMM1 and GEMM2. The report includes each active expert's token count, physical M=16 rows, padding and row utilization; no balanced token distribution is assumed.
+By default, B=1 uses direct execution for its eight selected experts. B=8/16 run separate timed histogram/prefix and gather assignment kernels followed by grouped small-M MMA baseline Expert GEMM1 and GEMM2. The report includes each active expert's token count, physical M=16 rows, padding and row utilization; no balanced token distribution is assumed.
 
 ## Routing input
 
@@ -59,3 +59,40 @@ The simulator keeps one GPU, memory system and L2 across launches, including the
 - Expert weights are allocated only for experts selected by the supplied routing trace. Assignment, GEMM and reduction work is represented in timed kernels.
 - Decode attention uses one request/head CTA (or one per request/head/split), streams valid KV tiles, and uses online softmax. Split-KV partial outputs carry log-sum-exp statistics into a separately timed stable reduction.
 - The decode and grouped-expert patterns use the repository's H100 Hopper simulator profile. These cycle estimates are simulation results; H100 serving-kernel timing calibration or numerical tensor-inference parity has not been established.
+
+## Correction regression and complete matrix
+
+The frozen baseline is `f554d79`. The final reference sweep retained byte-identical
+8-case GEMM and 6-case FA3 CSV results; the selected CTest suite passed 23/23.
+The explicitly excluded `workload_profile_boundary` check is the previously
+identified textual false positive, as requested. Exact Native graph parity is
+checked separately against the C++ oracle builders; those builders are not used
+by the workload compiler.
+
+Run the entire matrix (one-layer gates first), or audit existing output:
+
+```sh
+PYTHONPATH=frontend/src python3 scripts/run_qwen3_correction_matrix.py \
+  --runner build/gtsim_program \
+  --out-dir validation/results/qwen3-correction/final
+PYTHONPATH=frontend/src python3 scripts/run_qwen3_correction_matrix.py \
+  --runner build/gtsim_program \
+  --out-dir validation/results/qwen3-correction/final --audit-only
+```
+
+The numerical oracles interpret typed Native operations independently of the
+timing simulator. Algebra tests use ideal casts; an optional precision path
+checks IEEE BF16 round-to-nearest-even storage and FP32 arithmetic. This is not
+a full end-to-end BF16 inference accuracy measurement or hardware timing calibration.
+
+The split-combination math can be compared structurally with the upstream
+[Hopper FlashAttention combination kernel](https://github.com/Dao-AILab/flash-attention/blob/main/hopper/flash_fwd_combine_kernel.h):
+it combines partial LSE statistics using a maximum and exponential weights.
+Our tests compare the emitted Native math with an independent non-split CPU
+reference. This establishes mathematical agreement only; our SIMT decode schedule
+is not a reproduction of that optimized Hopper implementation and no latency
+accuracy is inferred from this comparison. No physical H100 measurements for
+these new schedules are available in this checkout.
+
+The complete correction evidence and six-case results are in
+[qwen3-correction-report.md](qwen3-correction-report.md).

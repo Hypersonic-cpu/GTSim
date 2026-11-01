@@ -7,7 +7,7 @@ from gtsim_frontend.passes.instantiate import instantiate
 from gtsim_frontend.passes.hopper.lower import lower
 from gtsim_frontend.passes.lower_execution import lower as expand
 from gtsim_frontend.serialization.json_codec import loads, dumps
-from native_math_oracle import evaluate_vector
+from native_math_oracle import evaluate_vector, round_dtype
 
 
 def compile_spec(spec):
@@ -24,6 +24,31 @@ def compile_spec(spec):
 
 
 class CanonicalVectorTests(unittest.TestCase):
+    def test_bf16_storage_fp32_math_and_rounding(self):
+        # BF16 ties: even mantissas round down, odd mantissas round up.
+        self.assertEqual(round_dtype(1 + 1 / 256, "bf16"), 1)
+        self.assertEqual(round_dtype(1 + 3 / 256, "bf16"), 1 + 2 / 128)
+        x = [[math.sin(c / 13) for c in range(128)]]
+        y = [[math.cos(c / 17) for c in range(128)]]
+        _, native = compile_spec(AddSpec(1, 128))
+        result = evaluate_vector(native, {"X": x, "Y": y}, precision=True)["Output"]
+        expected = [
+            [
+                round_dtype(round_dtype(a, "bf16") + round_dtype(b, "bf16"), "bf16")
+                for a, b in zip(x[0], y[0])
+            ]
+        ]
+        self.assertEqual(result, expected)
+        _, norm = compile_spec(NormSpec(1, 128, 1e-6))
+        reductions = [
+            s
+            for p in norm.ops
+            for s in p.steps
+            if s.math is not None and s.math.reduction_axes
+        ]
+        self.assertTrue(reductions)
+        self.assertTrue(all(s.math.dtype == "fp32" for s in reductions))
+
     def assert_matrix(self, expected, actual):
         for row, got in zip(expected, actual):
             for x, y in zip(row, got):

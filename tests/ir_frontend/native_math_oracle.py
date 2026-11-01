@@ -6,6 +6,7 @@ and timing calibration. Operand axes come from the serialized IR.
 
 from itertools import product
 import math
+import struct
 from gtsim_frontend.ir.algorithm import MathKind as M
 from gtsim_frontend.ir.schedule import Scope, OpKind, ValueId
 
@@ -22,7 +23,20 @@ def matrix(rows, axes):
     return tensor(axes, (len(rows), len(rows[0])), lambda i: rows[i[0]][i[1]])
 
 
-def step_math(step, inputs, shape, parameters=None):
+def round_dtype(value, dtype):
+    """IEEE round-to-nearest-even storage; integer index operations stay exact."""
+    if dtype == "int32":
+        return int(value)
+    value = struct.unpack("f", struct.pack("f", value))[0]
+    if dtype == "bf16":
+        bits = struct.unpack("I", struct.pack("f", value))[0]
+        if math.isfinite(value):
+            bits = (bits + 0x7FFF + ((bits >> 16) & 1)) & 0xFFFF0000
+        value = struct.unpack("f", struct.pack("I", bits))[0]
+    return value
+
+
+def step_math(step, inputs, shape, parameters=None, precision=False):
     axes = step.math.output_axes
     extents = {}
     for input_axes, sizes, _ in inputs:
@@ -121,7 +135,15 @@ def step_math(step, inputs, shape, parameters=None):
             return values[0]
         raise AssertionError(f"unsupported native oracle math {kind}")
 
-    return tensor(axes, sizes, evaluate)
+    return tensor(
+        axes,
+        sizes,
+        lambda index: (
+            round_dtype(evaluate(index), step.math.dtype)
+            if precision
+            else evaluate(index)
+        ),
+    )
 
 
 def evaluate_partition(native, part, query, keys, values, supplied=None):
@@ -186,7 +208,7 @@ def evaluate_partition(native, part, query, keys, values, supplied=None):
     return [out[0, d] for d in range(128)], lse
 
 
-def evaluate_vector(native, supplied):
+def evaluate_vector(native, supplied, precision=False):
     """Interpret native primitive instructions with real tensor/register views."""
     outputs = {
         t.id: [list(row) for row in supplied[t.id]]
@@ -219,7 +241,13 @@ def evaluate_vector(native, supplied):
                 name = dict(group.aliases).get(op.region.tensor, op.region.tensor)
                 source = supplied[name]
                 state[op.role] = matrix(
-                    [r[col : col + cols] for r in source[row : row + rows]],
+                    [
+                        [
+                            round_dtype(v, op.results[0].dtype) if precision else v
+                            for v in r[col : col + cols]
+                        ]
+                        for r in source[row : row + rows]
+                    ],
                     op.results[0].axes,
                 )
             elif op.kind == OpKind.STORE:
@@ -239,7 +267,11 @@ def evaluate_vector(native, supplied):
                     inputs.extend(temporary[i] for i in step.input_steps)
                     temporary.append(
                         step_math(
-                            step, inputs, op.results[0].shape, dict(group.constants)
+                            step,
+                            inputs,
+                            op.results[0].shape,
+                            dict(group.constants),
+                            precision,
                         )
                     )
                 state[op.role] = temporary[-1]
