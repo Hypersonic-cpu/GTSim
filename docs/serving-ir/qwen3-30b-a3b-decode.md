@@ -1,5 +1,7 @@
 # Qwen3-30B-A3B single-step decode in GTSim
 
+Correction status: the reviewed `f554d79` implementation still has a parallel decode compiler and unresolved attention, RoPE, and vector-operation fidelity problems. The residual dataflow has been corrected, but the canonical IR migration and corrected six-case execution have not yet been completed. Previous decode timing reports are historical results of the reviewed implementation, not acceptance evidence for the corrected workload.
+
 This workload models one autoregressive decode token for each request, through one or two Qwen3 MoE Transformer layers on a single H100 stream. It does not model prefill, sampling, the LM head, or later generation steps.
 
 The dimensions and operator behavior follow the [Qwen3-30B-A3B configuration](https://huggingface.co/Qwen/Qwen3-30B-A3B/blob/main/config.json) and the [Transformers Qwen3 MoE implementation](https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3_moe/modeling_qwen3_moe.py): hidden size 2048, 32 query heads, 4 KV heads, head dimension 128, 128 experts, Top-8 routing, expert intermediate size 768, BF16, RMSNorm epsilon `1e-6`, and RoPE theta `1e6`.

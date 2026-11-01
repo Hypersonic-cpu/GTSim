@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from .common import MatrixGroup
 
 
 class TailPredicate(str, Enum):
@@ -23,6 +24,12 @@ class LoopVar(str, Enum):
     M_HALF = "m_half"
     N_CHUNK = "n_chunk"
     K_FRAGMENT = "k_fragment"
+    SPLIT = "split"
+    KV_START = "kv_start"
+    TOKEN = "token"
+    CHANNEL = "channel"
+    SLOT = "slot"
+    OUTPUT_ROW = "output_row"
 
 
 class Phase(str, Enum):
@@ -65,6 +72,12 @@ class BufferRole(str, Enum):
 
 
 class OpRole(str, Enum):
+    INIT_MAX = "init_max"
+    INIT_SUM = "init_sum"
+    INIT_OUTPUT = "init_output"
+    OUTPUT_CAST = "output_cast"
+    PARTIAL_LSE = "partial_lse"
+    STORE_LSE = "store_lse"
     ACQUIRE = "acquire"
     RELEASE = "release"
     LOAD_A = "load_A"
@@ -100,6 +113,7 @@ class OpRole(str, Enum):
 
 
 class Relation(str, Enum):
+    EXPLICIT = "explicit_preceding_producer"
     BUFFER_REUSE = "buffer_reuse"
     PREVIOUS_LOAD = "previous_load"
     LOAD_A = "load_A"
@@ -129,7 +143,7 @@ class Relation(str, Enum):
 @dataclass(frozen=True)
 class IndexExpr:
     constant: int = 0
-    terms: tuple[tuple[LoopVar, int], ...] = ()
+    terms: tuple[tuple[LoopVar | str, int], ...] = ()
 
     def evaluate(self, bindings):
         return self.constant + sum(
@@ -162,7 +176,7 @@ class SlotUse:
 
 @dataclass(frozen=True)
 class Dependency:
-    source: OpRole
+    source: OpRole | str
     phase: Phase
     relation: Relation
 
@@ -172,6 +186,8 @@ class SymbolicRegion:
     tensor: str
     offsets: tuple[IndexExpr, ...]
     shape: tuple[int, ...]
+    valid_axis: str = ""
+    row_index: str = ""
 
     def offsets_at(self, bindings):
         return tuple(expr.evaluate(bindings) for expr in self.offsets)
@@ -193,6 +209,31 @@ class PipelineRegion:
 
 
 @dataclass(frozen=True)
+class AttentionPartition:
+    request: int
+    query_head: int
+    kv_head: int
+    split: int
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class LoopState:
+    producer: OpRole | str
+    initializer: OpRole
+
+
+@dataclass(frozen=True)
+class WorkGroup:
+    bindings: tuple[tuple[LoopVar | str, int], ...] = ()
+    aliases: tuple[tuple[str, str], ...] = ()
+    ranges: tuple[tuple[str, int, int], ...] = ()
+    constants: tuple[tuple[str, float], ...] = ()
+    iterations: tuple[tuple[tuple[LoopVar, int], ...], ...] = ()
+
+
+@dataclass(frozen=True)
 class ScheduleDomain:
     dimensions: tuple[int, ...]
     num_sms: int
@@ -202,6 +243,11 @@ class ScheduleDomain:
     pipeline: PipelineRegion
     loops: tuple[TileLoop, ...]
     order: str = "original"
+    partitions: tuple[AttentionPartition, ...] = ()
+    states: tuple[LoopState, ...] = ()
+    matrix_groups: tuple[MatrixGroup, ...] = ()
+    workgroups: tuple[WorkGroup, ...] = ()
+    partial_outputs: tuple[str, ...] = ()
 
 
 class InitialValue(str, Enum):
@@ -212,10 +258,12 @@ class InitialValue(str, Enum):
 
 @dataclass(frozen=True)
 class ValueId:
-    producer: OpRole
+    producer: OpRole | str
     result: int = 0
     iteration_delta: int = 0
     initial: InitialValue = InitialValue.NONE
+    offsets: tuple[int, ...] = ()
+    shape: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,3 +271,4 @@ class SSAValue:
     id: ValueId
     shape: tuple[int, ...]
     dtype: str = "fp32"
+    axes: tuple[str, ...] = ()

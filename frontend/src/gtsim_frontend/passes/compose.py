@@ -1,7 +1,26 @@
 import re
-from dataclasses import replace
+from dataclasses import replace, dataclass
+from ..ir.graph import KernelTensor
+from ..ir.common import require
 from ..ir.execution import ExecProgram, ExecutionLaunch
 from ..serialization.json_codec import digest
+
+
+@dataclass(frozen=True)
+class KernelInterface:
+    """Verified per-launch metadata retained after its eager DAG is released."""
+
+    tensors: tuple[KernelTensor, ...]
+    outputs: tuple[int, ...]
+    content_hash: str
+
+    def verify(self):
+        ids = {t.id for t in self.tensors}
+        require(
+            len(ids) == len(self.tensors) and set(self.outputs) <= ids,
+            "kernel interface",
+            "invalid tensor/output metadata",
+        )
 
 
 def compose(program, kernels, kernel_files=None, launch_overhead_cycles=0):
@@ -9,13 +28,17 @@ def compose(program, kernels, kernel_files=None, launch_overhead_cycles=0):
     tensor_ids = {}
     tensors = []
     launches = []
+    produced = set()
     for invocation in program.launches:
         kernel = kernels[invocation.id]
         kernel.verify()
         bindings = dict(invocation.bindings)
         resolved = []
         for t in kernel.tensors:
-            if invocation.algorithm.family == "gemm":
+            if invocation.algorithm.family in (
+                "gemm",
+                "vector",
+            ) or invocation.algorithm.schedule_id in ("decode_simt", "decode_combine"):
                 key = bindings[t.name]
             else:
                 match = re.fullmatch(r"([QKVO])_b(\d+)_h(\d+)", t.name)
@@ -38,9 +61,12 @@ def compose(program, kernels, kernel_files=None, launch_overhead_cycles=0):
                 tensors[old.id] = replace(
                     old,
                     read_only=old.read_only and t.read_only,
-                    preloaded=old.preloaded or t.preloaded,
+                    preloaded=old.preloaded or (t.preloaded and key not in produced),
                 )
             resolved.append((t.id, tensor_ids[key]))
+        for output in kernel.outputs:
+            global_id = dict(resolved)[output]
+            produced.add(tensors[global_id].name)
         path = kernel_files[invocation.id] if kernel_files else f"{invocation.id}.gtsir"
         launches.append(ExecutionLaunch(invocation.id, path, tuple(resolved)))
     result = ExecProgram(

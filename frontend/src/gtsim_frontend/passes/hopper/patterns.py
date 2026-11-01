@@ -56,6 +56,10 @@ def softmax_shape(role, profile):
 
 
 def select(op, profile):
+    if profile.family == "vector" or (profile.family == "fa3" and profile.q_tile == 1):
+        from .math_patterns import select_math
+
+        return select_math(op, profile)
     deps = op.dependencies
     if op.kind == K.COPY:
         axis, extent = (
@@ -63,6 +67,8 @@ def select(op, profile):
             if op.role == R.LOAD_A
             else ((1, profile.mma_n) if op.role == R.LOAD_B else (0, profile.mma_m))
         )
+        if profile.family == "gemm" and profile.warpgroup == 1:
+            axis, extent = -1, 0
         steps = (
             NativeStep("cp.dram2sram_tma", deps, chunk_axis=axis, chunk_extent=extent),
         )
@@ -85,7 +91,7 @@ def select(op, profile):
             )
         steps = (
             NativeStep(
-                "wgmma.m64n64k16",
+                "mma.sync.m16n8k16" if profile.warpgroup == 1 else "wgmma.m64n64k16",
                 deps,
                 (profile.mma_m, profile.mma_n, profile.mma_k),
                 profile.warpgroup,
@@ -122,6 +128,8 @@ def select(op, profile):
 
 
 def layouts(profile):
+    if profile.family == "vector":
+        return (SharedLayout(B.OUTPUT, 1, "row_major", 16384),)
     if profile.family == "gemm":
         return (
             SharedLayout(

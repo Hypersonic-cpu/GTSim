@@ -45,6 +45,54 @@ class Program(Header):
         for k in self.launches:
             k.algorithm.verify()
             bindings = dict(k.bindings)
+            if k.algorithm.schedule_id in (
+                "decode_simt",
+                "decode_combine",
+                "grouped_small_m_mma",
+                "simt_vector",
+            ):
+                from ..kernels.hopper.attention_decode import physical_tensors
+
+                if k.algorithm.schedule_id == "decode_combine":
+                    from ..kernels.hopper.attention_combine import physical_tensors
+                if k.algorithm.schedule_id == "grouped_small_m_mma":
+                    from ..kernels.hopper.gemm_groups import physical_tensors
+                if k.algorithm.family == "vector":
+                    from ..kernels.vector import signature
+
+                    specs = signature(k.algorithm.primitive)
+                else:
+                    specs = physical_tensors(k.algorithm)
+                require(
+                    len(bindings) == len(k.bindings)
+                    and set(bindings) == {t.id for t in specs},
+                    k.id,
+                    "invalid scheduled kernel bindings",
+                )
+                for spec in specs:
+                    require(
+                        bindings[spec.id] in tensors, k.id, "unbound scheduled tensor"
+                    )
+                    actual = tensors[bindings[spec.id]]
+                    require(
+                        (actual.shape, actual.dtype, actual.tier)
+                        == (spec.shape, spec.dtype, spec.tier),
+                        k.id,
+                        "scheduled tensor shape/dtype mismatch",
+                    )
+                    require(
+                        spec.read_only or not actual.read_only,
+                        k.id,
+                        "scheduled output is read-only",
+                    )
+                inputs = {bindings[t.id] for t in specs if t.read_only}
+                outputs = [bindings[t.id] for t in specs if not t.read_only]
+                require(
+                    len(outputs) == len(set(outputs)) and not (set(outputs) & inputs),
+                    k.id,
+                    "scheduled output alias",
+                )
+                continue
             expected = (
                 ("A", "B", "C")
                 if k.algorithm.family == "gemm"

@@ -8,9 +8,12 @@ def lower(flow):
     flow.verify()
     result = ArchKernel(
         symbol=flow.symbol,
+        contract=flow.contract,
         source_hash=digest(flow),
         family=flow.family,
-        sync_semantics_version="pingpong-cross-wave-v2"
+        sync_semantics_version="streaming-decode-v1"
+        if flow.schedule_id in ("decode_simt", "decode_combine")
+        else "pingpong-cross-wave-v2"
         if flow.family == "gemm"
         else "ref-fa3-v1",
         schedule_id=flow.schedule_id,

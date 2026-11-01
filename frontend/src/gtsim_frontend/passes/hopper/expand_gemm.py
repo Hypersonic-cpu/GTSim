@@ -21,6 +21,32 @@ class WaveState:
     compute: list[list[int]] = field(default_factory=list)
 
 
+def mapped_rows(context, role, regions):
+    """Resolve typed logical group rows; coalesce only adjacent actual rows."""
+    if context.matrix_group is None or role == R.LOAD_B:
+        return regions
+    mapping = (
+        context.matrix_group.input_rows
+        if role == R.LOAD_A
+        else context.matrix_group.output_rows
+    )
+    result = []
+    for row, column, rows, columns in regions:
+        selected = mapping[row : row + rows]
+        for actual in selected:
+            if (
+                result
+                and result[-1][0] + result[-1][2] == actual
+                and result[-1][1] == column
+                and result[-1][3] == columns
+            ):
+                start, col, count, width = result[-1]
+                result[-1] = (start, col, count + 1, width)
+            else:
+                result.append((actual, column, 1, columns))
+    return tuple(result)
+
+
 def operand_loads(native, emitter, context, k, stage_loads, compute, previous):
     p = native.profile
     d = native.domain
@@ -35,15 +61,20 @@ def operand_loads(native, emitter, context, k, stage_loads, compute, previous):
     results = []
     for role, tensor, letter, leading in (
         (R.LOAD_A, 0, "A", d.dimensions[2]),
-        (R.LOAD_B, 1, "B", d.dimensions[1]),
+        (R.LOAD_B, context.weight_tensor, "B", d.dimensions[1]),
     ):
         pattern = patterns[role]
         regions = copy_regions(
             pattern.steps[0], pattern.source.region, context.bindings(k)
         )
+        regions = mapped_rows(context, role, regions)
         ids = []
         for chunk, region in enumerate(regions):
-            suffix = f"_c{chunk}" if role == R.LOAD_B else ""
+            if native.schedule_id in ("small_m_mma", "grouped_small_m_mma"):
+                shape = native.tensors[tensor].shape
+                if region[0] >= shape[0] or region[1] >= shape[1]:
+                    continue
+            suffix = f"_c{chunk}" if role == R.LOAD_B or len(regions) > 1 else ""
             ids.append(
                 emitter.emit(
                     role,
@@ -103,6 +134,8 @@ def matrix_accumulate(native, emitter, context, k, loads, last, previous_stores)
 
 
 def epilogue(native, emitter, context, last, compute):
+    if native.schedule_id in ("small_m_mma", "grouped_small_m_mma"):
+        return small_m_epilogue(native, emitter, context, last, compute)
     p = native.profile
     prefix = f"TB{context.cta}_Tile{context.tile}"
     staging = []
@@ -142,6 +175,51 @@ def epilogue(native, emitter, context, last, compute):
                 2,
                 region,
                 {L.STAGING: staging, L.PREVIOUS_CHUNK: stores[-1:]},
+                ld=native.domain.dimensions[1],
+                step=1,
+            )
+        )
+    return stores
+
+
+def small_m_epilogue(native, emitter, context, last, compute):
+    """MMA accumulator fragments use the same typed store patterns as WGMMA."""
+    p = native.profile
+    staging = []
+    for binding in instruction_iterations(emitter.patterns[R.MATMUL].steps[0]):
+        warp = binding[V.WARP]
+        column = (warp * 2 + binding[V.N_CHUNK]) * p.mma_n
+        staging.append(
+            emitter.emit(
+                R.STORE,
+                context,
+                warp,
+                f"tile{context.tile}_stage{column}",
+                2,
+                (context.row * p.bm, context.column * p.bn + column, p.bm, p.mma_n),
+                {L.WARP_TAIL: [last[warp]], L.FINAL_ROUND: compute[-1]},
+                dtype=native.tensors[2].dtype,
+            )
+        )
+    stores = []
+    pattern = emitter.patterns[R.STORE]
+    for store_index, region in enumerate(
+        mapped_rows(
+            context,
+            R.STORE,
+            copy_regions(pattern.steps[1], pattern.source.region, context.bindings()),
+        )
+    ):
+        stores.append(
+            emitter.emit(
+                R.STORE,
+                context,
+                p.producer_warp,
+                f"tile{context.tile}_store{store_index}",
+                2,
+                region,
+                {L.STAGING: staging, L.PREVIOUS_CHUNK: stores[-1:]},
+                dtype=native.tensors[2].dtype,
                 ld=native.domain.dimensions[1],
                 step=1,
             )

@@ -1,6 +1,6 @@
 from dataclasses import replace
 from ..ir.common import Header, require
-from ..ir.profiles import GEMM, FA3
+from ..ir.profiles import GEMM, FA3, SMALL_M
 from ..ir.schedule import OpRole, OpKind, Phase, Relation, ExecutorRole, Scope
 
 
@@ -11,15 +11,28 @@ def verify_domain(flow):
     require(d is not None, flow.symbol, "missing structured loop domain")
     from ..ir.algorithm import Algorithm
 
-    Algorithm(symbol=flow.symbol, family=flow.family, dimensions=d.dimensions).verify()
+    Algorithm(
+        symbol=flow.symbol,
+        family=flow.family,
+        dimensions=d.dimensions,
+        dtype=flow.tensors[0].dtype,
+        schedule_id=flow.schedule_id if flow.profile == SMALL_M else "reference",
+        groups=d.matrix_groups,
+    ).verify()
     require(type(d.num_sms) is int and d.num_sms > 0, flow.symbol, "invalid SM count")
     require(
-        flow.profile == (GEMM if flow.family == "gemm" else FA3),
+        flow.profile
+        == (
+            SMALL_M
+            if flow.schedule_id in ("small_m_mma", "grouped_small_m_mma")
+            else (GEMM if flow.family == "gemm" else FA3)
+        ),
         flow.symbol,
         "unsupported reference profile/depth/tiling",
     )
     require(
-        d == domain(flow.family, d.dimensions, d.num_sms),
+        d
+        == domain(flow.family, d.dimensions, d.num_sms, flow.profile, d.matrix_groups),
         flow.symbol,
         "unsupported tile loop, stage generation, tail predicate or pipeline depth",
     )
@@ -28,7 +41,12 @@ def verify_domain(flow):
 def verify_operations(flow):
     from ..kernels.hopper.reference.templates import operations
 
-    expected = {op.role: op for op in operations(flow.family, flow.domain)}
+    expected = {
+        op.role: op
+        for op in operations(
+            flow.family, flow.domain, flow.profile, flow.tensors[0].dtype
+        )
+    }
     require(
         len({op.id for op in flow.ops}) == len(flow.ops),
         flow.symbol,
@@ -55,7 +73,8 @@ def verify_operations(flow):
         )
         ref = expected[op.role]
         require(
-            op.dependencies == ref.dependencies,
+            tuple(d for d in op.dependencies if d.relation != Relation.EXPLICIT)
+            == ref.dependencies,
             op.id,
             "unsupported event/dependency transformation in fixed reference schedule",
         )
@@ -71,7 +90,7 @@ def verify_operations(flow):
         )
         require(op.executor == ref.executor, op.id, "unsupported executor assignment")
         require(
-            replace(op, id=ref.id) == ref,
+            replace(op, id=ref.id, dependencies=ref.dependencies) == ref,
             op.id,
             "unsupported SSA operands, scope or operation kind",
         )
@@ -92,6 +111,14 @@ def verify_operations(flow):
                 op.id,
                 "SSA value does not dominate operation",
             )
+        for dependency in op.dependencies:
+            if dependency.relation == Relation.EXPLICIT:
+                require(
+                    dependency.source in seen
+                    and dependency.phase in (Phase.ISSUE, Phase.COMPLETE),
+                    op.id,
+                    "explicit dependency must reference an earlier scheduled producer",
+                )
         seen.add(op.role)
         for dependency in op.dependencies:
             require(
@@ -110,6 +137,23 @@ def verify_tensors(flow):
     from ..ir.algorithm import Algorithm
     from ..ir.program import Program
 
+    if flow.schedule_id == "grouped_small_m_mma":
+        from ..kernels.hopper.gemm_groups import physical_tensors
+
+        algorithm = Algorithm(
+            symbol=flow.symbol,
+            family="gemm",
+            dimensions=flow.domain.dimensions,
+            dtype=flow.tensors[0].dtype,
+            schedule_id=flow.schedule_id,
+            groups=flow.domain.matrix_groups,
+        )
+        require(
+            flow.tensors == physical_tensors(algorithm),
+            flow.symbol,
+            "invalid grouped GEMM tensor/weight identities",
+        )
+        return
     dims = flow.domain.dimensions
     if flow.family == "gemm":
         m, n, k = dims
@@ -134,12 +178,18 @@ def verify_tensors(flow):
         tensor.verify()
         require(
             tensor.shape == shapes[tensor.id]
-            and tensor.dtype == "fp16"
+            and tensor.dtype == flow.tensors[0].dtype
             and tensor.read_only == (tensor.id not in outputs),
             tensor.id,
             "invalid operand region, dtype or output identity",
         )
-    Algorithm(symbol=flow.symbol, family=flow.family, dimensions=dims).verify()
+    Algorithm(
+        symbol=flow.symbol,
+        family=flow.family,
+        dimensions=dims,
+        dtype=flow.tensors[0].dtype,
+        schedule_id="small_m_mma" if flow.profile == SMALL_M else "reference",
+    ).verify()
 
 
 def verify_flow(flow):
@@ -147,13 +197,27 @@ def verify_flow(flow):
 
     verify_types(flow, location=flow.symbol)
     Header.verify(flow)
+    if flow.family == "vector":
+        from .vector import verify_vector
+
+        verify_vector(flow)
+        return
+    if flow.schedule_id in ("decode_simt", "decode_combine"):
+        from .attention import verify_attention_flow
+
+        verify_attention_flow(flow)
+        return
     require(flow.family in ("gemm", "fa3"), flow.symbol, "unknown algorithm family")
     require(
-        flow.schedule_id == f"ref_h100_{flow.family}_v0_1_0",
+        flow.schedule_id == f"ref_h100_{flow.family}_v0_1_0"
+        or (
+            flow.family == "gemm"
+            and flow.schedule_id in ("small_m_mma", "grouped_small_m_mma")
+        ),
         flow.symbol,
         "unknown schedule",
     )
     verify_domain(flow)
     verify_tensors(flow)
-    flow.mapping.verify(flow.family)
+    flow.mapping.verify(flow.family, "MMA" if flow.profile == SMALL_M else "WGMMA")
     verify_operations(flow)

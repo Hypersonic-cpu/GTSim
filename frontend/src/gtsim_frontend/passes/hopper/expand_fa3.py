@@ -199,6 +199,10 @@ def epilogue(native, emitter, context, state):
 
 
 def expand(native):
+    if native.schedule_id in ("decode_simt", "decode_combine"):
+        from .expand_structured import expand as expand_structured
+
+        return expand_structured(native)
     emitter = InstructionEmitter(native)
     ctas = []
     p = native.profile

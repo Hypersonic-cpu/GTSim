@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from .common import Header, Tensor
+from .algorithm import MathOperation, AlgorithmContract
 from .profiles import ReferenceProfile, GEMM
 from .schedule import (
     OpRole,
@@ -19,7 +20,7 @@ from .mapping import Mapping
 @dataclass(frozen=True)
 class FlowOp:
     id: str
-    role: OpRole
+    role: OpRole | str
     kind: OpKind
     scope: Scope
     executor: ExecutorRole
@@ -28,6 +29,8 @@ class FlowOp:
     region: SymbolicRegion | None = None
     slot: SlotUse | None = None
     results: tuple[SSAValue, ...] = ()
+    math: MathOperation | None = None
+    reduction_shape: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,7 @@ class FlowKernel(Header):
     tensors: tuple[Tensor, ...] = ()
     mapping: Mapping = Mapping()
     ops: tuple[FlowOp, ...] = ()
+    contract: AlgorithmContract | None = None
 
     def verify(self):
         from ..verify.flow import verify_flow

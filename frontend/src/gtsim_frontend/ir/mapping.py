@@ -11,13 +11,23 @@ class Mapping:
     store: tuple[tuple[BufferRole, str], ...] = ()
     routes: tuple[tuple[str, str, str], ...] = (("HBM", "SMEM", "bulk_copy"),)
 
-    def verify(self, family):
+    def verify(self, family, matrix="WGMMA"):
         require(
             self.target == "sm90" and self.placement == "original",
             "mapping",
             "unsupported target or CTA placement",
         )
-        expected = {ExecutorRole.PRODUCER: "TMA", ExecutorRole.MATRIX: "WGMMA"}
+        if family == "vector":
+            require(
+                dict(self.execute)
+                == {ExecutorRole.PRODUCER: "TMA", ExecutorRole.VECTOR: "SIMD"}
+                and self.store == ((BufferRole.OUTPUT, "SMEM"),)
+                and self.routes == (("HBM", "SMEM", "bulk_copy"),),
+                "mapping",
+                "invalid vector execution/storage mapping",
+            )
+            return
+        expected = {ExecutorRole.PRODUCER: "TMA", ExecutorRole.MATRIX: matrix}
         if family == "fa3":
             expected[ExecutorRole.VECTOR] = "SIMD"
         require(

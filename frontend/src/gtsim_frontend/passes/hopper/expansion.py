@@ -1,6 +1,7 @@
 """IR-05-only loop iteration, instruction emission and phased event resolution."""
 
 from dataclasses import dataclass, replace
+from ...ir.common import MatrixGroup
 from ...ir.graph import ArchInstruction, HOPPER_OPS, CTA, KernelTensor
 from ...ir.execution import ExecKernel
 from ...ir.schedule import OpRole as R, Relation as L, Phase as P, LoopVar as V
@@ -17,6 +18,8 @@ class TileContext:
     batch: int = 0
     head: int = 0
     kv_head: int = 0
+    matrix_group: MatrixGroup | None = None
+    weight_tensor: int = 1
 
     def bindings(self, k=0):
         return {
@@ -43,6 +46,7 @@ class InstructionEmitter:
         self.ops = []
         self.pending = []
         self.events = {}
+        self.produced = {}
 
     def emit(
         self,
@@ -56,15 +60,25 @@ class InstructionEmitter:
         dtype="fp16",
         ld=0,
         step=0,
+        value_dependencies=(),
     ):
         pattern = self.patterns[role].steps[step]
-        complete = []
+        complete = list(value_dependencies)
         issue = []
         future = []
         for dependency in pattern.dependencies:
+            if dependency.relation == L.EXPLICIT:
+                key = (context.cta, dependency.source)
+                if key not in self.produced:
+                    raise ValueError(
+                        "explicit native dependency has no emitted producer"
+                    )
+                target = issue if dependency.phase == P.ISSUE else complete
+                target.extend(self.produced[key])
+                continue
             if dependency.relation not in groups:
                 raise ValueError(
-                    f"{role.value}: missing event group {dependency.relation.value}"
+                    f"{role}: missing event group {dependency.relation.value}"
                 )
             target = issue if dependency.phase == P.ISSUE else complete
             for value in groups[dependency.relation]:
@@ -72,6 +86,24 @@ class InstructionEmitter:
                     future.append((dependency.phase, value))
                 else:
                     target.append(value)
+        if self.native.schedule_id in (
+            "small_m_mma",
+            "grouped_small_m_mma",
+        ) and pattern.opcode in (
+            "cp.dram2sram_tma",
+            "cp.sram2dram_tma",
+        ):
+            spec = self.native.tensors[tensor]
+            row, column, rows, columns = tile
+            tile = (
+                row,
+                column,
+                min(rows, spec.shape[0] - row),
+                min(columns, spec.shape[1] - column),
+            )
+            if min(tile[2:]) <= 0:
+                raise ValueError("empty masked native memory region")
+            dtype = spec.dtype
         nid = len(self.ops)
         self.ops.append(
             ArchInstruction(
@@ -89,6 +121,10 @@ class InstructionEmitter:
                 tuple(complete),
             )
         )
+        key = (context.cta, role)
+        # All fragments of a producer must complete before a conservative
+        # explicit consumer edge. Retaining the IDs is bounded by the eager DAG.
+        self.produced.setdefault(key, []).append(nid)
         self.pending.extend((nid, phase, value.key) for phase, value in future)
         return nid
 
@@ -110,13 +146,31 @@ class InstructionEmitter:
 def contexts(native):
     p = native.profile
     d = native.domain
+    if d.matrix_groups:
+        _, n, _ = d.dimensions
+        ids = {t.id: i for i, t in enumerate(native.tensors)}
+        identity = 0
+        for group in d.matrix_groups:
+            for row in range((len(group.input_rows) + p.bm - 1) // p.bm):
+                for column in range((n + p.bn - 1) // p.bn):
+                    yield TileContext(
+                        identity,
+                        identity % d.num_sms,
+                        identity,
+                        row,
+                        column,
+                        matrix_group=group,
+                        weight_tensor=ids[group.weight],
+                    )
+                    identity += 1
+        return
     if native.family == "gemm":
         m, n, k = d.dimensions
         order = [
             (row, column)
-            for start in range(0, n // p.bn, 8)
-            for row in range(m // p.bm)
-            for column in range(start, min(n // p.bn, start + 8))
+            for start in range(0, (n + p.bn - 1) // p.bn, 8)
+            for row in range((m + p.bm - 1) // p.bm)
+            for column in range(start, min((n + p.bn - 1) // p.bn, start + 8))
         ]
         for cta in range(d.cta_count):
             for tile in range(cta, d.tile_count, d.cta_count):
@@ -159,7 +213,13 @@ def tensors(native):
     if native.family == "gemm":
         return tuple(
             KernelTensor(
-                i, t.id, t.shape, (t.shape[1], 1), preloaded=i == 1, read_only=i == 1
+                i,
+                t.id,
+                t.shape,
+                (t.shape[1], 1),
+                dtype=t.dtype,
+                preloaded=t.read_only if native.domain.matrix_groups else i == 1,
+                read_only=t.read_only if native.domain.matrix_groups else i == 1,
             )
             for i, t in enumerate(native.tensors)
         )

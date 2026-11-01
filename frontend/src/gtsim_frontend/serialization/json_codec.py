@@ -16,7 +16,7 @@ from ..ir import (
     profiles,
     schedule,
     graph,
-    decode,
+    primitives,
 )
 
 _TYPES = {
@@ -32,7 +32,7 @@ _TYPES = {
         profiles,
         schedule,
         graph,
-        decode,
+        primitives,
     )
     for c in vars(module).values()
     if isinstance(c, type) and dataclasses.is_dataclass(c)
@@ -44,19 +44,47 @@ _FORMATS = {
     "ArchKernel": "arch-ir/0.2",
     "ExecKernel": "gtsim.exec.kernel/2",
     "ExecProgram": "gtsim.exec.program/1",
-    "DecodeProgram": "prog-ir/0.2",
-    "DecodeAlgorithm": "algo-ir/0.3",
-    "DecodeFlowKernel": "flow-ir/0.3",
-    "DecodeNativeKernel": "arch-ir/0.3",
 }
 
 
 _ENUMS = {
     c.__name__: c
-    for module in (algorithm, schedule, decode)
+    for module in (algorithm, schedule)
     for c in vars(module).values()
     if isinstance(c, type) and issubclass(c, Enum) and c is not Enum
 }
+
+
+# Appended optional fields preserve frozen reference encodings and hashes.
+_OPTIONAL_DEFAULTS = {
+    "Algorithm": {
+        "schedule_id": "reference",
+        "valid_lengths": (),
+        "split_count": 1,
+        "groups": (),
+        "primitive": None,
+    },
+    "AlgorithmContract": {"valid_lengths": (), "groups": ()},
+    "ScheduleDomain": {"partitions": (), "states": (), "matrix_groups": ()},
+    "FlowOp": {"math": None},
+    "SSAValue": {"axes": ()},
+    "NativeStep": {
+        "operands": (),
+        "math": None,
+        "input_steps": (),
+        "fragment_axes": (),
+    },
+}
+
+
+_OPTIONAL_DEFAULTS["Algorithm"]["primitive"] = None
+_OPTIONAL_DEFAULTS["MathOperation"] = {"constants": (), "parameter": ""}
+_OPTIONAL_DEFAULTS["ValueId"] = {"offsets": (), "shape": ()}
+_OPTIONAL_DEFAULTS["ScheduleDomain"].update(workgroups=(), partial_outputs=())
+_OPTIONAL_DEFAULTS["SymbolicRegion"] = {"valid_axis": "", "row_index": ""}
+_OPTIONAL_DEFAULTS["FlowOp"]["reduction_shape"] = ()
+_OPTIONAL_DEFAULTS["FlowKernel"] = {"contract": None}
+_OPTIONAL_DEFAULTS["ArchKernel"] = {"contract": None}
 
 
 def encode(value):
@@ -68,6 +96,9 @@ def encode(value):
             **{
                 f.name: encode(getattr(value, f.name))
                 for f in dataclasses.fields(value)
+                if f.name not in _OPTIONAL_DEFAULTS.get(type(value).__name__, {})
+                or getattr(value, f.name)
+                != _OPTIONAL_DEFAULTS[type(value).__name__][f.name]
             },
         }
     if isinstance(value, tuple):
@@ -94,7 +125,8 @@ def decode(value):
             raise ValueError(f"unknown record: {name}")
         cls = _TYPES[name]
         expected = {f.name for f in dataclasses.fields(cls)}
-        if set(value) != expected | {"record"}:
+        optional = set(_OPTIONAL_DEFAULTS.get(name, {}))
+        if set(value) - {"record"} - expected or expected - set(value) - optional:
             raise ValueError(f"{name}: missing or unknown fields")
         return cls(**{k: decode(v) for k, v in value.items() if k != "record"})
     return value

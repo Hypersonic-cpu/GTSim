@@ -97,14 +97,6 @@ class Header:
                     "Algorithm",
                     "ExecKernel",
                 )
-                else 3
-                if type(self).__name__
-                in (
-                    "DecodeProgram",
-                    "DecodeAlgorithm",
-                    "DecodeFlowKernel",
-                    "DecodeNativeKernel",
-                )
                 else 1
             ),
             self.symbol,
@@ -140,3 +132,13 @@ class TileValue:
             "invalid value shape",
         )
         require(self.dtype in ("fp16", "fp32"), self.id, "unsupported value dtype")
+
+
+@dataclass(frozen=True)
+class MatrixGroup:
+    """Logical row/weight identities for a grouped matrix product."""
+
+    identity: int
+    input_rows: tuple[int, ...]
+    output_rows: tuple[int, ...]
+    weight: str

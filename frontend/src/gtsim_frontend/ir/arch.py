@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from .common import Header, Tensor
+from .algorithm import MathOperation, AlgorithmContract
 from .flow import FlowOp
 from .mapping import Mapping
 from .profiles import ReferenceProfile, ResourceFootprint, GEMM
-from .schedule import ScheduleDomain, Dependency, BufferRole, TileLoop
+from .schedule import ScheduleDomain, Dependency, BufferRole, TileLoop, ValueId
 from .graph import KernelTensor, CTA, ArchInstruction, HOPPER_OPS
 
 
@@ -18,6 +19,10 @@ class NativeStep:
     chunk_axis: int = -1
     chunk_extent: int = 0
     loops: tuple[TileLoop, ...] = ()
+    operands: tuple[ValueId, ...] = ()
+    math: MathOperation | None = None
+    input_steps: tuple[int, ...] = ()
+    fragment_axes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,7 @@ class ArchKernel(Header):
     registers: RegisterLayout | None = None
     async_protocol: AsyncProtocol = AsyncProtocol()
     ops: tuple[NativePattern, ...] = ()
+    contract: AlgorithmContract | None = None
 
     def verify(self):
         from ..verify.native import verify_native

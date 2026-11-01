@@ -3,7 +3,7 @@
 from ....ir.common import Tensor
 from ....ir.flow import FlowOp, FlowKernel
 from ....ir.mapping import Mapping
-from ....ir.profiles import GEMM, FA3
+from ....ir.profiles import GEMM, FA3, SMALL_M
 from ....ir.schedule import (
     TailPredicate,
     LoopVar as V,
@@ -34,13 +34,19 @@ def index(var, scale=1):
     return IndexExpr(terms=((var, scale),))
 
 
-def domain(family, dims, sms):
-    profile = GEMM if family == "gemm" else FA3
+def domain(family, dims, sms, profile=None, groups=()):
+    profile = profile or (GEMM if family == "gemm" else FA3)
     if family == "gemm":
         m, n, k = dims
-        tiles = (m // GEMM.bm) * (n // GEMM.bn)
-        ctas = min(sms, tiles)
-        rounds = k // GEMM.bk
+        tiles = ((m + profile.bm - 1) // profile.bm) * (
+            (n + profile.bn - 1) // profile.bn
+        )
+        if groups:
+            tiles = sum(
+                (len(g.input_rows) + profile.bm - 1) // profile.bm for g in groups
+            ) * ((n + profile.bn - 1) // profile.bn)
+        ctas = tiles if groups else min(sms, tiles)
+        rounds = (k + profile.bk - 1) // profile.bk
     else:
         batch, hq, hkv, q, kv = dims
         tiles = batch * hq * (q // FA3.q_tile)
@@ -69,11 +75,15 @@ def domain(family, dims, sms):
         waves,
         pipeline,
         (TileLoop(V.CTA, ctas), TileLoop(V.WAVE, waves, TailPredicate.TILE_EXISTS)),
+        matrix_groups=groups,
     )
 
 
-def mapping(family):
-    execute = ((E.PRODUCER, "TMA"), (E.MATRIX, "WGMMA"))
+def mapping(family, profile=None):
+    execute = (
+        (E.PRODUCER, "TMA"),
+        (E.MATRIX, "MMA" if profile == SMALL_M else "WGMMA"),
+    )
     buffers = (B.AB, B.OUTPUT)
     if family == "fa3":
         execute += ((E.VECTOR, "SIMD"),)
@@ -81,7 +91,8 @@ def mapping(family):
     return Mapping(execute=execute, store=tuple((b, "SMEM") for b in buffers))
 
 
-def operations(family, d):
+def operations(family, d, profile=None, dtype="fp16"):
+    p = profile or (GEMM if family == "gemm" else FA3)
     stage = d.pipeline.stage
 
     def dep(source, relation, phase=P.COMPLETE):
@@ -130,7 +141,7 @@ def operations(family, d):
                 SSAValue(
                     ValueId(role),
                     result_shape,
-                    "fp16" if kind == K.COPY or role == R.CAST else "fp32",
+                    dtype if kind == K.COPY or role == R.CAST else "fp32",
                 ),
             )
         )
@@ -148,12 +159,10 @@ def operations(family, d):
         )
 
     if family == "gemm":
-        a = SymbolicRegion("A", (index(V.ROW, GEMM.bm), index(V.K, GEMM.bk)), (128, 64))
-        b = SymbolicRegion(
-            "B", (index(V.K, GEMM.bk), index(V.COLUMN, GEMM.bn)), (64, 256)
-        )
+        a = SymbolicRegion("A", (index(V.ROW, p.bm), index(V.K, p.bk)), (p.bm, p.bk))
+        b = SymbolicRegion("B", (index(V.K, p.bk), index(V.COLUMN, p.bn)), (p.bk, p.bn))
         c = SymbolicRegion(
-            "C", (index(V.ROW, GEMM.bm), index(V.COLUMN, GEMM.bn)), (128, 256)
+            "C", (index(V.ROW, p.bm), index(V.COLUMN, p.bn)), (p.bm, p.bn)
         )
         reuse = dep(R.MATMUL, L.BUFFER_REUSE)
         loads = (reuse, dep(R.LOAD_A, L.PREVIOUS_LOAD, P.ISSUE))
@@ -314,13 +323,18 @@ def build(algorithm, num_sms):
         raise ValueError("num_sms must be positive")
     family = algorithm.family
     dims = algorithm.dimensions
-    d = domain(family, dims, num_sms)
+    profile = (
+        SMALL_M
+        if algorithm.schedule_id in ("small_m_mma", "grouped_small_m_mma")
+        else (GEMM if family == "gemm" else FA3)
+    )
+    d = domain(family, dims, num_sms, profile, algorithm.groups)
     if family == "gemm":
         m, n, k = dims
         tensors = (
-            Tensor("A", (m, k), read_only=True),
-            Tensor("B", (k, n), read_only=True),
-            Tensor("C", (m, n)),
+            Tensor("A", (m, k), algorithm.dtype, read_only=True),
+            Tensor("B", (k, n), algorithm.dtype, read_only=True),
+            Tensor("C", (m, n), algorithm.dtype),
         )
     else:
         b, hq, hkv, q, kv = dims
@@ -330,18 +344,24 @@ def build(algorithm, num_sms):
             Tensor("V", (b, hkv, 128, kv), read_only=True),
             Tensor("O", (b, hq, q, 128)),
         )
+    if algorithm.groups:
+        from ..gemm_groups import physical_tensors
+
+        tensors = physical_tensors(algorithm)
     from ....serialization.json_codec import digest
 
     flow = FlowKernel(
         symbol=algorithm.symbol,
         source_hash=digest(algorithm),
         family=family,
-        schedule_id=f"ref_h100_{family}_v0_1_0",
-        profile=GEMM if family == "gemm" else FA3,
+        schedule_id=algorithm.schedule_id
+        if profile == SMALL_M
+        else f"ref_h100_{family}_v0_1_0",
+        profile=profile,
         domain=d,
         tensors=tensors,
-        mapping=mapping(family),
-        ops=operations(family, d),
+        mapping=mapping(family, profile),
+        ops=operations(family, d, profile, algorithm.dtype),
     )
     flow.verify()
     return flow
