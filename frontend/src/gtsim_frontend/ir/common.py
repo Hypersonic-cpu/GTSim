@@ -25,7 +25,11 @@ class Tensor:
             self.id,
             "dimensions must be concrete positive integers",
         )
-        require(self.dtype in ("fp16", "fp32"), self.id, "unsupported dtype")
+        require(
+            self.dtype in ("fp16", "bf16", "fp32", "int32"),
+            self.id,
+            "unsupported dtype",
+        )
         require(self.tier == "HBM", self.id, "reference profile requires HBM")
 
 
@@ -86,7 +90,21 @@ class Header:
             self.schema_version
             == (
                 2
-                if type(self).__name__ in ("FlowKernel", "ArchKernel", "Algorithm")
+                if type(self).__name__
+                in (
+                    "FlowKernel",
+                    "ArchKernel",
+                    "Algorithm",
+                    "ExecKernel",
+                )
+                else 3
+                if type(self).__name__
+                in (
+                    "DecodeProgram",
+                    "DecodeAlgorithm",
+                    "DecodeFlowKernel",
+                    "DecodeNativeKernel",
+                )
                 else 1
             ),
             self.symbol,

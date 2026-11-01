@@ -28,6 +28,7 @@ struct Kernel {
     std::vector<Tensor> tensors;
     std::vector<CTA> ctas;
     std::vector<Instruction> ops;
+    std::vector<int> partial_outputs;
     std::vector<int> outputs;
 };
 Kernel read_kernel(const std::filesystem::path& path);

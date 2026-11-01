@@ -4,6 +4,14 @@
 #include <regex>
 
 namespace GTSim::ExecutionIR {
+static DataType parse_dtype(const std::string& value) {
+    if (value == "fp16") return DataType::FP16;
+    if (value == "bf16") return DataType::BF16;
+    if (value == "fp32") return DataType::FP32;
+    if (value == "int32") return DataType::INT32;
+    throw std::invalid_argument("unsupported execution dtype " + value);
+}
+
 std::unique_ptr<DAG>
 materialize(const Kernel& k, const SimulatorConfig& config,
             const TensorRegistry& registry,
@@ -25,11 +33,14 @@ materialize(const Kernel& k, const SimulatorConfig& config,
             throw std::invalid_argument("unbound kernel tensor");
         const auto& global = registry.at(ids.at(t.id));
         if (t.shape != global.shape || t.strides != global.strides ||
-            t.dtype != "fp16" || t.tier != "HBM")
+            (t.dtype != "fp16" && t.dtype != "bf16" && t.dtype != "fp32" &&
+             t.dtype != "int32") ||
+            t.tier != "HBM")
             throw std::invalid_argument("incompatible tensor binding");
     }
     for (const auto& c : k.ctas) {
-        if (c.id < 0 || c.sm < 0 || c.sm >= config.num_sms || c.warps != 12 ||
+        if (c.id < 0 || c.sm < 0 || c.sm >= config.num_sms || c.warps < 1 ||
+            c.warps > config.max_warps_per_sm || c.warps > 32 ||
             c.shared_bytes <= 0 ||
             c.shared_bytes > config.shared_memory_per_cta_bytes ||
             c.register_bytes <= 0 ||
@@ -43,6 +54,7 @@ materialize(const Kernel& k, const SimulatorConfig& config,
         {"cp.sram2dram_tma", "ST"},
         {"st.reg2sram", "ST"},
         {"wgmma.m64n64k16", "Tensor"},
+        {"mma.sync.m16n8k16", "Tensor"},
         {"local_max", "SIMD"},
         {"reduce_max", "SIMD"},
         {"merge_max", "SIMD"},
@@ -56,14 +68,51 @@ materialize(const Kernel& k, const SimulatorConfig& config,
         {"shfl_sum", "SHFL"},
         {"scores_scale", "SFU"},
         {"exp2", "SFU"},
-        {"acc_o_div", "SFU"}};
-    std::map<int, int> sms;
-    for (const auto& c : k.ctas) sms[c.id] = c.sm;
+        {"acc_o_div", "SFU"},
+        {"simd.add", "SIMD"},
+        {"simd.sub", "SIMD"},
+        {"simd.mul", "SIMD"},
+        {"simd.fma", "SIMD"},
+        {"simd.max", "SIMD"},
+        {"simd.min", "SIMD"},
+        {"simd.cast", "SIMD"},
+        {"simd.fill", "SIMD"},
+        {"simd.identity", "SIMD"},
+        {"sfu.exp", "SFU"},
+        {"sfu.log", "SFU"},
+        {"sfu.sqrt", "SFU"},
+        {"sfu.rsqrt", "SFU"},
+        {"sfu.divide", "SFU"},
+        {"sfu.sin", "SFU"},
+        {"sfu.cos", "SFU"},
+        {"shfl", "SHFL"}};
+    std::map<int, int> sms, warp_bases, cta_warps;
+    std::vector<int> sm_next_subpartition(config.num_sms, 0);
+    std::uint64_t next_warp_id = 0;
+    for (const auto& c : k.ctas) {
+        sms[c.id] = c.sm;
+        cta_warps[c.id] = c.warps;
+        const auto desired =
+            static_cast<std::uint64_t>(sm_next_subpartition[c.sm] % 4);
+        next_warp_id += (desired + 4 - next_warp_id % 4) % 4;
+        if (next_warp_id + static_cast<std::uint64_t>(c.warps) >
+            static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+            throw std::overflow_error("execution warp numbering exceeds int32");
+        warp_bases[c.id] = static_cast<int>(next_warp_id);
+        next_warp_id += static_cast<std::uint64_t>(c.warps);
+        sm_next_subpartition[c.sm] = (sm_next_subpartition[c.sm] + c.warps) % 4;
+    }
     std::vector<std::set<int>> deps(k.ops.size());
     std::vector<std::vector<int>> children(k.ops.size());
     std::set<int> output_ids(k.outputs.begin(), k.outputs.end());
+    const std::set<int> partial_output_ids(k.partial_outputs.begin(),
+                                           k.partial_outputs.end());
     if (output_ids.empty() || output_ids.size() != k.outputs.size())
         throw std::invalid_argument("missing/duplicate output contract");
+    if (partial_output_ids.size() != k.partial_outputs.size() ||
+        !std::all_of(partial_output_ids.begin(), partial_output_ids.end(),
+                     [&](int id) { return output_ids.contains(id); }))
+        throw std::invalid_argument("invalid partial output contract");
     for (int output : output_ids) {
         if (!ids.contains(output))
             throw std::invalid_argument("unknown output tensor");
@@ -77,7 +126,9 @@ materialize(const Kernel& k, const SimulatorConfig& config,
                 area += std::uint64_t(o.tile[2]) * o.tile[3];
                 regions.push_back(o.tile);
             }
-        if (area != tensor.shape[0] * tensor.shape[1])
+        const auto full_area = tensor.shape[0] * tensor.shape[1];
+        if (area == 0 || area > full_area ||
+            (!partial_output_ids.contains(output) && area != full_area))
             throw std::invalid_argument("incomplete output coverage");
         for (std::size_t i = 0; i < regions.size(); ++i)
             for (std::size_t j = i + 1; j < regions.size(); ++j) {
@@ -103,11 +154,12 @@ materialize(const Kernel& k, const SimulatorConfig& config,
                          std::regex_replace(o.name, warp_pattern, "_w")}]
                 .push_back(o.warp % 4);
         if (o.id != static_cast<int>(dag->nodes.size()) ||
-            !sms.contains(o.cta) || o.warp < o.cta * 12 ||
-            o.warp >= o.cta * 12 + 12 || !supported.contains(o.op) ||
-            supported.at(o.op) != o.pipeline ||
-            (o.dtype != "fp16" && o.dtype != "fp32") || o.tile[0] < 0 ||
-            o.tile[1] < 0 || o.tile[2] <= 0 || o.tile[3] <= 0)
+            !sms.contains(o.cta) || o.warp < warp_bases.at(o.cta) ||
+            o.warp >= warp_bases.at(o.cta) + cta_warps.at(o.cta) ||
+            !supported.contains(o.op) || supported.at(o.op) != o.pipeline ||
+            (o.dtype != "fp16" && o.dtype != "bf16" && o.dtype != "fp32" &&
+             o.dtype != "int32") ||
+            o.tile[0] < 0 || o.tile[1] < 0 || o.tile[2] <= 0 || o.tile[3] <= 0)
             throw std::invalid_argument("invalid native instruction " + o.name);
         for (const auto* list : {&o.after_issue, &o.after_complete})
             for (int d : *list) {
@@ -131,18 +183,20 @@ materialize(const Kernel& k, const SimulatorConfig& config,
                 std::uint64_t(o.tile[0]) + o.tile[2] > t.shape[0] ||
                 std::uint64_t(o.tile[1]) + o.tile[3] > t.shape[1] ||
                 o.leading_dim != static_cast<int>(t.strides[0]) ||
+                parse_dtype(o.dtype) != t.dtype ||
                 (o.op == "cp.sram2dram_tma" && t.read_only))
                 throw std::invalid_argument(
                     "invalid memory region/visibility binding");
         }
         auto* n = new DAGNode(o.id, o.name, o.pipeline, o.op, o.warp,
                               o.after_complete, 0,
-                              Tile(o.tile[0], o.tile[1], o.tile[2], o.tile[3]));
+                              Tile(o.tile[0], o.tile[1], o.tile[2], o.tile[3]),
+                              parse_dtype(o.dtype));
         n->issue_depends_on = o.after_issue;
         n->sm_id = sms.at(o.cta);
         n->thread_block_id = o.cta;
         n->matrix_id = ids.contains(o.tensor) ? ids.at(o.tensor) : o.tensor;
-        n->data_type = o.dtype == "fp32" ? DataType::FP32 : DataType::FP16;
+        n->data_type = parse_dtype(o.dtype);
         n->matrix_leading_dim = o.leading_dim;
         dag->add_node(n);
     }

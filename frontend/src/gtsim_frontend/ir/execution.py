@@ -8,6 +8,8 @@ from .common import Header, require
 class ExecKernel(FlatKernel):
     """IR-05 explicit kernel graph with no timing constants or addresses."""
 
+    schema_version: int = 2
+
 
 @dataclass(frozen=True)
 class ExecutionLaunch:

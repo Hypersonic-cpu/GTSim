@@ -23,7 +23,8 @@ struct KernelTiming {
     int launch_cycle{}, start_cycle{}, device_complete_cycle{},
         complete_cycle{}, device_cycles{};
     std::size_t l2_lines_before{}, l2_lines_after{};
-    std::uint64_t hbm_read_bytes{};
+    std::uint64_t hbm_read_bytes{}, hbm_write_bytes{}, hbf_read_bytes{},
+        hbf_write_bytes{};
 };
 struct ProgramTiming {
     int total_cycles{};

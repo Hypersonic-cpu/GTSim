@@ -3,6 +3,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 from enum import Enum
 from ..ir import (
     common,
@@ -15,6 +16,7 @@ from ..ir import (
     profiles,
     schedule,
     graph,
+    decode,
 )
 
 _TYPES = {
@@ -30,6 +32,7 @@ _TYPES = {
         profiles,
         schedule,
         graph,
+        decode,
     )
     for c in vars(module).values()
     if isinstance(c, type) and dataclasses.is_dataclass(c)
@@ -39,14 +42,18 @@ _FORMATS = {
     "Algorithm": "algo-ir/0.2",
     "FlowKernel": "flow-ir/0.2",
     "ArchKernel": "arch-ir/0.2",
-    "ExecKernel": "gtsim.exec.kernel/1",
+    "ExecKernel": "gtsim.exec.kernel/2",
     "ExecProgram": "gtsim.exec.program/1",
+    "DecodeProgram": "prog-ir/0.2",
+    "DecodeAlgorithm": "algo-ir/0.3",
+    "DecodeFlowKernel": "flow-ir/0.3",
+    "DecodeNativeKernel": "arch-ir/0.3",
 }
 
 
 _ENUMS = {
     c.__name__: c
-    for module in (algorithm, schedule)
+    for module in (algorithm, schedule, decode)
     for c in vars(module).values()
     if isinstance(c, type) and issubclass(c, Enum) and c is not Enum
 }
@@ -65,6 +72,10 @@ def encode(value):
         }
     if isinstance(value, tuple):
         return [encode(v) for v in value]
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("non-finite float in IR")
+        return value
     if value is None or type(value) in (str, int, bool):
         return value
     raise ValueError(f"unsupported IR value: {type(value).__name__}")

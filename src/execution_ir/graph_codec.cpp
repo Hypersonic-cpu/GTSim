@@ -17,9 +17,19 @@ template <class T> T read(const std::filesystem::path& path) {
     return result;
 }
 Kernel read_kernel(const std::filesystem::path& path) {
-    auto k = read<Kernel>(path);
-    if (k.record != "ExecKernel" || k.format != "gtsim.exec.kernel/1" ||
-        k.schema_version != 1 || k.target != "sm90")
+    std::ifstream file(path);
+    if (!file) throw std::invalid_argument("cannot open " + path.string());
+    std::string text((std::istreambuf_iterator<char>(file)), {});
+    Kernel k;
+    constexpr auto options = glz::opts{.error_on_unknown_keys = true,
+                                       .error_on_missing_keys = false};
+    if (auto error = glz::read<options>(k, text))
+        throw std::invalid_argument(path.string() + ": " +
+                                    glz::format_error(error, text));
+    if (k.record != "ExecKernel" ||
+        !((k.format == "gtsim.exec.kernel/1" && k.schema_version == 1) ||
+          (k.format == "gtsim.exec.kernel/2" && k.schema_version == 2)) ||
+        k.target != "sm90")
         throw std::invalid_argument(
             "unsupported execution kernel format/target");
     for (const auto& t : k.tensors)

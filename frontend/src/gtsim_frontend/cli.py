@@ -12,7 +12,7 @@ from . import driver
 def main():
     parser = argparse.ArgumentParser(prog="gtsim-ir")
     parser.add_argument(
-        "command", choices=("compile", "run", "inspect", "verify", "validate")
+        "command", choices=("compile", "run", "decode", "inspect", "verify", "validate")
     )
     parser.add_argument("kernel", nargs="?", choices=("gemm", "fa3"))
     parser.add_argument("--input", type=Path)
@@ -36,6 +36,12 @@ def main():
     parser.add_argument("--runner", default="build/gtsim_program")
     parser.add_argument("--out-dir", default="validation/results/ir-framework/run")
     parser.add_argument("--launch-overhead-cycles", type=int, default=0)
+    parser.add_argument("--batch-size", type=int, choices=(1, 8, 16), default=1)
+    parser.add_argument("--layers", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--context-lengths", type=int, nargs="+")
+    parser.add_argument("--split-count", type=int)
+    parser.add_argument("--routing-seed", type=int, default=0)
+    parser.add_argument("--routing-trace", type=Path)
     parser.add_argument("--oracle", default="legacy")
     parser.add_argument("--suite", default="h100-v0.1.0")
     args = parser.parse_args()
@@ -70,6 +76,42 @@ def main():
             from .validation import validate
 
             validate(args)
+            return
+        if args.command == "decode":
+            from .programs.qwen3_decode import build as build_decode, load_routing_trace
+
+            routing_trace = (
+                load_routing_trace(args.routing_trace, args.layers, args.batch_size)
+                if args.routing_trace
+                else None
+            )
+            program, summary = build_decode(
+                batch_size=args.batch_size,
+                layers=args.layers,
+                context_lengths=args.context_lengths,
+                split_count=args.split_count,
+                routing_seed=args.routing_seed,
+                routing_trace=routing_trace,
+            )
+            summary["routing_source"] = (
+                "provided_trace" if routing_trace is not None else "synthetic_seeded"
+            )
+            output = args.out_dir
+            if output == "validation/results/ir-framework/run":
+                output = f"validation/results/qwen3-30b-a3b-decode/b{args.batch_size}-l{args.layers}"
+            timeline = driver.run_decode(
+                program,
+                summary,
+                output,
+                args.runner,
+                args.architecture,
+                args.memory_config,
+                args.launch_overhead_cycles,
+            )
+            print(
+                f"Decode cycles: {timeline['stream']['duration_cycles']}; "
+                f"kernels: {len(timeline['kernels'])}; layers: {len(timeline['layers_summary'])}"
+            )
             return
         if args.input:
             program = loads(args.input.read_text())

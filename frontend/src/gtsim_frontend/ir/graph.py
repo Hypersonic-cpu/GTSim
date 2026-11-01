@@ -8,6 +8,7 @@ HOPPER_OPS = {
     "cp.sram2dram_tma": "ST",
     "st.reg2sram": "ST",
     "wgmma.m64n64k16": "Tensor",
+    "mma.sync.m16n8k16": "Tensor",
     "local_max": "SIMD",
     "reduce_max": "SIMD",
     "merge_max": "SIMD",
@@ -22,6 +23,23 @@ HOPPER_OPS = {
     "scores_scale": "SFU",
     "exp2": "SFU",
     "acc_o_div": "SFU",
+    "simd.add": "SIMD",
+    "simd.sub": "SIMD",
+    "simd.mul": "SIMD",
+    "simd.fma": "SIMD",
+    "simd.max": "SIMD",
+    "simd.min": "SIMD",
+    "simd.cast": "SIMD",
+    "simd.fill": "SIMD",
+    "simd.identity": "SIMD",
+    "sfu.exp": "SFU",
+    "sfu.log": "SFU",
+    "sfu.sqrt": "SFU",
+    "sfu.rsqrt": "SFU",
+    "sfu.divide": "SFU",
+    "sfu.sin": "SFU",
+    "sfu.cos": "SFU",
+    "shfl": "SHFL",
 }
 
 
@@ -69,6 +87,7 @@ class FlatKernel(Header):
     tensors: tuple[KernelTensor, ...] = ()
     ctas: tuple[CTA, ...] = ()
     ops: tuple[ArchInstruction, ...] = ()
+    partial_outputs: tuple[int, ...] = ()
     outputs: tuple[int, ...] = ()
 
     def verify(self):
@@ -85,7 +104,7 @@ class FlatKernel(Header):
                 type(t.id) is int
                 and t.id >= 0
                 and bool(t.name)
-                and t.dtype == "fp16"
+                and t.dtype in ("fp16", "bf16", "fp32", "int32")
                 and t.tier == "HBM"
                 and len(t.shape) == len(t.strides) == 2
                 and all(type(d) is int and d > 0 for d in t.shape)
@@ -110,16 +129,26 @@ class FlatKernel(Header):
         )
         ctas = {c.id: c for c in self.ctas}
         require(len(ctas) == len(self.ctas), self.symbol, "duplicate CTA")
+        warp_bases = {}
+        sm_next_subpartition = {}
+        next_warp_id = 0
         for c in self.ctas:
             require(
                 c.id >= 0
                 and c.sm >= 0
-                and c.warps == 12
+                and 1 <= c.warps <= 32
                 and 0 < c.shared_bytes <= 228 * 1024
                 and 0 < c.register_bytes <= 256 * 1024,
                 self.symbol,
                 "invalid reference CTA resources",
             )
+            desired = sm_next_subpartition.get(c.sm, 0) % 4
+            next_warp_id += (desired + 4 - next_warp_id % 4) % 4
+            warp_bases[c.id] = next_warp_id
+            next_warp_id += c.warps
+            sm_next_subpartition[c.sm] = (
+                sm_next_subpartition.get(c.sm, 0) + c.warps
+            ) % 4
         require(
             tuple(o.id for o in self.ops) == tuple(range(len(self.ops))),
             self.symbol,
@@ -129,6 +158,12 @@ class FlatKernel(Header):
             len(set(self.outputs)) == len(self.outputs),
             self.symbol,
             "duplicate output tensor",
+        )
+        require(
+            len(set(self.partial_outputs)) == len(self.partial_outputs)
+            and set(self.partial_outputs) <= set(self.outputs),
+            self.symbol,
+            "invalid partial output contract",
         )
         tensors = {t.id: t for t in self.tensors}
         writes = {o.tensor for o in self.ops if o.op == "cp.sram2dram_tma"}
@@ -146,7 +181,14 @@ class FlatKernel(Header):
                 if o.op == "cp.sram2dram_tma" and o.tensor == output
             ]
             require(
-                sum(r[2] * r[3] for r in regions) == tensor.shape[0] * tensor.shape[1],
+                0
+                < sum(r[2] * r[3] for r in regions)
+                <= tensor.shape[0] * tensor.shape[1]
+                and (
+                    output in self.partial_outputs
+                    or sum(r[2] * r[3] for r in regions)
+                    == tensor.shape[0] * tensor.shape[1]
+                ),
                 self.symbol,
                 "incomplete native output coverage",
             )
@@ -169,18 +211,32 @@ class FlatKernel(Header):
                 "unsupported native op or pipeline",
             )
             require(
-                o.cta in ctas and o.cta * 12 <= o.warp < o.cta * 12 + 12,
+                o.cta in ctas
+                and warp_bases[o.cta] <= o.warp < warp_bases[o.cta] + ctas[o.cta].warps,
                 o.name,
                 "invalid CTA/warp",
             )
             require(
-                o.dtype in ("fp16", "fp32")
+                o.dtype in ("fp16", "bf16", "fp32", "int32")
                 and len(o.tile) == 4
                 and min(o.tile[:2]) >= 0
                 and min(o.tile[2:]) > 0,
                 o.name,
                 "invalid dtype or tile",
             )
+            if o.op in ("cp.dram2sram_tma", "cp.sram2dram_tma"):
+                require(o.tensor in tensors, o.name, "unbound global-memory tensor")
+                tensor = tensors[o.tensor]
+                row, col, rows, columns = o.tile
+                require(
+                    row + rows <= tensor.shape[0]
+                    and col + columns <= tensor.shape[1]
+                    and o.leading_dim == tensor.strides[0]
+                    and o.dtype == tensor.dtype
+                    and (o.op != "cp.sram2dram_tma" or not tensor.read_only),
+                    o.name,
+                    "global-memory type, region, or visibility mismatch",
+                )
             for dep in edges[o.id]:
                 require(
                     dep in edges and dep != o.id, o.name, "dangling or self dependency"
