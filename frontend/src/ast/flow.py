@@ -1,7 +1,7 @@
 """Explicit scheduled operations; no algorithm-family dispatch or presets."""
 
 from dataclasses import dataclass
-from .common import Header, Tensor, DataType, StaticIf
+from .common import Header, Tensor, DataType, StaticIf, StaticBinding
 from .algorithm import MathOperation
 from .profiles import ScheduleConfig
 from .schedule import (
@@ -18,6 +18,7 @@ from .schedule import (
     Buffer,
     BufferView,
     DependencyRule,
+    TileLoop,
 )
 from .mapping import Mapping
 
@@ -39,6 +40,10 @@ class FlowOp:
     event: str | None
     cast: DataType | None
     implements: str | None
+    iterations: tuple[TileLoop, ...]
+    work_shape: tuple[int | str, ...]
+    guard: str
+    static_args: tuple[StaticBinding, ...]
 
 
 @dataclass(frozen=True)

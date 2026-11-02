@@ -1,0 +1,55 @@
+flow.kernel @norm_rope_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %HEADS : index
+  static.param %D : index
+  static.param %INPUT_WIDTH : index
+  static.param %OFFSET : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.param %THETA : fp32
+  static.param %EPS : fp32
+  static.let %HEAD_ROWS = %B*%HEADS
+  static.let %REQUEST = floordiv(%cta,%HEADS)
+  static.let %HEAD = %cta mod %HEADS
+  static.let %HALF = floordiv(%D,2)
+  flow.tensor @Input : tensor<BxINPUT_WIDTHxbf16, row_major>
+  flow.tensor @Weight : tensor<1xDxbf16, row_major>
+  flow.tensor @Output : tensor<HEAD_ROWSxDxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %HEAD_ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %x, !x_ready = flow.load_async @x @Input[%REQUEST, %OFFSET+%HEAD*%D]<1xD> by %producer : tensor<1xDxbf16> scope<pipeline>
+    %weight, !weight_ready = flow.load_async @weight @Weight[0, 0]<1xD> by %producer : tensor<1xDxbf16> scope<pipeline>
+    %x_fp32 = flow.arithmetic @x_fp32 implements<@x_fp32> reads[%x] after[@x.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %square = flow.arithmetic @square implements<@square> reads[%x_fp32] after[@x_fp32.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %sum = flow.reduction @sum implements<@sum> reads[%square] after[@square.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xD>
+    %mean = flow.arithmetic @mean implements<@mean> reads[%sum] after[@sum.complete:data] : tensor<1x1xfp32> scope<pipeline> static.args<divisor=%D>
+    %mean_eps = flow.arithmetic @mean_eps implements<@mean_eps> reads[%mean] after[@mean.complete:data] : tensor<1x1xfp32> scope<pipeline> static.args<epsilon=%EPS>
+    %inv = flow.special_function @inv implements<@inv> reads[%mean_eps] after[@mean_eps.complete:data] : tensor<1x1xfp32> scope<pipeline>
+    %unit = flow.arithmetic @unit implements<@unit> reads[%x_fp32, %inv] after[@x_fp32.complete:data, @inv.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %weight_fp32 = flow.arithmetic @weight_fp32 implements<@weight_fp32> reads[%weight] after[@weight.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %normalized = flow.arithmetic @normalized implements<@normalized> reads[%unit, %weight_fp32] after[@unit.complete:data, @weight_fp32.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %log_theta = flow.special_function @log_theta implements<@log_theta> reads[] : tensor<1x1xfp32> scope<pipeline> static.args<theta=%THETA>
+    %exponent = flow.arithmetic @exponent implements<@exponent> reads[%log_theta] after[@log_theta.complete:data] : tensor<1xHALFxfp32> scope<pipeline> static.args<coefficient=-2/%D, channels=iota(%HALF)>
+    %frequency = flow.special_function @frequency implements<@frequency> reads[%exponent] after[@exponent.complete:data] : tensor<1xHALFxfp32> scope<pipeline>
+    %angle = flow.arithmetic @angle implements<@angle> reads[%frequency] after[@frequency.complete:data] : tensor<1xHALFxfp32> scope<pipeline> static.args<position=%CONTEXTS[%REQUEST]>
+    %cos = flow.special_function @cos implements<@cos> reads[%angle] after[@angle.complete:data] : tensor<1xHALFxfp32> scope<pipeline>
+    %sin = flow.special_function @sin implements<@sin> reads[%angle] after[@angle.complete:data] : tensor<1xHALFxfp32> scope<pipeline>
+    %rotate = flow.arithmetic @rotate implements<@rotate> reads[%normalized] after[@normalized.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %signed_rotate = flow.arithmetic @signed_rotate implements<@signed_rotate> reads[%rotate] after[@rotate.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %original_cos = flow.arithmetic @original_cos implements<@original_cos> reads[%normalized, %cos] after[@normalized.complete:data, @cos.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %rotated_sin = flow.arithmetic @rotated_sin implements<@rotated_sin> reads[%signed_rotate, %sin] after[@signed_rotate.complete:data, @sin.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %add = flow.arithmetic @add implements<@add> reads[%original_cos, %rotated_sin] after[@original_cos.complete:data, @rotated_sin.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%add] after[@add.complete:data] : tensor<1xDxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @Output[%cta, 0]<1xD> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @norm_rope_mapping flow<@norm_rope_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

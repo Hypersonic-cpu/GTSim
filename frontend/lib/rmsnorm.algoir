@@ -1,0 +1,29 @@
+algo.kernel @rmsnorm(%X: tensor<ROWSxWIDTHxbf16>, %Weight: tensor<1xWIDTHxbf16>)
+    -> (%Output: tensor<ROWSxWIDTHxbf16>) {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  static.param %EPS : fp32
+  algo.domain %row in [0, 1)
+  algo.compute @x_fp32 result<%x_fp32> semantics<cast_fp32(x)>
+  algo.op @x_fp32 category<convert> cost<none> dtype<fp32> inputs[%x] output[%x_fp32] reduction[]
+  algo.compute @square result<%square> semantics<cast_fp32(X) * cast_fp32(X)>
+  algo.op @square category<arithmetic> cost<multiply> dtype<fp32> inputs[%x_fp32] output[%square] reduction[]
+  algo.compute @sum_square result<%sum_square> semantics<sum_D(square)>
+  algo.op @sum_square category<reduction> cost<sum> dtype<fp32> inputs[%square] output[%sum_square] reduction[]
+  algo.compute @mean result<%mean> semantics<sum_square / WIDTH>
+  algo.op @mean category<arithmetic> cost<divide> dtype<fp32> inputs[%sum_square] output[%mean] reduction[]
+  algo.compute @mean_eps result<%mean_eps> semantics<mean + EPS>
+  algo.op @mean_eps category<arithmetic> cost<simple> dtype<fp32> inputs[%mean] output[%mean_eps] reduction[]
+  algo.compute @inv_rms result<%inv_rms> semantics<rsqrt(mean_eps)>
+  algo.op @inv_rms category<special_function> cost<root> dtype<fp32> inputs[%mean_eps] output[%inv_rms] reduction[]
+  algo.compute @normalized result<%normalized> semantics<cast_fp32(X) * inv_rms>
+  algo.op @normalized category<arithmetic> cost<multiply> dtype<fp32> inputs[%x_fp32, %inv_rms] output[%normalized] reduction[]
+  algo.compute @weight_fp32 result<%weight_fp32> semantics<cast_fp32(weight)>
+  algo.op @weight_fp32 category<convert> cost<none> dtype<fp32> inputs[%weight] output[%weight_fp32] reduction[]
+  algo.compute @scaled result<%scaled> semantics<normalized * Weight>
+  algo.op @scaled category<arithmetic> cost<multiply> dtype<fp32> inputs[%normalized, %weight_fp32] output[%scaled] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(scaled)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%scaled] output[%cast] reduction[]
+  algo.compute @contract_Output result<%Output> semantics<cast_bf16((cast_fp32(X) * rsqrt(mean_D(cast_fp32(X)^2)+EPS)) * cast_fp32(Weight))>
+}

@@ -1,0 +1,26 @@
+algo.kernel @fa3_combine(%Partial: tensor<PART_ROWSxDxfp32>, %LSE: tensor<PART_ROWSx1xfp32>)
+    -> (%O: tensor<BxQWIDTHxbf16>) {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %D : index
+  static.param %S : index
+  static.param %NUM_SMS : index
+  algo.domain %row in [0, 1)
+  algo.compute @max_lse result<%max_lse> semantics<max_s(LSE_s)>
+  algo.op @max_lse category<reduction> cost<extremum> dtype<fp32> inputs[%lse] output[%max_lse] reduction[]
+  algo.compute @delta result<%delta> semantics<LSE_s-max_lse>
+  algo.op @delta category<arithmetic> cost<simple> dtype<fp32> inputs[%lse, %max_lse] output[%delta] reduction[]
+  algo.compute @weights result<%weights> semantics<exp(delta)>
+  algo.op @weights category<special_function> cost<exponential> dtype<fp32> inputs[%delta] output[%weights] reduction[]
+  algo.compute @denominator result<%denominator> semantics<sum_s(weights)>
+  algo.op @denominator category<reduction> cost<sum> dtype<fp32> inputs[%weights] output[%denominator] reduction[]
+  algo.compute @weighted result<%weighted> semantics<weights_s*Partial_s>
+  algo.op @weighted category<arithmetic> cost<multiply> dtype<fp32> inputs[%weights, %partial] output[%weighted] reduction[]
+  algo.compute @numerator result<%numerator> semantics<sum_s(weighted)>
+  algo.op @numerator category<reduction> cost<sum> dtype<fp32> inputs[%weighted] output[%numerator] reduction[]
+  algo.compute @normalize result<%normalize> semantics<numerator/denominator>
+  algo.op @normalize category<arithmetic> cost<divide> dtype<fp32> inputs[%numerator, %denominator] output[%normalize] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(normalize)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%normalize] output[%cast] reduction[]
+  algo.compute @contract_O result<%O> semantics<O[b,h*D:(h+1)*D] = cast_bf16(sum_s(exp(LSE_s-max_s(LSE))*Partial_s)/sum_s(exp(LSE_s-max_s(LSE))))>
+}

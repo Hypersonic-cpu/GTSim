@@ -19,7 +19,7 @@ def region(source, row, column, shape):
     return A.SymbolicRegion(source.tensor, (index(row), index(column)), shape)
 
 
-def select(op, flow, operand_positions):
+def _select(op, flow, operand_positions):
     p = flow.config
     bm, bn, bk = p.tile_shape
     mm, mn, mk = p.matrix_shape
@@ -52,6 +52,9 @@ def select(op, flow, operand_positions):
                 ),
                 op.dependencies,
                 (),
+                (),
+                "true",
+                op.static_args,
             )
         )
     elif op.kind == A.OpKind.MATRIX:
@@ -78,6 +81,9 @@ def select(op, flow, operand_positions):
                 None,
                 op.dependencies,
                 (),
+                (),
+                "true",
+                op.static_args,
             )
         )
     elif op.kind == A.OpKind.STORE:
@@ -109,6 +115,9 @@ def select(op, flow, operand_positions):
                 None,
                 staging,
                 (),
+                (),
+                "true",
+                op.static_args,
             )
         )
         tensor = next(t for t in flow.tensors if t.id == op.region.tensor)
@@ -123,11 +132,68 @@ def select(op, flow, operand_positions):
                 dimension(tensor.shape[1]),
                 final,
                 (0,),
+                (),
+                "true",
+                op.static_args,
             )
         )
     elif op.kind not in (A.OpKind.ACQUIRE, A.OpKind.RELEASE):
         raise ValueError(f"no Hopper instruction pattern for {op.kind.value}")
     return A.NativePattern(op.id, op.scope, tuple(steps), op.dependencies)
+
+
+def select(op, flow, positions):
+    from dataclasses import replace
+
+    if op.kind == A.OpKind.MATRIX and op.region is None:
+        return A.NativePattern(
+            op.id,
+            op.scope,
+            (
+                A.NativeStep(
+                    A.NativeOpcode.MATRIX,
+                    A.ExecutionResource.MATRIX,
+                    index("%executor"),
+                    op.iterations,
+                    None,
+                    op.results[0].dtype,
+                    None,
+                    op.dependencies,
+                    (),
+                    op.work_shape,
+                    op.guard,
+                    op.static_args,
+                ),
+            ),
+            op.dependencies,
+        )
+    if "bulk_copy_exact" in op.capabilities:
+        from .vector import select_vector
+
+        return select_vector(op, flow)
+    if op.kind in (A.OpKind.ARITHMETIC, A.OpKind.SPECIAL_FUNCTION, A.OpKind.REDUCTION):
+        from .vector import select_vector
+
+        return select_vector(op, flow)
+    if not any(item.kind == A.OpKind.MATRIX for item in flow.ops) and op.kind in (
+        A.OpKind.COPY,
+        A.OpKind.STORE,
+    ):
+        from .vector import select_vector
+
+        return select_vector(op, flow)
+    if flow.config.warpgroup == 1:
+        from .skinny import select_skinny
+
+        return select_skinny(op, flow, positions)
+    pattern = _select(op, flow, positions)
+    return replace(
+        pattern,
+        steps=tuple(
+            replace(step, loops=op.iterations + step.loops, guard=op.guard)
+            for step in pattern.steps
+        ),
+    )
 
 
 def lower_region(flow):
@@ -143,6 +209,25 @@ def lower_region(flow):
     bm, bn, _ = p.tile_shape
     registers = p.warps * 32 * base_registers * 4 + bm * bn * 4
     cta_variable = flow.domain.loops[0].variable
+    from dataclasses import replace
+
+    patterns = tuple(select(op, flow, positions) for op in flow.ops)
+    tensors = {tensor.id: tensor for tensor in flow.tensors}
+    patterns = tuple(
+        replace(
+            pattern,
+            steps=tuple(
+                replace(
+                    step, leading_dim=dimension(tensors[step.region.tensor].shape[1])
+                )
+                if step.opcode in (A.NativeOpcode.TMA_LOAD, A.NativeOpcode.TMA_STORE)
+                and step.leading_dim is None
+                else step
+                for step in pattern.steps
+            ),
+        )
+        for pattern in patterns
+    )
     return A.ArchRegion(
         flow.symbol,
         flow.static,
@@ -162,11 +247,19 @@ def lower_region(flow):
             registers,
         ),
         A.AsyncProtocol(p.stages, 1, 0, A.Phase.COMPLETE),
-        tuple(select(op, flow, positions) for op in flow.ops),
+        patterns,
         flow.dependency_rules,
         flow.static_ifs,
         cta_variable,
-        index("%" + cta_variable),
+        index(
+            "%"
+            + cta_variable
+            + (
+                " mod %NUM_SMS"
+                if flow.mapping.placement == A.Placement.ROUND_ROBIN
+                else ""
+            )
+        ),
         flow.after,
         flow.origin,
     )

@@ -1,0 +1,39 @@
+flow.kernel @expert_histogram_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  static.let %EO = %E+1
+  static.let %ASSIGNMENTS = %B*%TK
+  flow.tensor @ExpertIDs : tensor<BxTKxint32, row_major>
+  flow.tensor @Counts : tensor<1xExint32, row_major>
+  flow.tensor @Offsets : tensor<1xEOxint32, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to 1 step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  static.if <%k==0> {
+    flow.dependency_rule @scan_state from[@histogram.complete] at[%wave = %wave] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @scan_state from[@scan.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  flow.dependency_rule @scan_last from[@scan.complete] at[%wave = %wave, %k = ilog2(%E)-1] select<all>
+  %ids, !ids_ready = flow.load_async @ids @ExpertIDs[%row, 0]<1xTK> by %producer : tensor<1xTKxint32> scope<prologue> iterate<%row = 0 to %B>
+  %zero = flow.arithmetic @zero implements<@zero> reads[] : tensor<1xExint32> scope<prologue>
+  %histogram = flow.arithmetic @histogram implements<@histogram> reads[%ids, %zero] after[@ids.complete:data, @zero.complete:data] : tensor<1xExint32> scope<prologue> work<ASSIGNMENTSx1>
+  flow.pipeline @loop %k = 0 to ilog2(%E) step 1 depth(1) generation_counts_per_wave[1] {
+    %shift = flow.arithmetic @shift implements<@shift> reads[] after[@histogram.complete:scan_state, @scan.complete:scan_state] : tensor<1xExint32> scope<pipeline>
+    %scan = flow.arithmetic @scan implements<@scan> reads[%shift] after[@shift.complete:data, @histogram.complete:scan_state, @scan.complete:scan_state] : tensor<1xExint32> scope<pipeline>
+  }
+  %exclusive = flow.arithmetic @exclusive implements<@exclusive> reads[%scan] after[@scan.complete:scan_last] : tensor<1xEOxint32> scope<epilogue>
+  !counts_done = flow.store_async @counts reads[%histogram] cast<int32> to @Counts[0, 0]<1xE> by %producer after[@histogram.complete:data] scope<epilogue>
+  !offsets_done = flow.store_async @offsets reads[%exclusive] cast<int32> to @Offsets[0, 0]<1xEO> by %producer after[@exclusive.complete:data] scope<epilogue>
+}
+mapping.program @expert_histogram_mapping flow<@expert_histogram_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

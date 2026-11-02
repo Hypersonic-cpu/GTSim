@@ -1,0 +1,11 @@
+algo.kernel @kv_append(%Knew: tensor<HEAD_ROWSxDxbf16>, %Vnew: tensor<HEAD_ROWSxDxbf16>)
+    -> (%Kcache: tensor<CACHE_ROWSxDxbf16>, %Vcache: tensor<CACHE_ROWSxDxbf16>) {
+  static.param %B : index
+  static.param %KVH : index
+  static.param %D : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  algo.domain %row in [0, 1)
+  algo.compute @contract_Kcache result<%Kcache> semantics<Kcache[(prefix_sum(CONTEXTS,b)+b)*KVH+h*(CONTEXTS[b]+1)+CONTEXTS[b],:] = Knew[b*KVH+h,:]; all history rows retained>
+  algo.compute @contract_Vcache result<%Vcache> semantics<Vcache[(prefix_sum(CONTEXTS,b)+b)*KVH+h*(CONTEXTS[b]+1)+CONTEXTS[b],:] = Vnew[b*KVH+h,:]; all history rows retained>
+}

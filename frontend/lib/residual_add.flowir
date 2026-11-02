@@ -1,0 +1,28 @@
+flow.kernel @residual_add_flow schedule<explicit> target<sm90> {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  flow.tensor @X : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.tensor @Y : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.tensor @Output : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %x, !x_ready = flow.load_async @x @X[%cta, 0]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %y, !y_ready = flow.load_async @y @Y[%cta, 0]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %x_fp32 = flow.arithmetic @x_fp32 implements<@x_fp32> reads[%x] after[@x.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %y_fp32 = flow.arithmetic @y_fp32 implements<@y_fp32> reads[%y] after[@y.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %add = flow.arithmetic @add implements<@add> reads[%x_fp32, %y_fp32] after[@x_fp32.complete:data, @y_fp32.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%add] after[@add.complete:data] : tensor<1xWIDTHxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @Output[%cta, 0]<1xWIDTH> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @residual_add_mapping flow<@residual_add_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

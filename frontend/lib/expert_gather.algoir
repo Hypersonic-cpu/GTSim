@@ -1,0 +1,16 @@
+algo.kernel @expert_gather(%X: tensor<BxHxbf16>, %ExpertIDs: tensor<BxTKxint32>, %Probabilities: tensor<BxTKxbf16>, %Offsets: tensor<1xEOxint32>)
+    -> (%SortedX: tensor<ASSIGNMENTSxHxbf16>, %Assignments: tensor<ASSIGNMENTSx3xint32>, %SortedProbabilities: tensor<ASSIGNMENTSx1xbf16>) {
+  static.param %B : index
+  static.param %H : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  static.param %IDS : index_list
+  static.let %EO = %E+1
+  algo.domain %row in [0, 1)
+  algo.compute @assignment result<%assignment> semantics<(token,slot,expert), row=offset[expert]+rank_within_expert>
+  algo.op @assignment category<arithmetic> cost<simple> dtype<int32> inputs[%id, %offset] output[%assignment] reduction[]
+  algo.compute @contract_SortedX result<%SortedX> semantics<SortedX[r,:] = X[argsort_stable(IDS)[r]//TK,:]>
+  algo.compute @contract_Assignments result<%Assignments> semantics<Assignments[r,:] = (argsort_stable(IDS)[r]//TK,argsort_stable(IDS)[r] mod TK,IDS[argsort_stable(IDS)[r]])>
+  algo.compute @contract_SortedProbabilities result<%SortedProbabilities> semantics<SortedProbabilities[r,0] = Probabilities[Assignments[r,0],Assignments[r,1]]>
+}

@@ -1,0 +1,35 @@
+flow.kernel @rmsnorm_flow schedule<explicit> target<sm90> {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  static.param %EPS : fp32
+  flow.tensor @X : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.tensor @Weight : tensor<1xWIDTHxbf16, row_major>
+  flow.tensor @Output : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %x, !x_ready = flow.load_async @x @X[%cta, 0]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %weight, !weight_ready = flow.load_async @weight @Weight[0, 0]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %x_fp32 = flow.arithmetic @x_fp32 implements<@x_fp32> reads[%x] after[@x.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %square = flow.arithmetic @square implements<@square> reads[%x_fp32] after[@x_fp32.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %sum_square = flow.reduction @sum_square implements<@sum_square> reads[%square] after[@square.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xWIDTH>
+    %mean = flow.arithmetic @mean implements<@mean> reads[%sum_square] after[@sum_square.complete:data] : tensor<1x1xfp32> scope<pipeline> static.args<divisor=%WIDTH>
+    %mean_eps = flow.arithmetic @mean_eps implements<@mean_eps> reads[%mean] after[@mean.complete:data] : tensor<1x1xfp32> scope<pipeline> static.args<epsilon=%EPS>
+    %inv_rms = flow.special_function @inv_rms implements<@inv_rms> reads[%mean_eps] after[@mean_eps.complete:data] : tensor<1x1xfp32> scope<pipeline>
+    %normalized = flow.arithmetic @normalized implements<@normalized> reads[%x_fp32, %inv_rms] after[@x_fp32.complete:data, @inv_rms.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %weight_fp32 = flow.arithmetic @weight_fp32 implements<@weight_fp32> reads[%weight] after[@weight.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %scaled = flow.arithmetic @scaled implements<@scaled> reads[%normalized, %weight_fp32] after[@normalized.complete:data, @weight_fp32.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%scaled] after[@scaled.complete:data] : tensor<1xWIDTHxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @Output[%cta, 0]<1xWIDTH> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @rmsnorm_mapping flow<@rmsnorm_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

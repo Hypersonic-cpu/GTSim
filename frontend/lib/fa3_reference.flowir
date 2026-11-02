@@ -1,0 +1,91 @@
+flow.kernel @fa3_reference_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %Q_LENGTH : index
+  static.param %Q_TILE : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.let %QTILES = ceildiv(%Q_LENGTH,%Q_TILE)
+  static.let %CTAS = %B*%HQ*%QTILES
+  static.let %QROWS = %B*%HQ*%Q_LENGTH
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%HKV
+  static.let %QUERY_BLOCK = %cta mod %QTILES
+  static.let %HEAD = floordiv(%cta,%QTILES) mod %HQ
+  static.let %REQUEST = floordiv(%cta,%QTILES*%HQ)
+  static.let %KVHEAD = floordiv(%HEAD,floordiv(%HQ,%HKV))
+  static.let %LENGTH = %CONTEXTS[%REQUEST]+1
+  static.let %VALID = min(%TILE,%LENGTH-%k*%TILE)
+  static.let %CACHE_BASE = (prefix_sum(%CONTEXTS,%REQUEST)+%REQUEST)*%HKV+%KVHEAD*%LENGTH
+  static.let %QBASE = (%REQUEST*%HQ+%HEAD)*%Q_LENGTH+%QUERY_BLOCK*%Q_TILE
+  static.let %FR = floordiv(%Q_TILE,8)
+  static.require <%Q_LENGTH divisible_by 128, %Q_TILE == 128, %TILE == 128>
+  flow.tensor @Q : tensor<QROWSxDxbf16, row_major>
+  flow.tensor @K : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.tensor @V : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.tensor @O : tensor<QROWSxDxbf16, row_major>
+  flow.schedule_config tile(128x256x128) stages(2) warps(12) consumer_warps(8) producer_warp(8) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %CTAS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<163840>
+  static.if <%k>=2> {
+    flow.dependency_rule @reuse from[@pv.complete] at[%wave = %wave, %k = %k-2] select<all>
+  }
+  static.if <has_previous_fragment(%executor)> {
+    flow.dependency_rule @fragment from[@qk.complete, @pv.complete] at[%wave = %wave] select<last_per_executor>
+  }
+  flow.dependency_rule @lane from[@score.complete, @tile_max.complete, @max_new.complete, @alpha_delta.complete, @alpha.complete, @delta.complete, @probability.complete, @prob_sum.complete, @sum_scaled.complete, @sum_new.complete, @out_scaled.complete, @normalize.complete, @cast.complete, @log_sum.complete, @lse.complete, @qk.complete, @pv.complete, @prob_cast.complete] at[%wave = %wave, %k = %k, %executor = %executor] select<all>
+  flow.dependency_rule @last from[@pv.complete, @sum_new.complete] at[%wave = %wave, %k = ceildiv(%LENGTH,%TILE)-1, %executor = %executor] select<all>
+  static.if <%k==0> {
+    flow.dependency_rule @state_max_new from[@max_init.complete] at[%wave = %wave, %executor = %executor] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_max_new from[@max_new.complete] at[%wave = %wave, %k = %k-1, %executor = %executor] select<all>
+  }
+  static.if <%k==0> {
+    flow.dependency_rule @state_sum_new from[@sum_init.complete] at[%wave = %wave, %executor = %executor] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_sum_new from[@sum_new.complete] at[%wave = %wave, %k = %k-1, %executor = %executor] select<all>
+  }
+  static.if <%k==0> {
+    flow.dependency_rule @state_pv from[@out_init.complete] at[%wave = %wave, %executor = %executor] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_pv from[@pv.complete] at[%wave = %wave, %k = %k-1, %executor = %executor] select<all>
+  }
+  %query, !query_ready = flow.load_async @query @Q[%QBASE, 0]<Q_TILExD> by %producer requires<bulk_copy_exact> : tensor<Q_TILExDxbf16> scope<prologue>
+  %max_init = flow.arithmetic @max_init implements<@max_init> reads[] : tensor<FRx1xfp32> scope<prologue> iterate<%executor = 0 to 8> static.args<value=-inf>
+  %sum_init = flow.arithmetic @sum_init implements<@sum_init> reads[] : tensor<FRx1xfp32> scope<prologue> iterate<%executor = 0 to 8> static.args<value=0>
+  %out_init = flow.arithmetic @out_init implements<@out_init> reads[] : tensor<FRxDxfp32> scope<prologue> iterate<%executor = 0 to 8> static.args<value=0>
+  flow.pipeline @loop %k = 0 to ceildiv(%LENGTH,%TILE) step 1 depth(2) generation_counts_per_wave[1] {
+    %key, !key_ready = flow.load_async @key @K[%CACHE_BASE+%k*%TILE, 0]<VALIDxD> by %producer requires<bulk_copy_exact> after[@pv.complete:reuse] : tensor<VALIDxDxbf16> scope<pipeline>
+    %value, !value_ready = flow.load_async @value @V[%CACHE_BASE+%k*%TILE, 0]<VALIDxD> by %producer requires<bulk_copy_exact> after[@pv.complete:reuse] : tensor<VALIDxDxbf16> scope<pipeline>
+    %qk = flow.matmul @qk implements<@qk> reads[%query, %key] after[@query.complete:data, @key.complete:data, @qk.complete:fragment] : tensor<FRxTILExfp32> scope<pipeline> iterate<%executor = 0 to 8> iterate<%fragment = 0 to ceildiv(%D,16)*ceildiv(%TILE,64)> work<16x64>
+    %score = flow.arithmetic @score implements<@score> reads[%qk] after[@qk.complete:lane] : tensor<FRxTILExfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %tile_max = flow.reduction @tile_max implements<@tile_max> reads[%score] after[@score.complete:lane] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8> work<FRxTILE>
+    %max_new = flow.arithmetic @max_new implements<@max_new> reads[%tile_max] after[@tile_max.complete:lane, @max_init.complete:state_max_new, @max_new.complete:state_max_new] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %alpha_delta = flow.arithmetic @alpha_delta implements<@alpha_delta> reads[%max_new] after[@max_new.complete:lane, @max_init.complete:state_max_new, @max_new.complete:state_max_new] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %alpha = flow.special_function @alpha implements<@alpha> reads[%alpha_delta] after[@alpha_delta.complete:lane] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %delta = flow.arithmetic @delta implements<@delta> reads[%score, %max_new] after[@score.complete:lane, @max_new.complete:lane] : tensor<FRxTILExfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %probability = flow.special_function @probability implements<@probability> reads[%delta] after[@delta.complete:lane] : tensor<FRxTILExfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %prob_cast = flow.arithmetic @prob_cast implements<@prob_cast> reads[%probability] after[@probability.complete:lane] : tensor<FRxTILExbf16> scope<pipeline> iterate<%executor = 0 to 8>
+    %prob_sum = flow.reduction @prob_sum implements<@prob_sum> reads[%probability] after[@probability.complete:lane] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8> work<FRxTILE>
+    %sum_scaled = flow.arithmetic @sum_scaled implements<@sum_scaled> reads[%alpha] after[@alpha.complete:lane, @sum_init.complete:state_sum_new, @sum_new.complete:state_sum_new] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %sum_new = flow.arithmetic @sum_new implements<@sum_new> reads[%sum_scaled, %prob_sum] after[@sum_scaled.complete:lane, @prob_sum.complete:lane] : tensor<FRx1xfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %out_scaled = flow.arithmetic @out_scaled implements<@out_scaled> reads[%alpha] after[@alpha.complete:lane, @out_init.complete:state_pv, @pv.complete:state_pv] : tensor<FRxDxfp32> scope<pipeline> iterate<%executor = 0 to 8>
+    %pv = flow.matmul @pv implements<@pv> reads[%prob_cast, %value, %out_scaled] after[@prob_cast.complete:lane, @value.complete:data, @out_scaled.complete:lane, @pv.complete:fragment] : tensor<FRxDxfp32> scope<pipeline> iterate<%executor = 0 to 8> iterate<%fragment = 0 to ceildiv(%TILE,16)*ceildiv(%D,64)> work<16x64>
+  }
+  %normalize = flow.arithmetic @normalize implements<@normalize> reads[%pv, %sum_new] after[@pv.complete:last, @sum_new.complete:last] : tensor<FRxDxfp32> scope<epilogue> iterate<%executor = 0 to 8>
+  %cast = flow.arithmetic @cast implements<@cast> reads[%normalize] after[@normalize.complete:data] : tensor<FRxDxbf16> scope<epilogue> iterate<%executor = 0 to 8>
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @O[%QBASE+%executor*%FR, 0]<FRxD> by %producer requires<bulk_copy_exact> after[@cast.complete:data] scope<epilogue> iterate<%executor = 0 to 8>
+}
+mapping.program @fa3_reference_mapping flow<@fa3_reference_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

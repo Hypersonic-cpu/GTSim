@@ -11,6 +11,7 @@ class OperationClass(str, Enum):
     REDUCTION = "reduction"
     MATRIX = "matrix"
     CONVERT = "convert"
+    COLLECTIVE = "collective"
 
 
 class ArithmeticCost(str, Enum):
@@ -24,6 +25,10 @@ class SpecialFunction(str, Enum):
     EXPONENTIAL = "exponential"
     LOGARITHMIC = "logarithmic"
     ROOT = "root"
+
+
+class CollectiveKind(str, Enum):
+    SHUFFLE = "shuffle"
 
 
 class ReductionKind(str, Enum):
@@ -40,7 +45,7 @@ class AlgorithmTrait(str, Enum):
 class MathOperation:
     id: str
     category: OperationClass
-    cost: ArithmeticCost | SpecialFunction | ReductionKind | None
+    cost: ArithmeticCost | SpecialFunction | ReductionKind | CollectiveKind | None
     dtype: DataType
     inputs: tuple[str, ...]
     output: str

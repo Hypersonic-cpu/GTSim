@@ -26,8 +26,8 @@ Each lowering stage has its own Python file and may share common abstractions.
 The new implementation is independent of `src/gtsim_frontend/`. Program/Algorithm
 compilation composes explicitly supplied `.flowir` schedules into one symbolic
 FlowIR. Flow → Arch selects structured Hopper instructions. Arch → Exec resolves
-static scopes and expands loops into a concrete DAG. Automatic schedule synthesis
-and non-GEMM target patterns remain outside the implemented path.
+static scopes and expands loops into a concrete DAG. Automatic schedule synthesis remains outside the implemented path. Shared
+vector/SFU/reduction and Small-M MMA patterns support the textual Qwen example.
 
 ## AST conventions
 
@@ -59,6 +59,7 @@ ProgIR, FlowIR, or any other individual level. The common syntax AST defines
   argument expression without eagerly resolving it.
 - `static.let` defines a derived compile-time symbol, including tile indices.
 - `static.pred` defines a reusable boolean expression.
+- `static.args` retains compiler-resolved immediate operands on an operation.
 - `static.require` declares a compile-time parameter constraint.
 - `static.if`, `static.elif`, and `static.else` select source regions. The first
   matching branch is retained; an `else` branch is optional.
@@ -187,5 +188,25 @@ The two-GEMM example executed successfully through the existing runtime: the
 first region completed at cycle 11,899 and the second at 38,948, with zero launch
 overhead and persistent GPU/MemorySystem/L2 state. Each region's instructions,
 addresses, resources, and dependency edges matched the independent C++ reference
-for this example. This is focused GEMM evidence, not a full regression sweep or
-support for new attention/vector workloads.
+for this example. These numbers describe the two-GEMM fixture only; the textual Qwen comparison
+scope is documented below.
+
+## Operator library and Qwen block
+
+`frontend/lib/` contains reusable GEMM, grouped Small-M, FA3 full-query/Decode,
+and auxiliary operator text definitions. `frontend/asm/qwen3/one_block.progir`
+composes them into one real MoE decoder block. Parameter JSON files select B=1
+or B=16, histories, routing and split counts; the compiler contains no Qwen
+workload generator.
+
+Large workload validation defaults to per-kernel in-memory expansion/comparison,
+not serializing millions of DAG records. See
+[`asm/qwen3/README.md`](asm/qwen3/README.md) for commands and
+[`asm/qwen3/results.md`](asm/qwen3/results.md) for exact comparisons and limits.
+
+Iteration scopes reuse already validated static contexts. Parameter-only and
+CTA/K-dependent expressions are resolved once at their appropriate scope;
+last-fragment event selection uses indexed tails rather than rescanning history.
+This changes compiler CPU overhead, not simulated timing or DAG dependencies.
+`static.args` immediate operands are retained through Native IR and concretized
+only at IR-04 → IR-05.

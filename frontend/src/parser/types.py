@@ -43,6 +43,7 @@ def check(value, expected=None, location="IR"):
                 A.OperationClass.ARITHMETIC: A.ArithmeticCost,
                 A.OperationClass.SPECIAL_FUNCTION: A.SpecialFunction,
                 A.OperationClass.REDUCTION: A.ReductionKind,
+                A.OperationClass.COLLECTIVE: A.CollectiveKind,
             }
             cost_type = subtypes.get(value.category, type(None))
             if type(value.cost) is not cost_type:

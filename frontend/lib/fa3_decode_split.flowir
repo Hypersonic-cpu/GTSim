@@ -1,0 +1,92 @@
+flow.kernel @fa3_decode_split_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %S : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.let %QROWS = %B*%HQ
+  static.let %QWIDTH = %HQ*%D
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%HKV
+  static.let %PART_ROWS = %B*%HQ*%S
+  static.let %SPLIT = %cta mod %S
+  static.let %HEAD = floordiv(%cta,%S) mod %HQ
+  static.let %REQUEST = floordiv(%cta,%S*%HQ)
+  static.let %KVHEAD = floordiv(%HEAD,floordiv(%HQ,%HKV))
+  static.let %LENGTH = %CONTEXTS[%REQUEST]+1
+  static.let %START = floordiv(%LENGTH*%SPLIT,%S)
+  static.let %END = floordiv(%LENGTH*(%SPLIT+1),%S)
+  static.let %VALID = min(%TILE,%END-%START-%k*%TILE)
+  static.let %CACHE_BASE = (prefix_sum(%CONTEXTS,%REQUEST)+%REQUEST)*%HKV + %KVHEAD*%LENGTH
+  flow.tensor @Q : tensor<QROWSxDxbf16, row_major>
+  flow.tensor @K : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.tensor @V : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.tensor @Partial : tensor<PART_ROWSxDxfp32, row_major>
+  flow.tensor @LSE : tensor<PART_ROWSx1xfp32, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(1) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %PART_ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<131328>
+  static.if <%k>0> {
+    flow.dependency_rule @previous_k from[@score_scaled.complete] at[%wave = %wave, %k = %k-1] select<all>
+    flow.dependency_rule @previous_v from[@pv_add.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  flow.dependency_rule @last from[@pv_add.complete, @sum_new.complete, @max_new.complete] at[%wave = %wave, %k = ceildiv(%END-%START,%TILE)-1] select<all>
+  static.if <%k==0> {
+    flow.dependency_rule @state_max_new from[@max_init.complete] at[%wave = %wave] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_max_new from[@max_new.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  static.if <%k==0> {
+    flow.dependency_rule @state_sum_new from[@sum_init.complete] at[%wave = %wave] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_sum_new from[@sum_new.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  static.if <%k==0> {
+    flow.dependency_rule @state_pv_add from[@out_init.complete] at[%wave = %wave] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @state_pv_add from[@pv_add.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  %query, !query_ready = flow.load_async @query @Q[%REQUEST*%HQ+%HEAD, 0]<1xD> by %producer : tensor<1xDxbf16> scope<prologue>
+  %max_init = flow.arithmetic @max_init implements<@max_init> reads[] : tensor<1x1xfp32> scope<prologue> static.args<value=-inf>
+  %sum_init = flow.arithmetic @sum_init implements<@sum_init> reads[] : tensor<1x1xfp32> scope<prologue> static.args<value=0>
+  %out_init = flow.arithmetic @out_init implements<@out_init> reads[] : tensor<1xDxfp32> scope<prologue> static.args<value=0>
+  flow.pipeline @loop %k = 0 to ceildiv(%END-%START,%TILE) step 1 depth(1) generation_counts_per_wave[1] {
+    %key, !key_ready = flow.load_async @key @K[%CACHE_BASE+%START+%k*%TILE, 0]<VALIDxD> by %producer after[@score_scaled.complete:previous_k] : tensor<VALIDxDxbf16> scope<pipeline>
+    %value, !value_ready = flow.load_async @value @V[%CACHE_BASE+%START+%k*%TILE, 0]<VALIDxD> by %producer after[@pv_add.complete:previous_v] : tensor<VALIDxDxbf16> scope<pipeline>
+    %qk_product = flow.arithmetic @qk_product implements<@qk_product> reads[%query, %key] after[@query.complete:data, @key.complete:data] : tensor<VALIDxDxfp32> scope<pipeline>
+    %qk_sum = flow.reduction @qk_sum implements<@qk_sum> reads[%qk_product] after[@qk_product.complete:data] : tensor<1xVALIDxfp32> scope<pipeline> work<VALIDxD>
+    %score_scaled = flow.arithmetic @score_scaled implements<@score_scaled> reads[%qk_sum] after[@qk_sum.complete:data] : tensor<1xVALIDxfp32> scope<pipeline>
+    %tile_max = flow.reduction @tile_max implements<@tile_max> reads[%score_scaled] after[@score_scaled.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xVALID>
+    %max_new = flow.arithmetic @max_new implements<@max_new> reads[%tile_max] after[@tile_max.complete:data, @max_init.complete:state_max_new, @max_new.complete:state_max_new] : tensor<1x1xfp32> scope<pipeline>
+    %alpha_delta = flow.arithmetic @alpha_delta implements<@alpha_delta> reads[%max_new] after[@max_new.complete:data, @max_init.complete:state_max_new, @max_new.complete:state_max_new] : tensor<1x1xfp32> scope<pipeline>
+    %alpha = flow.special_function @alpha implements<@alpha> reads[%alpha_delta] after[@alpha_delta.complete:data] : tensor<1x1xfp32> scope<pipeline>
+    %score_delta = flow.arithmetic @score_delta implements<@score_delta> reads[%score_scaled, %max_new] after[@score_scaled.complete:data, @max_new.complete:data] : tensor<1xVALIDxfp32> scope<pipeline>
+    %probability = flow.special_function @probability implements<@probability> reads[%score_delta] after[@score_delta.complete:data] : tensor<1xVALIDxfp32> scope<pipeline>
+    %prob_sum = flow.reduction @prob_sum implements<@prob_sum> reads[%probability] after[@probability.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xVALID>
+    %sum_scaled = flow.arithmetic @sum_scaled implements<@sum_scaled> reads[%alpha] after[@alpha.complete:data, @sum_init.complete:state_sum_new, @sum_new.complete:state_sum_new] : tensor<1x1xfp32> scope<pipeline>
+    %sum_new = flow.arithmetic @sum_new implements<@sum_new> reads[%sum_scaled, %prob_sum] after[@sum_scaled.complete:data, @prob_sum.complete:data] : tensor<1x1xfp32> scope<pipeline>
+    %out_scaled = flow.arithmetic @out_scaled implements<@out_scaled> reads[%alpha] after[@alpha.complete:data, @out_init.complete:state_pv_add, @pv_add.complete:state_pv_add] : tensor<1xDxfp32> scope<pipeline>
+    %probability_bf16 = flow.arithmetic @probability_bf16 implements<@probability_bf16> reads[%probability] after[@probability.complete:data] : tensor<1xVALIDxbf16> scope<pipeline>
+    %pv_product = flow.arithmetic @pv_product implements<@pv_product> reads[%probability_bf16, %value] after[@probability_bf16.complete:data, @value.complete:data] : tensor<VALIDxDxfp32> scope<pipeline>
+    %pv_sum = flow.reduction @pv_sum implements<@pv_sum> reads[%pv_product] after[@pv_product.complete:data] : tensor<1xDxfp32> scope<pipeline> work<VALIDxD>
+    %pv_add = flow.arithmetic @pv_add implements<@pv_add> reads[%out_scaled, %pv_sum] after[@out_scaled.complete:data, @pv_sum.complete:data] : tensor<1xDxfp32> scope<pipeline>
+  }
+  %normalize = flow.arithmetic @normalize implements<@normalize> reads[%pv_add, %sum_new] after[@pv_add.complete:last, @sum_new.complete:last] : tensor<1xDxfp32> scope<epilogue>
+  %log_sum = flow.special_function @log_sum implements<@log_sum> reads[%sum_new] after[@sum_new.complete:last] : tensor<1x1xfp32> scope<epilogue>
+  %lse = flow.arithmetic @lse implements<@lse> reads[%max_new, %log_sum] after[@max_new.complete:last, @log_sum.complete:data] : tensor<1x1xfp32> scope<epilogue>
+  !lse_out_done = flow.store_async @lse_out reads[%lse] cast<fp32> to @LSE[%cta, 0]<1x1> by %producer after[@lse.complete:data] scope<epilogue>
+  !partial_out_done = flow.store_async @partial_out reads[%normalize] cast<fp32> to @Partial[%cta, 0]<1xD> by %producer after[@normalize.complete:data] scope<epilogue>
+}
+mapping.program @fa3_decode_split_mapping flow<@fa3_decode_split_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

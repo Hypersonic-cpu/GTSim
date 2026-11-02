@@ -1,0 +1,57 @@
+algo.kernel @fa3_decode(%Q: tensor<QROWSxDxbf16>, %K: tensor<CACHE_ROWSxDxbf16>, %V: tensor<CACHE_ROWSxDxbf16>)
+    -> (%O: tensor<BxQWIDTHxbf16>) {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %S : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  algo.domain %row in [0, 1)
+  algo.compute @max_init result<%max_init> semantics<-inf>
+  algo.op @max_init category<arithmetic> cost<simple> dtype<fp32> inputs[] output[%max_init] reduction[]
+  algo.compute @sum_init result<%sum_init> semantics<0>
+  algo.op @sum_init category<arithmetic> cost<simple> dtype<fp32> inputs[] output[%sum_init] reduction[]
+  algo.compute @out_init result<%out_init> semantics<zeros(D)>
+  algo.op @out_init category<arithmetic> cost<simple> dtype<fp32> inputs[] output[%out_init] reduction[]
+  algo.compute @qk_product result<%qk_product> semantics<cast_fp32(Q) * cast_fp32(K)>
+  algo.op @qk_product category<arithmetic> cost<multiply> dtype<fp32> inputs[%query, %key] output[%qk_product] reduction[]
+  algo.compute @qk_sum result<%qk_sum> semantics<sum_D(qk_product)>
+  algo.op @qk_sum category<reduction> cost<sum> dtype<fp32> inputs[%qk_product] output[%qk_sum] reduction[]
+  algo.compute @score_scaled result<%score_scaled> semantics<qk_sum / sqrt(D)>
+  algo.op @score_scaled category<arithmetic> cost<multiply> dtype<fp32> inputs[%qk_sum] output[%score_scaled] reduction[]
+  algo.compute @tile_max result<%tile_max> semantics<max_KV(score_scaled)>
+  algo.op @tile_max category<reduction> cost<extremum> dtype<fp32> inputs[%score_scaled] output[%tile_max] reduction[]
+  algo.compute @max_new result<%max_new> semantics<max(m_prev,tile_max)>
+  algo.op @max_new category<arithmetic> cost<simple> dtype<fp32> inputs[%tile_max] output[%max_new] reduction[]
+  algo.compute @alpha_delta result<%alpha_delta> semantics<m_prev-max_new>
+  algo.op @alpha_delta category<arithmetic> cost<simple> dtype<fp32> inputs[%max_new] output[%alpha_delta] reduction[]
+  algo.compute @alpha result<%alpha> semantics<exp(alpha_delta)>
+  algo.op @alpha category<special_function> cost<exponential> dtype<fp32> inputs[%alpha_delta] output[%alpha] reduction[]
+  algo.compute @score_delta result<%score_delta> semantics<score_scaled - max_new>
+  algo.op @score_delta category<arithmetic> cost<simple> dtype<fp32> inputs[%score_scaled, %max_new] output[%score_delta] reduction[]
+  algo.compute @probability result<%probability> semantics<exp(score_delta)>
+  algo.op @probability category<special_function> cost<exponential> dtype<fp32> inputs[%score_delta] output[%probability] reduction[]
+  algo.compute @prob_sum result<%prob_sum> semantics<sum_KV(probability)>
+  algo.op @prob_sum category<reduction> cost<sum> dtype<fp32> inputs[%probability] output[%prob_sum] reduction[]
+  algo.compute @sum_scaled result<%sum_scaled> semantics<l_prev*alpha>
+  algo.op @sum_scaled category<arithmetic> cost<multiply> dtype<fp32> inputs[%alpha] output[%sum_scaled] reduction[]
+  algo.compute @sum_new result<%sum_new> semantics<sum_scaled+prob_sum>
+  algo.op @sum_new category<arithmetic> cost<simple> dtype<fp32> inputs[%sum_scaled, %prob_sum] output[%sum_new] reduction[]
+  algo.compute @out_scaled result<%out_scaled> semantics<o_prev*alpha>
+  algo.op @out_scaled category<arithmetic> cost<multiply> dtype<fp32> inputs[%alpha] output[%out_scaled] reduction[]
+  algo.compute @probability_bf16 result<%probability_bf16> semantics<cast_bf16(probability)>
+  algo.op @probability_bf16 category<convert> cost<none> dtype<bf16> inputs[%probability] output[%probability_bf16] reduction[]
+  algo.compute @pv_product result<%pv_product> semantics<cast_fp32(probability_bf16) * cast_fp32(V)>
+  algo.op @pv_product category<arithmetic> cost<multiply> dtype<fp32> inputs[%probability_bf16, %value] output[%pv_product] reduction[]
+  algo.compute @pv_sum result<%pv_sum> semantics<sum_KV(pv_product)>
+  algo.op @pv_sum category<reduction> cost<sum> dtype<fp32> inputs[%pv_product] output[%pv_sum] reduction[]
+  algo.compute @pv_add result<%pv_add> semantics<out_scaled+pv_sum>
+  algo.op @pv_add category<arithmetic> cost<simple> dtype<fp32> inputs[%out_scaled, %pv_sum] output[%pv_add] reduction[]
+  algo.compute @normalize result<%normalize> semantics<o_final / l_final>
+  algo.op @normalize category<arithmetic> cost<divide> dtype<fp32> inputs[%pv_add, %sum_new] output[%normalize] reduction[]
+  algo.compute @output_cast result<%output_cast> semantics<cast_bf16(normalize)>
+  algo.op @output_cast category<convert> cost<none> dtype<bf16> inputs[%normalize] output[%output_cast] reduction[]
+  algo.compute @contract_O result<%O> semantics<O[b,h*D:(h+1)*D] = cast_bf16(cast_bf16(softmax(Q[b*HQ+h,:] @ K[b,h//(HQ/HKV),0:CONTEXTS[b]+1,:].T / sqrt(D))) @ V[b,h//(HQ/HKV),0:CONTEXTS[b]+1,:])>
+}

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TypeAlias
 
 
 class DataType(str, Enum):
@@ -10,6 +11,8 @@ class DataType(str, Enum):
     FP32 = "fp32"
     INT32 = "int32"
     INDEX = "index"
+    INDEX_LIST = "index_list"
+    FLOAT_LIST = "float_list"
 
 
 class MemorySpace(str, Enum):
@@ -89,3 +92,8 @@ class Tensor:
 class Header:
     symbol: str
     static: StaticDeclarations
+
+
+ImmediateValue: TypeAlias = (
+    int | float | bool | ConstantValue | tuple[int | float | bool, ...]
+)

@@ -60,7 +60,7 @@ def export_runtime(execution, directory, launch_overhead_cycles=0):
                     pipeline=PIPELINES[node.resource],
                     cta=cta_ids[node.cta],
                     warp=node.warp - bases[node.cta] + local_bases[node.cta],
-                    tensor=node.tensor,
+                    tensor=node.tensor if node.tensor is not None else 0,
                     dtype=node.dtype.value,
                     leading_dim=node.leading_dim or 0,
                     tile=node.tile,
@@ -89,11 +89,24 @@ def export_runtime(execution, directory, launch_overhead_cycles=0):
                 for c in ctas
             ],
             ops=ops,
-            partial_outputs=[],
+            partial_outputs=[
+                tensor.id
+                for tensor in execution.tensors
+                if tensor.id in region.outputs
+                and sum(
+                    node.tile[2] * node.tile[3]
+                    for node in (execution.ops[i] for i in region.nodes)
+                    if node.opcode == A.NativeOpcode.TMA_STORE.value
+                    and node.tensor == tensor.id
+                )
+                < tensor.shape[0] * tensor.shape[1]
+            ],
             outputs=region.outputs,
         )
         filename = region.id + ".gtsir"
-        (directory / filename).write_text(json.dumps(kernel, indent=2) + "\n")
+        with (directory / filename).open("w") as output:
+            json.dump(kernel, output, separators=(",", ":"))
+
         launches.append(
             dict(
                 record="ExecutionLaunch",

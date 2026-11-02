@@ -1,0 +1,46 @@
+flow.kernel @small_m_gemm_flow schedule<explicit> target<sm90> {
+  static.param %M : index
+  static.param %N : index
+  static.param %K : index
+  static.param %NUM_SMS : index
+  static.let %NTILES = ceildiv(%N,64)
+  static.let %CTAS = ceildiv(%M,16)*%NTILES
+  static.let %BLOCK = floordiv(%cta,%NTILES)
+  static.let %COL = %cta mod %NTILES
+  static.let %VALID = min(16,%M-%BLOCK*16)
+  static.let %AROW = %BLOCK*16
+  static.let %CROW = %BLOCK*16
+  static.let %WEIGHT_ROW = 0
+  static.let %WEIGHT_ROWS = %K
+  static.require <%N divisible_by 64, %K divisible_by 16>
+  flow.tensor @A : tensor<MxKxbf16, row_major>
+  flow.tensor @B : tensor<WEIGHT_ROWSxNxbf16, row_major>
+  flow.tensor @C : tensor<MxNxbf16, row_major>
+  flow.schedule_config tile(16x64x16) stages(2) warps(4) consumer_warps(4) producer_warp(0) warpgroup(1) matrix_tile(16x8x16)
+  flow.loop @cta %cta = 0 to %CTAS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<7168>
+  static.if <%k>=2> {
+    flow.dependency_rule @prior_acc from[@matmul.complete] at[%wave = %wave, %k = %k-2] select<all>
+  }
+  static.if <%k>0> {
+    flow.dependency_rule @prior_copy from[@load_A.issue, @load_B.issue] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  flow.dependency_rule @last from[@matmul.complete] at[%wave = %wave, %k = ceildiv(%K,16)-1] select<all>
+  static.if <has_previous_fragment(%executor)> {
+    flow.dependency_rule @fragment from[@matmul.complete] at[%wave = %wave] select<last_per_executor>
+  }
+  flow.pipeline @loop %k = 0 to ceildiv(%K,16) step 1 depth(2) generation_counts_per_wave[1] {
+    %load_A, !load_A_ready = flow.load_async @load_A @A[%AROW, %k*16]<VALIDx16> by %producer after[@matmul.complete:prior_acc, @load_A.issue:prior_copy, @load_B.issue:prior_copy] : tensor<VALIDx16xbf16> scope<pipeline>
+    %load_B, !load_B_ready = flow.load_async @load_B @B[%WEIGHT_ROW+%k*16, %COL*64]<16x64> by %producer after[@matmul.complete:prior_acc, @load_A.issue:prior_copy, @load_B.issue:prior_copy] : tensor<16x64xbf16> scope<pipeline>
+    %matmul, !matmul_done = flow.matmul @matmul implements<@matmul> reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@C[%CROW, %COL*64]<VALIDx64>> by %matrix after[@load_A.complete:data, @load_B.complete:data, @matmul.complete:fragment] : tensor<16x64xfp32> scope<pipeline>
+  }
+  !store_done = flow.store_async @store implements<@cast_output> reads[%matmul] cast<bf16> to @C[%CROW, %COL*64]<VALIDx64> by %producer after[@matmul.complete:last] scope<epilogue>
+}
+mapping.program @small_m_gemm_mapping flow<@small_m_gemm_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

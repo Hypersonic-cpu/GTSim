@@ -1,0 +1,56 @@
+algo.kernel @norm_rope(%Input: tensor<BxINPUT_WIDTHxbf16>, %Weight: tensor<1xDxbf16>)
+    -> (%Output: tensor<HEAD_ROWSxDxbf16>) {
+  static.param %B : index
+  static.param %HEADS : index
+  static.param %D : index
+  static.param %INPUT_WIDTH : index
+  static.param %OFFSET : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.param %THETA : fp32
+  static.param %EPS : fp32
+  algo.domain %row in [0, 1)
+  algo.compute @x_fp32 result<%x_fp32> semantics<cast_fp32(x)>
+  algo.op @x_fp32 category<convert> cost<none> dtype<fp32> inputs[%x] output[%x_fp32] reduction[]
+  algo.compute @square result<%square> semantics<cast_fp32(x)*cast_fp32(x)>
+  algo.op @square category<arithmetic> cost<multiply> dtype<fp32> inputs[%x_fp32] output[%square] reduction[]
+  algo.compute @sum result<%sum> semantics<sum_D(square)>
+  algo.op @sum category<reduction> cost<sum> dtype<fp32> inputs[%square] output[%sum] reduction[]
+  algo.compute @mean result<%mean> semantics<sum/D>
+  algo.op @mean category<arithmetic> cost<divide> dtype<fp32> inputs[%sum] output[%mean] reduction[]
+  algo.compute @mean_eps result<%mean_eps> semantics<mean+EPS>
+  algo.op @mean_eps category<arithmetic> cost<simple> dtype<fp32> inputs[%mean] output[%mean_eps] reduction[]
+  algo.compute @inv result<%inv> semantics<rsqrt(mean_eps)>
+  algo.op @inv category<special_function> cost<root> dtype<fp32> inputs[%mean_eps] output[%inv] reduction[]
+  algo.compute @unit result<%unit> semantics<x * inv>
+  algo.op @unit category<arithmetic> cost<multiply> dtype<fp32> inputs[%x_fp32, %inv] output[%unit] reduction[]
+  algo.compute @weight_fp32 result<%weight_fp32> semantics<cast_fp32(weight)>
+  algo.op @weight_fp32 category<convert> cost<none> dtype<fp32> inputs[%weight] output[%weight_fp32] reduction[]
+  algo.compute @normalized result<%normalized> semantics<unit * Weight>
+  algo.op @normalized category<arithmetic> cost<multiply> dtype<fp32> inputs[%unit, %weight_fp32] output[%normalized] reduction[]
+  algo.compute @log_theta result<%log_theta> semantics<log(THETA)>
+  algo.op @log_theta category<special_function> cost<logarithmic> dtype<fp32> inputs[] output[%log_theta] reduction[]
+  algo.compute @exponent result<%exponent> semantics<(-2*iota(D/2)/D)*log_theta>
+  algo.op @exponent category<arithmetic> cost<multiply> dtype<fp32> inputs[%log_theta] output[%exponent] reduction[]
+  algo.compute @frequency result<%frequency> semantics<exp(exponent)>
+  algo.op @frequency category<special_function> cost<exponential> dtype<fp32> inputs[%exponent] output[%frequency] reduction[]
+  algo.compute @angle result<%angle> semantics<CONTEXTS[REQUEST] * frequency>
+  algo.op @angle category<arithmetic> cost<multiply> dtype<fp32> inputs[%frequency] output[%angle] reduction[]
+  algo.compute @cos result<%cos> semantics<cos(angle)>
+  algo.op @cos category<special_function> cost<trigonometric> dtype<fp32> inputs[%angle] output[%cos] reduction[]
+  algo.compute @sin result<%sin> semantics<sin(angle)>
+  algo.op @sin category<special_function> cost<trigonometric> dtype<fp32> inputs[%angle] output[%sin] reduction[]
+  algo.compute @rotate result<%rotate> semantics<concat(normalized[D/2:D], normalized[0:D/2])>
+  algo.op @rotate category<collective> cost<shuffle> dtype<fp32> inputs[%normalized] output[%rotate] reduction[]
+  algo.compute @signed_rotate result<%signed_rotate> semantics<concat(-rotate[0:D/2], rotate[D/2:D])>
+  algo.op @signed_rotate category<arithmetic> cost<simple> dtype<fp32> inputs[%rotate] output[%signed_rotate] reduction[]
+  algo.compute @original_cos result<%original_cos> semantics<normalized * concat(cos,cos)>
+  algo.op @original_cos category<arithmetic> cost<multiply> dtype<fp32> inputs[%normalized, %cos] output[%original_cos] reduction[]
+  algo.compute @rotated_sin result<%rotated_sin> semantics<signed_rotate * concat(sin,sin)>
+  algo.op @rotated_sin category<arithmetic> cost<multiply> dtype<fp32> inputs[%signed_rotate, %sin] output[%rotated_sin] reduction[]
+  algo.compute @add result<%add> semantics<original_cos + rotated_sin>
+  algo.op @add category<arithmetic> cost<simple> dtype<fp32> inputs[%original_cos, %rotated_sin] output[%add] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(add)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%add] output[%cast] reduction[]
+  algo.compute @contract_Output result<%Output> semantics<cast_bf16(RoPE_half_layout(RMSNorm_per_head(Input[:,OFFSET:OFFSET+HEADS*D],Weight,EPS),positions=CONTEXTS,theta=THETA))>
+}

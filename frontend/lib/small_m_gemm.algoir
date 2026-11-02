@@ -1,0 +1,14 @@
+algo.kernel @small_m_gemm(%A: tensor<MxKxbf16>, %B: tensor<WEIGHT_ROWSxNxbf16>)
+    -> (%C: tensor<MxNxbf16>) {
+  static.param %M : index
+  static.param %N : index
+  static.param %K : index
+  static.param %NUM_SMS : index
+  static.require <%N divisible_by 64, %K divisible_by 16>
+  algo.domain %row in [0, 1)
+  algo.compute @matmul result<%matmul> semantics<sum_k(cast_fp32(A[m,k])*cast_fp32(B[k,n]))>
+  algo.op @matmul category<matrix> cost<none> dtype<fp32> inputs[%A, %B] output[%matmul] reduction[]
+  algo.compute @cast_output result<%cast_output> semantics<cast_bf16(matmul)>
+  algo.op @cast_output category<convert> cost<none> dtype<bf16> inputs[%matmul] output[%cast_output] reduction[]
+  algo.compute @contract_C result<%C> semantics<C[m,n] = cast_bf16(sum_k(cast_fp32(A[m,k])*cast_fp32(B[k,n])))>
+}

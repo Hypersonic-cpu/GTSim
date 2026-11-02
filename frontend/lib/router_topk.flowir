@@ -1,0 +1,43 @@
+flow.kernel @router_topk_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  flow.tensor @Logits : tensor<BxExbf16, row_major>
+  flow.tensor @ExpertIDs : tensor<BxTKxint32, row_major>
+  flow.tensor @Probabilities : tensor<BxTKxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %B step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  static.if <%k>0> {
+    flow.dependency_rule @previous_mask from[@mask.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  flow.dependency_rule @all_selected from[@mask.complete, @argmax.complete, @selected_max.complete] at[%wave = %wave] select<all>
+  %logits, !logits_ready = flow.load_async @logits @Logits[%cta, 0]<1xE> by %producer : tensor<1xExbf16> scope<prologue>
+  %logits_fp32 = flow.arithmetic @logits_fp32 implements<@logits_fp32> reads[%logits] after[@logits.complete:data] : tensor<1xExfp32> scope<prologue>
+  %max = flow.reduction @max implements<@max> reads[%logits_fp32] after[@logits_fp32.complete:data] : tensor<1x1xfp32> scope<prologue> work<1xE>
+  %delta = flow.arithmetic @delta implements<@delta> reads[%logits_fp32, %max] after[@logits_fp32.complete:data, @max.complete:data] : tensor<1xExfp32> scope<prologue>
+  %exp = flow.special_function @exp implements<@exp> reads[%delta] after[@delta.complete:data] : tensor<1xExfp32> scope<prologue>
+  %sum = flow.reduction @sum implements<@sum> reads[%exp] after[@exp.complete:data] : tensor<1x1xfp32> scope<prologue> work<1xE>
+  %softmax = flow.arithmetic @softmax implements<@softmax> reads[%exp, %sum] after[@exp.complete:data, @sum.complete:data] : tensor<1xExfp32> scope<prologue>
+  flow.pipeline @loop %k = 0 to %TK step 1 depth(1) generation_counts_per_wave[1] {
+    %selected_max = flow.reduction @selected_max implements<@selected_max> reads[%softmax] after[@softmax.complete:data, @mask.complete:previous_mask] : tensor<1x1xfp32> scope<pipeline> work<1xE>
+    %argmax = flow.arithmetic @argmax implements<@argmax> reads[%selected_max, %softmax] after[@selected_max.complete:data, @softmax.complete:data] : tensor<1xExint32> scope<pipeline>
+    %mask = flow.arithmetic @mask implements<@mask> reads[%argmax, %softmax] after[@argmax.complete:data, @softmax.complete:data, @mask.complete:previous_mask] : tensor<1xExfp32> scope<pipeline>
+  }
+  %pack_ids = flow.arithmetic @pack_ids implements<@pack_ids> reads[] after[@argmax.complete:all_selected] : tensor<1xTKxint32> scope<epilogue>
+  %pack = flow.arithmetic @pack implements<@pack> reads[] after[@selected_max.complete:all_selected] : tensor<1xTKxfp32> scope<epilogue>
+  %selected_sum = flow.reduction @selected_sum implements<@selected_sum> reads[%pack] after[@pack.complete:data] : tensor<1x1xfp32> scope<epilogue> work<1xTK>
+  %renormalize = flow.arithmetic @renormalize implements<@renormalize> reads[%pack, %selected_sum] after[@pack.complete:data, @selected_sum.complete:data] : tensor<1xTKxfp32> scope<epilogue>
+  %cast_prob = flow.arithmetic @cast_prob implements<@cast_prob> reads[%renormalize] after[@renormalize.complete:data] : tensor<1xTKxbf16> scope<epilogue>
+  !ids_done = flow.store_async @ids reads[%pack_ids] cast<int32> to @ExpertIDs[%cta, 0]<1xTK> by %producer after[@pack_ids.complete:data] scope<epilogue>
+  !prob_done = flow.store_async @prob reads[%cast_prob] cast<bf16> to @Probabilities[%cta, 0]<1xTK> by %producer after[@cast_prob.complete:data] scope<epilogue>
+}
+mapping.program @router_topk_mapping flow<@router_topk_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

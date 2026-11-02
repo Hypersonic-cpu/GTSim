@@ -44,7 +44,7 @@ def operand(value):
     )
 
 
-def flowop(op):
+def _flowop(op):
     role = op.id
     deps = (
         " after["
@@ -92,6 +92,41 @@ def flowop(op):
         + (f" cast<{enum(op.cast)}>" if op.cast else "")
         + f" to {region(op.region)} by %producer{deps}{capabilities}"
     )
+
+
+def flowop(op):
+    if op.kind in (A.OpKind.ARITHMETIC, A.OpKind.SPECIAL_FUNCTION, A.OpKind.REDUCTION):
+        text = f"%{op.id} = flow.{op.kind.value} @{op.id}"
+        if op.implements:
+            text += f" implements<@{op.implements}>"
+        text += " reads[" + ", ".join(operand(v) for v in op.operands) + "]"
+        if op.dependencies:
+            text += (
+                " after["
+                + ", ".join(
+                    f"@{d.source}.{d.phase.value}:{d.label}" for d in op.dependencies
+                )
+                + "]"
+            )
+        result = op.results[0]
+        text += f" : tensor<{'x'.join(map(str, result.shape))}x{result.dtype.value}>"
+    else:
+        text = _flowop(op)
+    if "scope<" not in text:
+        text += f" scope<{op.scope.value}>"
+    for loop in op.iterations:
+        text += f" iterate<%{loop.variable} = 0 to {loop.stop}>"
+    if op.work_shape:
+        text += f" work<{'x'.join(map(str, op.work_shape))}>"
+    if op.guard != "true":
+        text += f" static.if<{op.guard}>"
+    if op.static_args:
+        text += (
+            " static.args<"
+            + ", ".join(v.id + "=" + v.expression for v in op.static_args)
+            + ">"
+        )
+    return text
 
 
 def prog(ir):

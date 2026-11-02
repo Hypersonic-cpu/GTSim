@@ -1,0 +1,39 @@
+flow.kernel @fa3_combine_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %D : index
+  static.param %S : index
+  static.param %NUM_SMS : index
+  static.let %PART_ROWS = %B*%HQ*%S
+  static.let %QROWS = %B*%HQ
+  static.let %QWIDTH = %HQ*%D
+  static.let %REQUEST = floordiv(%cta,%HQ)
+  static.let %HEAD = %cta mod %HQ
+  flow.tensor @Partial : tensor<PART_ROWSxDxfp32, row_major>
+  flow.tensor @LSE : tensor<PART_ROWSx1xfp32, row_major>
+  flow.tensor @O : tensor<BxQWIDTHxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %QROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %partial, !partial_ready = flow.load_async @partial @Partial[%cta*%S+%split, 0]<1xD> by %producer : tensor<1xDxfp32> scope<pipeline> iterate<%split = 0 to %S>
+    %lse, !lse_ready = flow.load_async @lse @LSE[%cta*%S+%split, 0]<1x1> by %producer : tensor<1x1xfp32> scope<pipeline> iterate<%split = 0 to %S>
+    %max_lse = flow.reduction @max_lse implements<@max_lse> reads[%lse] after[@lse.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xS>
+    %delta = flow.arithmetic @delta implements<@delta> reads[%lse, %max_lse] after[@lse.complete:data, @max_lse.complete:data] : tensor<1xSxfp32> scope<pipeline>
+    %weights = flow.special_function @weights implements<@weights> reads[%delta] after[@delta.complete:data] : tensor<1xSxfp32> scope<pipeline>
+    %denominator = flow.reduction @denominator implements<@denominator> reads[%weights] after[@weights.complete:data] : tensor<1x1xfp32> scope<pipeline> work<1xS>
+    %weighted = flow.arithmetic @weighted implements<@weighted> reads[%weights, %partial] after[@weights.complete:data, @partial.complete:data] : tensor<SxDxfp32> scope<pipeline>
+    %numerator = flow.reduction @numerator implements<@numerator> reads[%weighted] after[@weighted.complete:data] : tensor<1xDxfp32> scope<pipeline> work<SxD>
+    %normalize = flow.arithmetic @normalize implements<@normalize> reads[%numerator, %denominator] after[@numerator.complete:data, @denominator.complete:data] : tensor<1xDxfp32> scope<pipeline>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%normalize] after[@normalize.complete:data] : tensor<1xDxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @O[%REQUEST, %HEAD*%D]<1xD> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @fa3_combine_mapping flow<@fa3_combine_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from .common import Header, DataType, MemorySpace
+from .common import Header, DataType, MemorySpace, ImmediateValue
 
 
 class ExecutionResource(str, Enum):
@@ -49,6 +49,7 @@ class ArchInstruction:
     leading_dim: int | None
     after_issue: tuple[int, ...]
     after_complete: tuple[int, ...]
+    static_args: tuple[tuple[str, ImmediateValue], ...]
 
 
 @dataclass(frozen=True)

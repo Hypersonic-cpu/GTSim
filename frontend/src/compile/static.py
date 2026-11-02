@@ -1,6 +1,10 @@
 """Shared, restricted static expression resolution and source-AST specialization."""
 
 import ast
+from functools import lru_cache
+from bisect import bisect_right
+import math
+from itertools import accumulate
 from dataclasses import replace
 import operator
 import re
@@ -14,6 +18,7 @@ _BINARY = {
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.FloorDiv: operator.floordiv,
+    ast.Div: operator.truediv,
     ast.Mod: operator.mod,
 }
 _COMPARE = {
@@ -29,7 +34,34 @@ _FUNCTIONS = {
     "floordiv": operator.floordiv,
     "min": min,
     "max": max,
+    "sum": sum,
+    "len": len,
+    "prefix_sum": lambda xs, n: sum(xs[:n]),
+    "unique": lambda xs: tuple(sorted(set(xs))),
+    "argsort": lambda xs: tuple(sorted(range(len(xs)), key=xs.__getitem__)),
+    "counts": lambda xs, keys: tuple(xs.count(key) for key in keys),
+    "prefix": lambda xs: (0, *accumulate(xs)),
+    "vceildiv": lambda xs, n: tuple((v + n - 1) // n for v in xs),
+    "scale": lambda xs, n: tuple(v * n for v in xs),
+    "bisect_right": bisect_right,
+    "index_of": lambda xs, v: xs.index(v),
+    "iota": lambda n: tuple(range(n)),
+    "vquotient": lambda xs, n: tuple(v // n for v in xs),
+    "inverse_permutation": lambda xs: tuple(sorted(range(len(xs)), key=xs.__getitem__)),
+    "ilog2": lambda n: math.ceil(math.log2(n)),
 }
+
+
+@lru_cache(maxsize=4096)
+def parse_expression(text):
+    text = re.sub(r"%([A-Za-z_]\w*)", r"\1", text)
+    text = re.sub(r"\bmod\b", "%", text)
+    text = re.sub(r"\btrue\b", "True", text)
+    text = re.sub(r"\bfalse\b", "False", text)
+    if " divisible_by " in text:
+        left, right = text.split(" divisible_by ", 1)
+        text = f"({left}) % ({right}) == 0"
+    return ast.parse(text, mode="eval").body
 
 
 def render(node):
@@ -45,6 +77,7 @@ def render(node):
             ast.Sub: "-",
             ast.Mult: "*",
             ast.FloorDiv: "//",
+            ast.Div: "/",
             ast.Mod: "mod",
         }
         return f"({render(node.left)} {spelling[type(node.op)]} {render(node.right)})"
@@ -79,6 +112,8 @@ def render(node):
             )
             + ")"
         )
+    if isinstance(node, ast.Subscript):
+        return f"{render(node.value)}[{render(node.slice)}]"
     if isinstance(node, ast.Call):
         return node.func.id + "(" + ", ".join(render(v) for v in node.args) + ")"
     raise ValueError(f"unsupported static expression: {ast.dump(node)}")
@@ -110,17 +145,32 @@ class Resolver:
             if self.value(constraint) is not True:
                 raise ValueError(f"unsatisfied static constraint: {constraint}")
 
+    def at(self, values, functions=None):
+        """Bind iteration indices without revalidating invariant parameters."""
+        result = object.__new__(Resolver)
+        result.context = self.context
+        result.definitions = self.definitions
+        result.values = {**self.values, **values}
+        result.functions = (
+            {**self.functions, **functions} if functions else self.functions
+        )
+        return result
+
     def expression(self, text):
-        text = re.sub(r"%([A-Za-z_]\w*)", r"\1", str(text))
-        text = re.sub(r"\bmod\b", "%", text)
-        text = re.sub(r"\btrue\b", "True", text)
-        text = re.sub(r"\bfalse\b", "False", text)
-        if " divisible_by " in text:
-            left, right = text.split(" divisible_by ", 1)
-            text = f"({left}) % ({right}) == 0"
-        return self.fold(ast.parse(text, mode="eval").body)
+        return self.fold(parse_expression(str(text)))
 
     def value(self, text):
+        if type(text) in (int, float, bool):
+            return text
+        if text in ("inf", "-inf"):
+            return (
+                A.ConstantValue.POSITIVE_INFINITY
+                if text == "inf"
+                else A.ConstantValue.NEGATIVE_INFINITY
+            )
+        key = text[1:] if text.startswith("%") else text
+        if key in self.values:
+            return self.values[key]
         node = self.expression(text)
         if not isinstance(node, ast.Constant):
             raise ValueError(f"unresolved static expression: {text}")
@@ -133,6 +183,20 @@ class Resolver:
     def fold(self, node):
         if isinstance(node, ast.Constant):
             return node
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return ast.Constant(
+                tuple(self.value(render(self.fold(v))) for v in node.elts)
+            )
+        if isinstance(node, ast.IfExp):
+            condition = self.fold(node.test)
+            if isinstance(condition, ast.Constant):
+                return self.fold(node.body if condition.value else node.orelse)
+            return ast.IfExp(condition, self.fold(node.body), self.fold(node.orelse))
+        if isinstance(node, ast.Subscript):
+            source, subscript = self.fold(node.value), self.fold(node.slice)
+            if isinstance(source, ast.Constant) and isinstance(subscript, ast.Constant):
+                return ast.Constant(source.value[subscript.value])
+            return ast.Subscript(source, subscript, ast.Load())
         if isinstance(node, ast.Name):
             if node.id in self.values:
                 return ast.Constant(self.values[node.id])
@@ -193,6 +257,13 @@ class Resolver:
                 )
             return ast.Call(node.func, values, [])
         raise ValueError(f"unsupported static expression: {ast.dump(node)}")
+
+    def materialize_constants(self):
+        for definition in (*self.context.bindings, *self.context.predicates):
+            value = self.expression(definition.expression)
+            if isinstance(value, ast.Constant):
+                self.values[definition.id] = value.value
+        return self
 
     def residual(self):
         bindings, predicates = [], []

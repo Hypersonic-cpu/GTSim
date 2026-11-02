@@ -1,0 +1,33 @@
+flow.kernel @kv_append_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %KVH : index
+  static.param %D : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.let %HEAD_ROWS = %B*%KVH
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%KVH
+  static.let %REQUEST = floordiv(%cta,%KVH)
+  static.let %HEAD = %cta mod %KVH
+  static.let %ROW = (prefix_sum(%CONTEXTS,%REQUEST)+%REQUEST)*%KVH+%HEAD*(%CONTEXTS[%REQUEST]+1)+%CONTEXTS[%REQUEST]
+  flow.tensor @Knew : tensor<HEAD_ROWSxDxbf16, row_major>
+  flow.tensor @Vnew : tensor<HEAD_ROWSxDxbf16, row_major>
+  flow.tensor @Kcache : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.tensor @Vcache : tensor<CACHE_ROWSxDxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %HEAD_ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %key, !key_ready = flow.load_async @key @Knew[%cta, 0]<1xD> by %producer : tensor<1xDxbf16> scope<pipeline>
+    %value, !value_ready = flow.load_async @value @Vnew[%cta, 0]<1xD> by %producer : tensor<1xDxbf16> scope<pipeline>
+  }
+  !key_out_done = flow.store_async @key_out reads[%key] cast<bf16> to @Kcache[%ROW, 0]<1xD> by %producer after[@key.complete:data] scope<epilogue>
+  !value_out_done = flow.store_async @value_out reads[%value] cast<bf16> to @Vcache[%ROW, 0]<1xD> by %producer after[@value.complete:data] scope<epilogue>
+}
+mapping.program @kv_append_mapping flow<@kv_append_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

@@ -12,6 +12,8 @@ from .export_runtime import export_runtime
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("source")
+    cli.add_argument("--params", type=Path)
+    cli.add_argument("--lib", type=Path)
     cli.add_argument("--algo", action="append", default=[])
     cli.add_argument("--flow", action="append", default=[])
     cli.add_argument("--param", action="append", default=[], metavar="NAME=JSON_VALUE")
@@ -22,6 +24,11 @@ def main():
     parameters = {
         name: json.loads(value) for name, value in (v.split("=", 1) for v in args.param)
     }
+    if args.params:
+        parameters = {**json.loads(args.params.read_text()), **parameters}
+    if args.lib:
+        args.algo += [str(p) for p in args.lib.glob("*.algoir")]
+        args.flow += [str(p) for p in args.lib.glob("*.flowir")]
     source = parse_file(args.source)
     if isinstance(source, A.ProgIR):
         source = compile_program(args.source, parameters, args.algo, args.flow)

@@ -1,0 +1,28 @@
+flow.kernel @extract_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %HEADS : index
+  static.param %D : index
+  static.param %INPUT_WIDTH : index
+  static.param %OFFSET : index
+  static.param %NUM_SMS : index
+  static.let %HEAD_ROWS = %B*%HEADS
+  static.let %REQUEST = floordiv(%cta,%HEADS)
+  static.let %HEAD = %cta mod %HEADS
+  flow.tensor @Input : tensor<BxINPUT_WIDTHxbf16, row_major>
+  flow.tensor @Output : tensor<HEAD_ROWSxDxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %HEAD_ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %x, !x_ready = flow.load_async @x @Input[%REQUEST, %OFFSET+%HEAD*%D]<1xD> by %producer : tensor<1xDxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%x] cast<bf16> to @Output[%cta, 0]<1xD> by %producer after[@x.complete:data] scope<epilogue>
+}
+mapping.program @extract_mapping flow<@extract_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

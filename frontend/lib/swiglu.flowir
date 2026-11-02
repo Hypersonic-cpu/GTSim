@@ -1,0 +1,32 @@
+flow.kernel @swiglu_flow schedule<explicit> target<sm90> {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  static.let %TWICE = 2*%WIDTH
+  flow.tensor @X : tensor<ROWSxTWICExbf16, row_major>
+  flow.tensor @Output : tensor<ROWSxWIDTHxbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ROWS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %gate, !gate_ready = flow.load_async @gate @X[%cta, 0]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %up, !up_ready = flow.load_async @up @X[%cta, %WIDTH]<1xWIDTH> by %producer : tensor<1xWIDTHxbf16> scope<pipeline>
+    %gate_fp32 = flow.arithmetic @gate_fp32 implements<@gate_fp32> reads[%gate] after[@gate.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %negate = flow.arithmetic @negate implements<@negate> reads[%gate_fp32] after[@gate_fp32.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %exp = flow.special_function @exp implements<@exp> reads[%negate] after[@negate.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %one_plus = flow.arithmetic @one_plus implements<@one_plus> reads[%exp] after[@exp.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %silu = flow.arithmetic @silu implements<@silu> reads[%gate_fp32, %one_plus] after[@gate_fp32.complete:data, @one_plus.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %up_fp32 = flow.arithmetic @up_fp32 implements<@up_fp32> reads[%up] after[@up.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %multiply = flow.arithmetic @multiply implements<@multiply> reads[%silu, %up_fp32] after[@silu.complete:data, @up_fp32.complete:data] : tensor<1xWIDTHxfp32> scope<pipeline>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%multiply] after[@multiply.complete:data] : tensor<1xWIDTHxbf16> scope<pipeline>
+  }
+  !output_done = flow.store_async @output reads[%cast] cast<bf16> to @Output[%cta, 0]<1xWIDTH> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @swiglu_mapping flow<@swiglu_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

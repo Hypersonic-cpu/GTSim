@@ -1,0 +1,16 @@
+algo.kernel @residual_add(%X: tensor<ROWSxWIDTHxbf16>, %Y: tensor<ROWSxWIDTHxbf16>)
+    -> (%Output: tensor<ROWSxWIDTHxbf16>) {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  algo.domain %row in [0, 1)
+  algo.compute @x_fp32 result<%x_fp32> semantics<cast_fp32(x)>
+  algo.op @x_fp32 category<convert> cost<none> dtype<fp32> inputs[%x] output[%x_fp32] reduction[]
+  algo.compute @y_fp32 result<%y_fp32> semantics<cast_fp32(y)>
+  algo.op @y_fp32 category<convert> cost<none> dtype<fp32> inputs[%y] output[%y_fp32] reduction[]
+  algo.compute @add result<%add> semantics<cast_fp32(X)+cast_fp32(Y)>
+  algo.op @add category<arithmetic> cost<simple> dtype<fp32> inputs[%x_fp32, %y_fp32] output[%add] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(add)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%add] output[%cast] reduction[]
+  algo.compute @contract_Output result<%Output> semantics<cast_bf16(cast_fp32(X)+cast_fp32(Y))>
+}

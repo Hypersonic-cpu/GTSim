@@ -10,7 +10,7 @@ def iterations(loops, resolver, values):
         yield values
         return
     loop, *rest = loops
-    current = Resolver(resolver.context, {**resolver.values, **values})
+    current = resolver.at(values)
     for value in range(
         current.value(loop.start), current.value(loop.stop), current.value(loop.step)
     ):
@@ -30,6 +30,7 @@ class Event:
 class NativeExpander:
     def __init__(self, region, resolver, tensors, nodes, ctas):
         self.region, self.resolver, self.tensors = region, resolver, tensors
+        self.scope_resolver = resolver
         self.nodes, self.ctas = nodes, ctas
         outer = tuple(loop.variable for loop in region.domain.loops)
         self.index_fields = {
@@ -40,6 +41,11 @@ class NativeExpander:
             keys = tuple(sorted(key for key, _ in rule.producer_bindings))
             self.index_fields.add(keys)
             self.index_fields.add(tuple(sorted((*keys, "executor"))))
+        self.index_fields |= {
+            tuple(sorted((*fields, "executor")))
+            for fields in tuple(self.index_fields)
+            if "executor" not in fields
+        }
         self.index = {}
         self.patterns = {op.id: op for op in region.ops}
         self.warp_bases = {}
@@ -63,14 +69,12 @@ class NativeExpander:
                 self.lookup(pattern.id, {wave: values[wave], "executor": warp}, cta)
             )
 
-        return Resolver(
-            self.resolver.context,
-            {**self.resolver.values, **values, "scope": pattern.scope.value},
+        return self.scope_resolver.at(
+            {**values, "scope": pattern.scope.value},
             {"has_previous_fragment": has_previous_fragment},
         )
 
-    def producers(self, dependency, values, cta, pattern):
-        resolver = self.resolver_at(values, cta, pattern)
+    def producers(self, dependency, values, cta, pattern, resolver):
         rules = [
             r
             for r in self.region.dependency_rules
@@ -91,10 +95,13 @@ class NativeExpander:
                     bindings["executor"] = values["executor"]
                 candidates = self.lookup(dependency.source, bindings, cta)
                 if rule.selection == A.Selection.LAST_PER_EXECUTOR:
-                    latest = {}
-                    for event in candidates:
-                        latest[event.executor] = event
-                    candidates = list(latest.values())
+                    if "executor" in bindings:
+                        candidates = candidates[-1:]
+                    else:
+                        latest = {}
+                        for event in candidates:
+                            latest[event.executor] = event
+                        candidates = list(latest.values())
                 matches.extend(n for e in candidates for n in e.nodes)
         else:
             bindings = {
@@ -108,6 +115,13 @@ class NativeExpander:
             ):
                 variable = self.region.domain.pipeline.loop.variable
                 bindings[variable] = values[variable]
+            producer = self.patterns[dependency.source]
+            if (
+                "executor" in values
+                and producer.steps
+                and any(loop.variable == "executor" for loop in producer.steps[0].loops)
+            ):
+                bindings["executor"] = values["executor"]
             candidates = self.lookup(dependency.source, bindings, cta)
             if not candidates:
                 raise ValueError(
@@ -139,9 +153,10 @@ class NativeExpander:
 
     def dependencies(self, dependencies, values, cta, pattern):
         issue, complete = [], []
+        resolver = self.resolver_at(values, cta, pattern)
         for dependency in dependencies:
             target = issue if dependency.phase == A.Phase.ISSUE else complete
-            target.extend(self.producers(dependency, values, cta, pattern))
+            target.extend(self.producers(dependency, values, cta, pattern, resolver))
         return issue, complete
 
     def pattern(self, pattern, values, cta):
@@ -150,8 +165,10 @@ class NativeExpander:
             self.register(Event(pattern.id, None, cta, values, None, tuple(complete)))
             return
         for step_id, step in enumerate(pattern.steps):
-            for point in iterations(step.loops, self.resolver, values):
+            for point in iterations(step.loops, self.scope_resolver, values):
                 resolver = self.resolver_at(point, cta, pattern)
+                if not resolver.value(step.guard):
+                    continue
                 executor = resolver.value(step.executor.expression)
                 point = {**point, "executor": executor}
                 issue, complete = self.dependencies(
@@ -171,18 +188,29 @@ class NativeExpander:
                             "native input step is missing or forward-referenced"
                         )
                     complete.extend(n for e in events for n in e.nodes)
-                tensor = self.tensors[step.region.tensor]
-                offsets = tuple(
-                    resolver.value(v.expression) for v in step.region.offsets
-                )
-                shape = tuple(resolver.value(v) for v in step.region.shape)
-                if len(shape) != 2 or any(
-                    off < 0 or off + length > limit
-                    for off, length, limit in zip(offsets, shape, tensor.shape)
-                ):
-                    raise ValueError(
-                        f"native memory/tensor region is out of bounds: {step.region.tensor}"
+                if step.region is None:
+                    tensor = None
+                    offsets = (0, 0)
+                    shape = tuple(resolver.value(v) for v in step.work_shape)
+                else:
+                    tensor = self.tensors[step.region.tensor]
+                    offsets = tuple(
+                        resolver.value(v.expression) for v in step.region.offsets
                     )
+                    shape = tuple(resolver.value(v) for v in step.region.shape)
+                    if step.opcode in (
+                        A.NativeOpcode.TMA_LOAD,
+                        A.NativeOpcode.TMA_STORE,
+                    ) and (
+                        len(shape) != 2
+                        or any(
+                            off < 0 or off + length > limit
+                            for off, length, limit in zip(offsets, shape, tensor.shape)
+                        )
+                    ):
+                        raise ValueError(
+                            f"native memory region is out of bounds: {step.region.tensor}: {offsets}, {shape}, {tensor.shape}"
+                        )
                 identity = len(self.nodes)
                 suffix = "_".join(
                     f"{k}{v}" for k, v in point.items() if k != "executor"
@@ -196,7 +224,7 @@ class NativeExpander:
                         step.resource,
                         cta,
                         self.warp_bases[cta] + executor,
-                        tensor.id,
+                        tensor.id if tensor else None,
                         (*offsets, *shape),
                         step.dtype,
                         resolver.value(step.leading_dim.expression)
@@ -204,6 +232,10 @@ class NativeExpander:
                         else None,
                         tuple(dict.fromkeys(issue)),
                         tuple(dict.fromkeys(complete)),
+                        tuple(
+                            (v.id, resolver.value(v.expression))
+                            for v in step.static_args
+                        ),
                     )
                 )
                 self.register(
@@ -214,9 +246,7 @@ class NativeExpander:
         cta_ids = {}
         pipeline = self.region.domain.pipeline.loop
         for point in iterations(self.region.domain.loops, self.resolver, {}):
-            resolver = Resolver(
-                self.resolver.context, {**self.resolver.values, **point}
-            )
+            resolver = self.resolver.at(point)
             if any(
                 guard.iterations and not resolver.value(guard.condition)
                 for guard in self.region.static_ifs
@@ -239,13 +269,17 @@ class NativeExpander:
                     )
                 )
             cta = cta_ids[local_cta]
+            outer_scope = resolver.materialize_constants()
+            self.scope_resolver = outer_scope
             for pattern in self.region.ops:
                 if pattern.scope == A.Scope.PROLOGUE:
                     self.pattern(pattern, point, cta)
-            for iteration in iterations((pipeline,), self.resolver, point):
+            for iteration in iterations((pipeline,), outer_scope, point):
+                self.scope_resolver = outer_scope.at(iteration).materialize_constants()
                 for pattern in self.region.ops:
                     if pattern.scope == A.Scope.PIPELINE:
                         self.pattern(pattern, iteration, cta)
+            self.scope_resolver = outer_scope
             for pattern in self.region.ops:
                 if pattern.scope == A.Scope.EPILOGUE:
                     self.pattern(pattern, point, cta)

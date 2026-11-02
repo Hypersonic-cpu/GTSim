@@ -8,6 +8,7 @@ from .schedule import ExecutorRole
 
 class Placement(str, Enum):
     ORDERED = "original"
+    ROUND_ROBIN = "round_robin"
 
 
 @dataclass(frozen=True)

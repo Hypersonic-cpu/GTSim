@@ -546,7 +546,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "load"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -690,7 +693,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "load"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -881,7 +887,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "matrix"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -1049,7 +1058,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "store"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             },
             {
               "dependencies": [
@@ -1118,7 +1130,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "store"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         }
@@ -1957,7 +1972,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "load"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -2101,7 +2119,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "load"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -2292,7 +2313,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "matrix"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         },
@@ -2460,7 +2484,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "store"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             },
             {
               "dependencies": [
@@ -2529,7 +2556,10 @@
               "resource": {
                 "enum": "ExecutionResource",
                 "value": "store"
-              }
+              },
+              "work_shape": [],
+              "guard": "true",
+              "static_args": []
             }
           ]
         }

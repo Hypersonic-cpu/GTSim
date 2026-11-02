@@ -1,0 +1,42 @@
+flow.kernel @expert_gather_flow schedule<explicit> target<sm90> {
+  static.param %B : index
+  static.param %H : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  static.param %IDS : index_list
+  static.let %EO = %E+1
+  static.let %ASSIGNMENTS = %B*%TK
+  static.let %ORDER = argsort(%IDS)
+  static.let %SLOT = %ORDER[%cta]
+  static.let %TOKEN = floordiv(%SLOT,%TK)
+  static.let %EXPERT = %IDS[%SLOT]
+  flow.tensor @X : tensor<BxHxbf16, row_major>
+  flow.tensor @ExpertIDs : tensor<BxTKxint32, row_major>
+  flow.tensor @Probabilities : tensor<BxTKxbf16, row_major>
+  flow.tensor @Offsets : tensor<1xEOxint32, row_major>
+  flow.tensor @SortedX : tensor<ASSIGNMENTSxHxbf16, row_major>
+  flow.tensor @Assignments : tensor<ASSIGNMENTSx3xint32, row_major>
+  flow.tensor @SortedProbabilities : tensor<ASSIGNMENTSx1xbf16, row_major>
+  flow.schedule_config tile(1x4096x1) stages(1) warps(4) consumer_warps(1) producer_warp(0) warpgroup(4) matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ASSIGNMENTS step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<16384>
+  flow.pipeline @loop %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %x, !x_ready = flow.load_async @x @X[%TOKEN, 0]<1xH> by %producer : tensor<1xHxbf16> scope<pipeline>
+    %id, !id_ready = flow.load_async @id @ExpertIDs[%TOKEN, %SLOT mod %TK]<1x1> by %producer : tensor<1x1xint32> scope<pipeline>
+    %prob, !prob_ready = flow.load_async @prob @Probabilities[%TOKEN, %SLOT mod %TK]<1x1> by %producer : tensor<1x1xbf16> scope<pipeline>
+    %offset, !offset_ready = flow.load_async @offset @Offsets[0, %EXPERT]<1x1> by %producer : tensor<1x1xint32> scope<pipeline>
+    %assignment = flow.arithmetic @assignment implements<@assignment> reads[%id, %offset] after[@id.complete:data, @offset.complete:data] : tensor<1x3xint32> scope<pipeline>
+  }
+  !sorted_x_done = flow.store_async @sorted_x reads[%x, %assignment] cast<bf16> to @SortedX[%cta, 0]<1xH> by %producer after[@x.complete:data, @assignment.complete:data] scope<epilogue>
+  !assignment_out_done = flow.store_async @assignment_out reads[%assignment] cast<int32> to @Assignments[%cta, 0]<1x3> by %producer after[@assignment.complete:data] scope<epilogue>
+  !sorted_prob_done = flow.store_async @sorted_prob reads[%prob, %assignment] cast<bf16> to @SortedProbabilities[%cta, 0]<1x1> by %producer after[@prob.complete:data, @assignment.complete:data] scope<epilogue>
+}
+mapping.program @expert_gather_mapping flow<@expert_gather_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

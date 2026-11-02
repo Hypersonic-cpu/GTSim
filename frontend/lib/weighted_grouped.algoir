@@ -1,0 +1,22 @@
+algo.kernel @weighted_grouped(%ExpertOutput: tensor<ASSIGNMENTSxHxbf16>, %Probabilities: tensor<BxTKxbf16>, %Assignments: tensor<ASSIGNMENTSx3xint32>)
+    -> (%Output: tensor<BxHxbf16>) {
+  static.param %B : index
+  static.param %H : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  static.param %IDS : index_list
+  algo.domain %row in [0, 1)
+  algo.compute @zero result<%zero> semantics<zeros(H)>
+  algo.op @zero category<arithmetic> cost<simple> dtype<fp32> inputs[] output[%zero] reduction[]
+  algo.compute @expert_fp32 result<%expert_fp32> semantics<cast_fp32(expert)>
+  algo.op @expert_fp32 category<convert> cost<none> dtype<fp32> inputs[%expert] output[%expert_fp32] reduction[]
+  algo.compute @prob_fp32 result<%prob_fp32> semantics<cast_fp32(prob)>
+  algo.op @prob_fp32 category<convert> cost<none> dtype<fp32> inputs[%prob] output[%prob_fp32] reduction[]
+  algo.compute @multiply result<%multiply> semantics<cast_fp32(expert)*cast_fp32(probability)>
+  algo.op @multiply category<arithmetic> cost<multiply> dtype<fp32> inputs[%expert_fp32, %prob_fp32] output[%multiply] reduction[]
+  algo.compute @add result<%add> semantics<acc_prev+multiply>
+  algo.op @add category<arithmetic> cost<simple> dtype<fp32> inputs[%multiply] output[%add] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(acc_final)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%add] output[%cast] reduction[]
+  algo.compute @contract_Output result<%Output> semantics<Output[b,:] = cast_bf16(sum_s(cast_fp32(Probabilities[b,s])*cast_fp32(ExpertOutput[inverse_permutation(argsort_stable(IDS))[b*TK+s],:])))>
+}

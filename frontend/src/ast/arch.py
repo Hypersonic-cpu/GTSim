@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from .common import Header, Tensor, DataType, StaticIf
+from .common import Header, Tensor, DataType, StaticIf, StaticBinding
 from .profiles import ResourceFootprint
 from .schedule import (
     ScheduleDomain,
@@ -22,6 +22,22 @@ class NativeOpcode(str, Enum):
     MATRIX = "wgmma.m64n64k16"
     SHARED_STORE = "st.reg2sram"
     TMA_STORE = "cp.sram2dram_tma"
+    MMA = "mma.sync.m16n8k16"
+    ADD = "simd.add"
+    MUL = "simd.mul"
+    CAST = "simd.cast"
+    FILL = "simd.fill"
+    MAX = "simd.max"
+    MIN = "simd.min"
+    REDUCE_SUM = "reduce_sum"
+    REDUCE_MAX = "reduce_max"
+    SHUFFLE = "shfl"
+    DIVIDE = "sfu.divide"
+    EXP = "sfu.exp"
+    LOG = "sfu.log"
+    RSQRT = "sfu.rsqrt"
+    SIN = "sfu.sin"
+    COS = "sfu.cos"
 
 
 @dataclass(frozen=True)
@@ -30,11 +46,14 @@ class NativeStep:
     resource: ExecutionResource
     executor: IndexExpr
     loops: tuple[TileLoop, ...]
-    region: SymbolicRegion
+    region: SymbolicRegion | None
     dtype: DataType
     leading_dim: IndexExpr | None
     dependencies: tuple[Dependency, ...]
     input_steps: tuple[int, ...]
+    work_shape: tuple[int | str, ...]
+    guard: str
+    static_args: tuple[StaticBinding, ...]
 
 
 @dataclass(frozen=True)

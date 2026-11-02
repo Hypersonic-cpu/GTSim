@@ -16,7 +16,7 @@ def strides(shape):
 
 def lower_arch(arch, parameters=None):
     root_parent = Resolver(EMPTY, parameters or {})
-    root = bound_resolver(arch.static, root_parent)
+    root = bound_resolver(arch.static, root_parent).materialize_constants()
     tensors = []
     for value in arch.tensors:
         shape = tuple(root.value(v) for v in value.shape)
@@ -51,7 +51,7 @@ def lower_arch(arch, parameters=None):
         ):
             tails[region.symbol] = predecessors
             continue
-        resolver = Resolver(region.static, values)
+        resolver = Resolver(region.static, values).materialize_constants()
         for tensor in region.tensors:
             actual = by_name[tensor.id]
             if (
@@ -108,3 +108,8 @@ def lower_arch(arch, parameters=None):
         ):
             raise ValueError("execution DAG contains a forward/cyclic dependency")
     return result
+
+
+def lower_region(arch, region):
+    """Expand one region; the caller retains the enclosing stream's ordering."""
+    return lower_arch(replace(arch, regions=(replace(region, after=()),), outputs=()))

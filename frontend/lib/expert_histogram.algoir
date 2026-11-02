@@ -1,0 +1,21 @@
+algo.kernel @expert_histogram(%ExpertIDs: tensor<BxTKxint32>)
+    -> (%Counts: tensor<1xExint32>, %Offsets: tensor<1xEOxint32>) {
+  static.param %B : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  static.let %EO = %E+1
+  algo.domain %row in [0, 1)
+  algo.compute @zero result<%zero> semantics<zeros(E)>
+  algo.op @zero category<arithmetic> cost<simple> dtype<int32> inputs[] output[%zero] reduction[]
+  algo.compute @histogram result<%histogram> semantics<scatter_add(zeros, ExpertIDs, 1)>
+  algo.op @histogram category<arithmetic> cost<simple> dtype<int32> inputs[%ids, %zero] output[%histogram] reduction[]
+  algo.compute @shift result<%shift> semantics<shift_right(previous_scan, 2**k)>
+  algo.op @shift category<collective> cost<shuffle> dtype<int32> inputs[] output[%shift] reduction[]
+  algo.compute @scan result<%scan> semantics<previous_scan+shift>
+  algo.op @scan category<arithmetic> cost<simple> dtype<int32> inputs[%shift] output[%scan] reduction[]
+  algo.compute @exclusive result<%exclusive> semantics<concat(0,inclusive_scan)>
+  algo.op @exclusive category<arithmetic> cost<simple> dtype<int32> inputs[%scan] output[%exclusive] reduction[]
+  algo.compute @contract_Counts result<%Counts> semantics<Counts[e] = sum_(b,s)(ExpertIDs[b,s]==e)>
+  algo.compute @contract_Offsets result<%Offsets> semantics<concat(0,cumsum(Counts)); final offset=B*TK>
+}

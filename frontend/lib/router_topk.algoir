@@ -1,0 +1,38 @@
+algo.kernel @router_topk(%Logits: tensor<BxExbf16>)
+    -> (%ExpertIDs: tensor<BxTKxint32>, %Probabilities: tensor<BxTKxbf16>) {
+  static.param %B : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %NUM_SMS : index
+  algo.domain %row in [0, 1)
+  algo.compute @logits_fp32 result<%logits_fp32> semantics<cast_fp32(logits)>
+  algo.op @logits_fp32 category<convert> cost<none> dtype<fp32> inputs[%logits] output[%logits_fp32] reduction[]
+  algo.compute @max result<%max> semantics<max_E(Logits)>
+  algo.op @max category<reduction> cost<extremum> dtype<fp32> inputs[%logits_fp32] output[%max] reduction[]
+  algo.compute @delta result<%delta> semantics<cast_fp32(Logits)-max>
+  algo.op @delta category<arithmetic> cost<simple> dtype<fp32> inputs[%logits_fp32, %max] output[%delta] reduction[]
+  algo.compute @exp result<%exp> semantics<exp(delta)>
+  algo.op @exp category<special_function> cost<exponential> dtype<fp32> inputs[%delta] output[%exp] reduction[]
+  algo.compute @sum result<%sum> semantics<sum_E(exp)>
+  algo.op @sum category<reduction> cost<sum> dtype<fp32> inputs[%exp] output[%sum] reduction[]
+  algo.compute @softmax result<%softmax> semantics<exp/sum>
+  algo.op @softmax category<arithmetic> cost<divide> dtype<fp32> inputs[%exp, %sum] output[%softmax] reduction[]
+  algo.compute @selected_max result<%selected_max> semantics<max of unselected softmax entries>
+  algo.op @selected_max category<reduction> cost<extremum> dtype<fp32> inputs[%softmax] output[%selected_max] reduction[]
+  algo.compute @argmax result<%argmax> semantics<lowest unmasked index attaining selected_max>
+  algo.op @argmax category<arithmetic> cost<simple> dtype<int32> inputs[%selected_max, %softmax] output[%argmax] reduction[]
+  algo.compute @mask result<%mask> semantics<where(index==argmax,-inf,previous_mask if k>0 else softmax)>
+  algo.op @mask category<arithmetic> cost<simple> dtype<fp32> inputs[%argmax, %softmax] output[%mask] reduction[]
+  algo.compute @pack_ids result<%pack_ids> semantics<pack argmax indices>
+  algo.op @pack_ids category<arithmetic> cost<simple> dtype<int32> inputs[] output[%pack_ids] reduction[]
+  algo.compute @pack result<%pack> semantics<pack selected probabilities>
+  algo.op @pack category<arithmetic> cost<simple> dtype<fp32> inputs[] output[%pack] reduction[]
+  algo.compute @selected_sum result<%selected_sum> semantics<sum_TK(selected probabilities)>
+  algo.op @selected_sum category<reduction> cost<sum> dtype<fp32> inputs[%pack] output[%selected_sum] reduction[]
+  algo.compute @renormalize result<%renormalize> semantics<selected probabilities / selected_sum>
+  algo.op @renormalize category<arithmetic> cost<divide> dtype<fp32> inputs[%pack, %selected_sum] output[%renormalize] reduction[]
+  algo.compute @cast_prob result<%cast_prob> semantics<cast_bf16(renormalize)>
+  algo.op @cast_prob category<convert> cost<none> dtype<bf16> inputs[%renormalize] output[%cast_prob] reduction[]
+  algo.compute @contract_ExpertIDs result<%ExpertIDs> semantics<stable_topk_indices(softmax(cast_fp32(Logits)),TK)>
+  algo.compute @contract_Probabilities result<%Probabilities> semantics<cast_bf16(gather(softmax(cast_fp32(Logits)),ExpertIDs) / sum_TK(gather(softmax(cast_fp32(Logits)),ExpertIDs)))>
+}

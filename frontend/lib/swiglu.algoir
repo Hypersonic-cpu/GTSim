@@ -1,0 +1,24 @@
+algo.kernel @swiglu(%X: tensor<ROWSxTWICExbf16>)
+    -> (%Output: tensor<ROWSxWIDTHxbf16>) {
+  static.param %ROWS : index
+  static.param %WIDTH : index
+  static.param %NUM_SMS : index
+  algo.domain %row in [0, 1)
+  algo.compute @gate_fp32 result<%gate_fp32> semantics<cast_fp32(gate)>
+  algo.op @gate_fp32 category<convert> cost<none> dtype<fp32> inputs[%gate] output[%gate_fp32] reduction[]
+  algo.compute @negate result<%negate> semantics<-cast_fp32(Gate)>
+  algo.op @negate category<arithmetic> cost<simple> dtype<fp32> inputs[%gate_fp32] output[%negate] reduction[]
+  algo.compute @exp result<%exp> semantics<exp(negate)>
+  algo.op @exp category<special_function> cost<exponential> dtype<fp32> inputs[%negate] output[%exp] reduction[]
+  algo.compute @one_plus result<%one_plus> semantics<1+exp>
+  algo.op @one_plus category<arithmetic> cost<simple> dtype<fp32> inputs[%exp] output[%one_plus] reduction[]
+  algo.compute @silu result<%silu> semantics<Gate / one_plus>
+  algo.op @silu category<arithmetic> cost<divide> dtype<fp32> inputs[%gate_fp32, %one_plus] output[%silu] reduction[]
+  algo.compute @up_fp32 result<%up_fp32> semantics<cast_fp32(up)>
+  algo.op @up_fp32 category<convert> cost<none> dtype<fp32> inputs[%up] output[%up_fp32] reduction[]
+  algo.compute @multiply result<%multiply> semantics<silu * Up>
+  algo.op @multiply category<arithmetic> cost<multiply> dtype<fp32> inputs[%silu, %up_fp32] output[%multiply] reduction[]
+  algo.compute @cast result<%cast> semantics<cast_bf16(multiply)>
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%multiply] output[%cast] reduction[]
+  algo.compute @contract_Output result<%Output> semantics<cast_bf16(silu(cast_fp32(X[:,0:WIDTH])) * cast_fp32(X[:,WIDTH:2*WIDTH]))>
+}

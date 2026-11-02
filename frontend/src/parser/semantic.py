@@ -237,11 +237,11 @@ def value(text):
 
 
 def region(text):
-    name, offsets, shape = match(r"@(\w+)\[(.*?)\]<([\dx]+)>", text).groups()
+    name, offsets, shape = match(r"@(\w+)\[(.*?)\]<([^>]+)>", text).groups()
     return A.SymbolicRegion(
         name,
         tuple(A.IndexExpr(expression=x.strip()) for x in split_balanced(offsets)),
-        tuple(int(n) for n in shape.split("x")),
+        tuple(scalar(n.lstrip("%")) for n in shape.split("x")),
     )
 
 
@@ -253,6 +253,9 @@ def operation(line, stage, views):
         "load_async": A.OpKind.COPY,
         "matmul": A.OpKind.MATRIX,
         "store_async": A.OpKind.STORE,
+        "arithmetic": A.OpKind.ARITHMETIC,
+        "special_function": A.OpKind.SPECIAL_FUNCTION,
+        "reduction": A.OpKind.REDUCTION,
     }.get(opcode)
     if kind is None:
         raise ValueError(f"unsupported Flow operation: {opcode}")
@@ -264,7 +267,9 @@ def operation(line, stage, views):
             A.Dependency(src, A.Phase(phase), dependency_kind(relation), relation)
         )
     reads = re.search(r"reads\[(.*?)\]", line)
-    operands = tuple(value(v) for v in reads[1].split(",")) if reads else ()
+    operands = (
+        tuple(value(v) for v in reads[1].split(",") if v.strip()) if reads else ()
+    )
     reg = region(line) if re.search(r"@\w+\[", line) else None
     executor = A.ExecutorRole.MATRIX if opcode == "matmul" else A.ExecutorRole.PRODUCER
     buffer_match = re.search(r"(?:slots\[|to\s+)%([\w]+)\.s", line)
@@ -278,13 +283,21 @@ def operation(line, stage, views):
     dest = re.search(r"to\s+(%[\w.]+\([^)]*\))", line)
     cast = re.search(r"cast<(\w+)>", line)
     results = ()
-    if opcode in ("load_async", "matmul"):
+    if opcode in (
+        "load_async",
+        "matmul",
+        "arithmetic",
+        "special_function",
+        "reduction",
+    ):
         ty = tensor(identity, match(r":\s*(tensor<[^>]+>)", line)[1])
         results = (A.SSAValue(A.ValueId(identity, 0, 0, None), ty.shape, ty.dtype),)
     return A.FlowOp(
         identity,
         kind,
-        A.Scope.EPILOGUE if opcode == "store_async" else A.Scope.PIPELINE,
+        A.Scope(re.search(r"scope<(\w+)>", line)[1])
+        if "scope<" in line
+        else (A.Scope.EPILOGUE if opcode == "store_async" else A.Scope.PIPELINE),
         executor,
         operands,
         tuple(deps),
@@ -299,6 +312,28 @@ def operation(line, stage, views):
         implements=(
             re.search(r"implements<@(\w+)>", line)[1] if "implements<" in line else None
         ),
+        iterations=tuple(
+            A.TileLoop(name, name, 0, scalar(stop.strip()), 1)
+            for name, stop in re.findall(r"iterate<%(\w+)\s*=\s*0\s+to\s+(.*?)>", line)
+        ),
+        work_shape=tuple(
+            scalar(v.lstrip("%"))
+            for v in re.search(r"work<([^>]+)>", line)[1].split("x")
+        )
+        if "work<" in line
+        else (),
+        guard=re.search(r"static.if<(.*?)>", line)[1]
+        if "static.if<" in line
+        else "true",
+        static_args=tuple(
+            A.StaticBinding(key.strip(), expr.strip())
+            for key, expr in (
+                item.split("=", 1)
+                for item in split_balanced(re.search(r"static.args<(.*?)>", line)[1])
+            )
+        )
+        if "static.args<" in line
+        else (),
     )
 
 
@@ -444,8 +479,19 @@ def flow_region(root, mapping, static):
                 line,
             ).groups()
             buffers.append(A.Buffer(name, int(slots), A.AccessMode(access), int(size)))
-        elif "flow.store_async" in line:
-            ops.append(operation(line, pipeline.stage, views))
+        elif re.search(
+            r"flow\.(?:store_async|load_async|arithmetic|special_function|reduction)",
+            line,
+        ):
+            ops.append(
+                operation(
+                    line,
+                    pipeline.stage
+                    if pipeline
+                    else A.PipelineStage(A.IterationId(A.IndexExpr("%k")), 1, (1,)),
+                    views,
+                )
+            )
         else:
             raise ValueError(f"unsupported Flow statement: {line}")
     if pipeline is None:
@@ -569,6 +615,7 @@ def math_operation(line):
         A.OperationClass.ARITHMETIC: A.ArithmeticCost,
         A.OperationClass.SPECIAL_FUNCTION: A.SpecialFunction,
         A.OperationClass.REDUCTION: A.ReductionKind,
+        A.OperationClass.COLLECTIVE: A.CollectiveKind,
     }
     if category in subtypes:
         cost = subtypes[category](cost)

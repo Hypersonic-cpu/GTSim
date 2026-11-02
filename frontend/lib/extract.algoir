@@ -1,0 +1,11 @@
+algo.kernel @extract(%Input: tensor<BxINPUT_WIDTHxbf16>)
+    -> (%Output: tensor<HEAD_ROWSxDxbf16>) {
+  static.param %B : index
+  static.param %HEADS : index
+  static.param %D : index
+  static.param %INPUT_WIDTH : index
+  static.param %OFFSET : index
+  static.param %NUM_SMS : index
+  algo.domain %row in [0, 1)
+  algo.compute @contract_Output result<%Output> semantics<Output[b*HEADS+h,:] = Input[b,OFFSET+h*D:OFFSET+(h+1)*D]>
+}
