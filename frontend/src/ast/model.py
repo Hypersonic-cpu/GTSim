@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import TypeAlias
+from enum import Enum
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +19,21 @@ class Operation:
     body: tuple["Node", ...]
 
 
-Node: TypeAlias = Statement | Operation
+class StaticBranchKind(str, Enum):
+    IF = "if"
+    ELIF = "elif"
+    ELSE = "else"
+
+
+@dataclass(frozen=True, slots=True)
+class StaticBranch:
+    kind: StaticBranchKind
+    condition: str | None
+    iterations: tuple[str, ...]
+    body: tuple["Node", ...]
+
+
+Node: TypeAlias = Statement | Operation | StaticBranch
 
 
 @dataclass(frozen=True, slots=True)

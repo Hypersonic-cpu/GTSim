@@ -102,21 +102,45 @@ int main() {
         require(reuse,"GEMM buffer is reused without consumer completion");
     }
     {
-        KernelOptions o; o.bm=64; o.bn=128; o.order="m-major";
-        std::unique_ptr<DAG> d(build_gemm_h100(128,256,256,o,hardware));
-        auto* ld=d->nodes_by_name.at("TB1_Tile1_TMA_LoadA_k0");
-        require(ld->sm_id==1 && ld->tile.r_off==64,"GEMM order does not change execution/SM mapping");
-        auto* next=d->nodes_by_name.at("TB0_Tile0_TMA_LoadA_k1");
-        require(!next->issue_depends_on.empty(),"TMA issue order missing");
+        KernelOptions o;
+        o.bm = 64;
+        o.bn = 128;
+        o.order = "m-major";
+        std::unique_ptr<DAG> d(build_gemm_h100(128, 256, 256, o, hardware));
+        auto* ld = d->nodes_by_name.at("TB1_Tile1_TMA_LoadA_k0");
+        require(ld->sm_id == 1 && ld->tile.r_off == 64,
+                "GEMM order does not change execution/SM mapping");
+        auto* next = d->nodes_by_name.at("TB0_Tile0_TMA_LoadA_k1");
+        int previous_batch_size = 0;
+        for (auto* previous : d->nodes) {
+            if (previous->name.find("TB0_Tile0_TMA_Load") == 0 &&
+                previous->name.find("_k0") != std::string::npos) {
+                require(std::find(next->depends_on.begin(),
+                                  next->depends_on.end(),
+                                  previous->id) != next->depends_on.end(),
+                        "TMA load must wait for all previous A/B completions");
+                require(
+                    std::find(next->issue_depends_on.begin(),
+                              next->issue_depends_on.end(),
+                              previous->id) == next->issue_depends_on.end(),
+                    "TMA completion edge must not be replaced by issue order");
+                ++previous_batch_size;
+            }
+        }
+        require(previous_batch_size == 3,
+                "previous batch must include A and both B chunks");
     }
     {
-        KernelOptions o; o.q_tile=64;o.kv_tile=64;o.stages=3;
-        std::unique_ptr<DAG> d(build_fa3_h100(64,512,1,1,1,o,hardware));
-        auto* k=d->nodes_by_name.at("TB0_K_Load0_k3");
-        auto* v=d->nodes_by_name.at("TB0_V_Load0_k3");
-        for(auto* load:{k,v}) {
-            bool found=false;
-            for(int id:load->depends_on) {
+        KernelOptions o;
+        o.q_tile = 64;
+        o.kv_tile = 64;
+        o.stages = 3;
+        std::unique_ptr<DAG> d(build_fa3_h100(64, 512, 1, 1, 1, o, hardware));
+        auto* k = d->nodes_by_name.at("TB0_K_Load0_k3");
+        auto* v = d->nodes_by_name.at("TB0_V_Load0_k3");
+        for (auto* load : {k, v}) {
+            bool found = false;
+            for (int id : load->depends_on) {
                 auto& name=d->nodes[id]->name;
                 if(name.find(load==k ? "_WGMMA_SS_" : "_WGMMA_RS_")!=std::string::npos &&
                    name.find("_k0_")!=std::string::npos) found=true;

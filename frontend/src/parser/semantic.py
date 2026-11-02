@@ -1,6 +1,7 @@
 """Convert parsed assembly into independent, typed IR data structures."""
 
 import re
+from dataclasses import replace
 from . import ast as A
 
 
@@ -40,7 +41,7 @@ def tensor(name, text, **options):
 def statements(nodes):
     result = []
     for node in nodes:
-        if isinstance(node, A.Operation):
+        if isinstance(node, (A.Operation, A.StaticBranch)):
             result.append(node)
         elif node.opcode or not result or not isinstance(result[-1], str):
             if node.text.strip():
@@ -57,13 +58,9 @@ def assignments(text):
     )
 
 
-def prog(root):
+def prog(root, static):
     header = " ".join(root.header)
-    symbol, params = match(r"prog.program\s+@(\w+)\s+params\((.*?)\)", header).groups()
-    declarations = tuple(
-        (name, A.DataType(dtype))
-        for name, dtype in re.findall(r"%(\w+)\s*:\s*(\w+)", params)
-    )
+    symbol = match(r"prog.program\s+@(\w+)", header)[1]
     tensors, streams, launches, commands = [], [], [], []
     returns, after = (), ()
     for node in statements(root.body):
@@ -119,17 +116,17 @@ def prog(root):
             raise ValueError(f"unsupported program statement: {node}")
     return A.ProgIR(
         symbol,
+        static=static,
         tensors=tuple(tensors),
         streams=tuple(streams),
         launches=tuple(launches),
         commands=tuple(commands),
-        parameters=declarations,
         returns=returns,
         return_after=after,
     )
 
 
-def algo(root):
+def algo(root, static):
     header = " ".join(root.header)
     symbol, ins, outs = match(
         r"algo.kernel\s+@(\w+)\((.*?)\)\s*->\s*\((.*?)\)", header
@@ -186,6 +183,9 @@ def algo(root):
             raise ValueError(f"unsupported algorithm statement: {line}")
     return A.AlgoIR(
         symbol,
+        static=static,
+        inputs=tuple(re.findall(r"%(\w+):", ins)),
+        outputs=tuple(re.findall(r"%(\w+):", outs)),
         tensors=tensors,
         domains=tuple(domains),
         accumulators=tuple(accumulators),
@@ -215,7 +215,7 @@ def region(text):
     name, offsets, shape = match(r"@(\w+)\[(.*?)\]<([\dx]+)>", text).groups()
     return A.SymbolicRegion(
         name,
-        tuple(A.IndexExpr(expression=x.strip()) for x in offsets.split(",")),
+        tuple(A.IndexExpr(expression=x.strip()) for x in split_balanced(offsets)),
         tuple(int(n) for n in shape.split("x")),
     )
 
@@ -271,18 +271,53 @@ def operation(line, stage, views):
         destination=dest[1] if dest else None,
         event=event[1] if event else None,
         cast=A.DataType(cast[1]) if cast else None,
+        implements=(
+            re.search(r"implements<@(\w+)>", line)[1] if "implements<" in line else None
+        ),
     )
 
 
-def flow(root, mapping):
+def flow_statements(nodes, condition="true"):
+    """Preserve branch guards while decoding Flow dependency-rule leaves."""
+    alternatives = []
+    for node in statements(nodes):
+        if isinstance(node, A.StaticBranch):
+            if node.iterations:
+                if node.kind != A.StaticBranchKind.IF or condition != "true":
+                    raise ValueError(
+                        "nested scoped static branches are not supported yet"
+                    )
+                yield node, "true"
+                yield from flow_statements(node.body)
+                continue
+            if node.kind == A.StaticBranchKind.IF:
+                alternatives = []
+            prior = " or ".join(f"({value})" for value in alternatives)
+            selected = node.condition or "true"
+            if prior:
+                selected = f"not ({prior}) and ({selected})"
+            effective = (
+                selected if condition == "true" else f"({condition}) and ({selected})"
+            )
+            yield from flow_statements(node.body, effective)
+            if node.condition is not None:
+                alternatives.append(node.condition)
+        else:
+            if condition != "true" and (
+                not isinstance(node, str) or not node.startswith("flow.dependency_rule")
+            ):
+                raise ValueError(
+                    "Flow static branches currently support dependency rules only"
+                )
+            yield node, condition
+
+
+def flow_region(root, mapping, static):
     symbol, schedule, target = match(
-        r"flow.kernel\s+@(\w+)\s+schedule<(\w+)>\s+target<(\w+)>", " ".join(root.header)
+        r"flow.(?:kernel|region)\s+@(\w+)\s+schedule<(\w+)>\s+target<(\w+)>",
+        " ".join(root.header),
     ).groups()
-    symbols = []
-    requirements = ()
     tensors = []
-    expr = ()
-    tilemap = ()
     executors = []
     buffers = []
     views = []
@@ -290,7 +325,15 @@ def flow(root, mapping):
     ops = []
     config = {}
     pipeline = None
-    for node in statements(root.body):
+    rules = []
+    static_ifs = []
+    mathematics = {}
+    for node, static_condition in flow_statements(root.body):
+        if isinstance(node, A.StaticBranch):
+            static_ifs.append(
+                A.StaticIf(node.condition.lstrip("%"), node.condition, node.iterations)
+            )
+            continue
         if isinstance(node, A.Operation):
             text = " ".join(node.header)
             name, var, end, depth, gens = match(
@@ -300,39 +343,55 @@ def flow(root, mapping):
             stage = A.PipelineStage(
                 A.IterationId(A.IndexExpr(expression="%" + var)),
                 int(depth),
-                split_balanced(gens),
+                tuple(scalar(v) for v in split_balanced(gens)),
             )
             pipeline = A.PipelineRegion(
                 name,
-                A.TileLoop(name, var, 0, end.strip(), 1),
+                A.TileLoop(name, var, 0, scalar(end.strip()), 1),
                 int(depth),
                 stage,
             )
             ops.extend(operation(line, stage, views) for line in statements(node.body))
             continue
         line = node
-        if line.startswith("flow.symbol"):
-            name, lo, hi = match(
-                r"flow.symbol\s+%(\w+)\s+range\[([^,]+),\s*([^]]+)\]", line
+        if line.startswith("flow.math"):
+            op = math_operation(line)
+            mathematics[op.id] = op
+        elif line.startswith("flow.dependency_rule"):
+            name, sources, bindings, selection = match(
+                r"flow.dependency_rule\s+@(\w+)\s+from\[(.*?)\]\s+at\[(.*?)\]\s+select<(\w+)>",
+                line,
             ).groups()
-            symbols.append((name, lo, hi))
-        elif line.startswith("flow.require"):
-            requirements = tuple(
-                x.strip() for x in match(r"<(.*)>", line)[1].split(",")
+            events = [
+                match(r"@(\w+)\.(\w+)", part).groups() for part in sources.split(",")
+            ]
+            phases = {phase for _, phase in events}
+            if len(phases) != 1:
+                raise ValueError("dependency_rule sources must share an event phase")
+            rules.append(
+                A.DependencyRule(
+                    name,
+                    tuple(source for source, _ in events),
+                    A.Phase(next(iter(phases))),
+                    A.Selection(selection),
+                    static_condition,
+                    tuple(
+                        (key.strip().lstrip("%"), value.strip())
+                        for key, value in (
+                            entry.split("=", 1) for entry in split_balanced(bindings)
+                        )
+                    ),
+                )
             )
         elif line.startswith("flow.tensor"):
             tensors.append(tensor(match(r"flow.tensor\s+@(\w+)", line)[1], line))
-        elif line.startswith("flow.domain"):
-            expr = assignments(line)
         elif line.startswith("flow.schedule_config"):
             config = dict(re.findall(r"(\w+)\(([^)]+)\)", line))
         elif line.startswith("flow.loop"):
             loop_id, var, end = match(
                 r"flow.loop\s+@(\w+)\s+%(\w+)\s*=\s*0\s+to\s+(.*?)\s+step\s+1", line
             ).groups()
-            loops.append(A.TileLoop(loop_id, var, 0, end, 1))
-        elif line.startswith("flow.tile_map"):
-            tilemap = assignments(line)
+            loops.append(A.TileLoop(loop_id, var, 0, scalar(end), 1))
         elif line.startswith("flow.executor"):
             name, role, organization = match(
                 r"flow.executor\s+%(\w+)\s+role<(\w+)>\s+organization<(\w+)>", line
@@ -426,22 +485,27 @@ def flow(root, mapping):
     if mtarget != target:
         raise ValueError("mapping target differs from flow.kernel target")
     domain = A.ScheduleDomain(pipeline, tuple(loops))
-    return A.FlowIR(
+    return A.FlowRegion(
         symbol,
+        static=static,
         schedule_id=schedule,
         config=profile,
         domain=domain,
         tensors=tuple(tensors),
         mapping=mapobj,
-        ops=tuple(ops),
-        symbols=tuple(symbols),
-        requirements=requirements,
-        expressions=expr,
-        tile_map=tilemap,
+        ops=tuple(replace(op, math=mathematics.get(op.implements)) for op in ops),
         executors=tuple(executors),
         buffers=tuple(buffers),
         buffer_views=tuple(views),
         mapping_symbol=mapping_symbol,
+        dependency_rules=tuple(rules),
+        static_ifs=tuple(static_ifs),
+        after=items(re.search(r"after\[(.*?)\]", " ".join(root.header))[1])
+        if "after[" in " ".join(root.header)
+        else (),
+        origin=re.search(r"origin<@(\w+)>", " ".join(root.header))[1]
+        if "origin<" in " ".join(root.header)
+        else None,
     )
 
 
@@ -466,13 +530,13 @@ def dependency_kind(label):
     if label in ("previous_tile_store", "previous_chunk"):
         return A.DependencyKind.OUTPUT_ORDER
     if label == "previous_load":
-        return A.DependencyKind.ISSUE_ORDER
+        return A.DependencyKind.LOOP_CARRIED
     return A.DependencyKind.DATA
 
 
 def math_operation(line):
     identity, category, cost, dtype, inputs, output, axes = match(
-        r"algo.op\s+@(\w+)\s+category<(\w+)>\s+cost<(\w+)>\s+dtype<(\w+)>\s+inputs\[(.*?)\]\s+output\[%(\w+)\]\s+reduction\[(.*?)\]",
+        r"(?:algo.op|flow.math)\s+@(\w+)\s+category<(\w+)>\s+cost<(\w+)>\s+dtype<(\w+)>\s+inputs\[(.*?)\]\s+output\[%(\w+)\]\s+reduction\[(.*?)\]",
         line,
     ).groups()
     category = A.OperationClass(category)
@@ -489,4 +553,38 @@ def math_operation(line):
         raise ValueError(f"{category.value} does not accept cost subtype {cost}")
     return A.MathOperation(
         identity, category, cost, A.DataType(dtype), items(inputs), output, items(axes)
+    )
+
+
+def flow_program(root, static):
+    from .static import declarations
+
+    header = " ".join(root.header)
+    symbol = match(r"flow.program\s+@(\w+)", header)[1]
+    stream = re.search(r"stream<@(\w+)>", header)
+    outputs = re.search(r"outputs\[(.*?)\]", header)
+    tensors, regions, mappings = [], [], {}
+    for node in statements(root.body):
+        if isinstance(node, A.Operation) and node.name == "mapping.program":
+            mappings[match(r"flow<@(\w+)>", " ".join(node.header))[1]] = node
+    for node in statements(root.body):
+        if isinstance(node, A.Operation):
+            if node.name == "mapping.program":
+                continue
+            if node.name != "flow.region":
+                raise ValueError(f"unsupported Flow region: {node.name}")
+            body, local = declarations(node)
+            name = match(r"flow.region\s+@(\w+)", " ".join(node.header))[1]
+            regions.append(flow_region(body, mappings[name], local))
+        elif node.startswith("flow.tensor"):
+            tensors.append(tensor(match(r"flow.tensor\s+@(\w+)", node)[1], node))
+        else:
+            raise ValueError(f"unsupported Flow program statement: {node}")
+    return A.FlowIR(
+        symbol,
+        static,
+        tuple(tensors),
+        tuple(regions),
+        stream[1] if stream else None,
+        items(outputs[1]) if outputs else (),
     )

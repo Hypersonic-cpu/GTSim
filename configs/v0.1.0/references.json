@@ -7,10 +7,14 @@
       "status": "release_reproduced",
       "workload": "H100 persistent two-stage GEMM",
       "hardware": "H100 SXM",
-      "arguments": ["512", "512", "512"],
-      "previous_total_cycles": 12956,
-      "expected_total_cycles": 12249,
-      "cycle_change_reason": "TMA loads for successive K tiles use issue-order dependencies, allowing transfers to overlap before prior values return.",
+      "arguments": [
+        "512",
+        "512",
+        "512"
+      ],
+      "previous_total_cycles": 12249,
+      "expected_total_cycles": 13169,
+      "cycle_change_reason": "Restore original completion-order dependencies between all successive A/B TMA load batches, retaining corrected cross-wave ping-pong buffer reuse and clamped column-group coverage. No hardware timing constants changed.",
       "command": "gtsim_gemm configs/v0.1.0/h100-sxm.yaml --memory-config configs/v0.1.0/memory_full_hbm-0F5M.yaml 512 512 512"
     },
     {
@@ -18,7 +22,13 @@
       "status": "release_reproduced",
       "workload": "H100 FA3 two-stage pipeline",
       "hardware": "H100 SXM",
-      "arguments": ["1", "1", "1", "128", "128"],
+      "arguments": [
+        "1",
+        "1",
+        "1",
+        "128",
+        "128"
+      ],
       "previous_total_cycles": 7168,
       "expected_total_cycles": 7212,
       "cycle_change_reason": "Adds the configured D2D request/response path.",

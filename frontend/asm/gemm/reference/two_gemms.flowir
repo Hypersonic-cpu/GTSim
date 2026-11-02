@@ -1,0 +1,174 @@
+flow.program @two_gemms stream<@compute> outputs[@Y] {
+  flow.tensor @X : tensor<256x192xfp16> storage<HBM> external readonly
+  flow.tensor @W0 : tensor<192x256xfp16> storage<HBM> external readonly
+  flow.tensor @H : tensor<256x256xfp16> storage<HBM>
+  flow.tensor @W1 : tensor<256x512xfp16> storage<HBM> external readonly
+  flow.tensor @Y : tensor<256x512xfp16> storage<HBM>
+  flow.region @first schedule<ref_h100_gemm_v0_1_0> target<sm90> origin<@gemm_reference> after[] {
+    static.let %tile = (%cta + (%wave * 1))
+    static.let %group = floordiv(%tile, 2)
+    static.let %group_start = (%group * 1)
+    static.let %group_width = min(1, (1 - %group_start))
+    static.let %group_tile = (%tile - (%group_start * 2))
+    static.let %row = floordiv(%group_tile, %group_width)
+    static.let %column = (%group_start + (%group_tile mod %group_width))
+    static.pred %valid_tile = (%tile < 2)
+    static.pred %has_previous_k = (%k > 0)
+    static.pred %previous_wave_start = ((%k == 0) and (%wave > 0))
+    static.pred %reuse_current_wave = (%k >= 2)
+    static.pred %has_previous_fragment = has_previous_fragment(%executor)
+    static.pred %in_pipeline = (%scope == 'pipeline')
+    static.pred %in_epilogue = (%scope == 'epilogue')
+    static.pred %has_previous_chunk = (%chunk > 0)
+    flow.math @matmul category<matrix> cost<none> dtype<fp32> inputs[%X, %W0] output[%acc] reduction[k]
+    flow.math @cast_output category<convert> cost<none> dtype<fp16> inputs[%acc] output[%H] reduction[]
+    flow.tensor @X : tensor<256x192xfp16, row_major>
+    flow.tensor @W0 : tensor<192x256xfp16, row_major>
+    flow.tensor @H : tensor<256x256xfp16, row_major>
+    flow.schedule_config tile(128x256x64) stages(2)
+        warps(12) consumer_warps(8)
+        producer_warp(8) warpgroup(4)
+        matrix_tile(64x64x16)
+    flow.loop @cta %cta = 0 to 1 step 1
+    flow.loop @wave %wave = 0 to 2 step 1
+    static.if <%has_previous_k> {
+      flow.dependency_rule @previous_load from[@load_A.complete, @load_B.complete] at[%wave = %wave, %k = (%k - 1)] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @previous_load from[@load_A.complete, @load_B.complete] at[%wave = (%wave - 1), %k = 2] select<all>
+    }
+    static.if <%reuse_current_wave> {
+      flow.dependency_rule @buffer_reuse from[@matmul.complete] at[%wave = %wave, %k = (%k - 2)] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @buffer_reuse from[@matmul.complete] at[%wave = (%wave - 1), %k = 2] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @previous_tile_store from[@store.complete] at[%wave = (%wave - 1)] select<all>
+    }
+    flow.dependency_rule @final_round from[@matmul.complete] at[%wave = %wave, %k = 2] select<all>
+    static.if <%has_previous_fragment> {
+      flow.dependency_rule @previous_fragment from[@matmul.complete] at[%wave = %wave] select<last_per_executor>
+    }
+    static.if <%in_pipeline> {
+      flow.dependency_rule @warp_tail from[@matmul.complete] at[%wave = %wave, %k = %k] select<last_per_executor>
+    }
+    static.if <%in_epilogue> {
+      flow.dependency_rule @warp_tail from[@matmul.complete] at[%wave = %wave, %k = 2] select<last_per_executor>
+    }
+    static.if <%has_previous_chunk> {
+      flow.dependency_rule @previous_chunk from[@store.issue] at[%wave = %wave, %chunk = (%chunk - 1)] select<all>
+    }
+    flow.executor %producer role<producer> organization<independent>
+    flow.executor %matrix role<matrix> organization<cooperative>
+    flow.buffer %ab_stage slots(2) access<read_write> : bytes_per_slot<49152>
+    flow.buffer %output slots(1) access<read_write> : bytes_per_slot<65536>
+    flow.buffer_view %a_stage of %ab_stage offset<0> : buffer<128x64xfp16>
+    flow.buffer_view %b_stage of %ab_stage offset<16384> : buffer<64x256xfp16>
+    static.if <%valid_tile> scope[%cta, %wave] {
+      flow.pipeline @k_loop %k = 0 to 3 step 1 depth(2)
+          generation_counts_per_wave[2, 1] {
+        flow.acquire @acquire scope<pipeline> slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:buffer_reuse]
+        %load_A, !load_A_ready = flow.load_async @load_A @X[(%row * 128), (%k * 64)]<128x64> to %a_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.complete:previous_load, @load_B.complete:previous_load] requires<bulk_copy> : tensor<128x64xfp16>
+        %load_B, !load_B_ready = flow.load_async @load_B @W0[(%k * 64), (%column * 256)]<64x256> to %b_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.complete:previous_load, @load_B.complete:previous_load] requires<bulk_copy> : tensor<64x256xfp16>
+        %matmul, !matmul_done = flow.matmul @matmul implements<@matmul> reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@H[(%row * 128), (%column * 256)]<128x256>> by %matrix after[@load_A.ready:load_A, @load_B.ready:load_B, @matmul.complete:previous_fragment, @store.complete:previous_tile_store] requires<matrix.mma> : tensor<128x256xfp32>
+        flow.release @release slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:warp_tail]
+      }
+      !store_done = flow.store_async @store implements<@cast_output> reads[%matmul] cast<fp16> to @H[(%row * 128), (%column * 256)]<128x256> by %producer after[@matmul.complete:warp_tail, @matmul.complete:final_round, @store.issue:previous_chunk] requires<bulk_copy>
+    }
+  }
+  
+  mapping.program @first_mapping flow<@first>
+      target<sm90> placement<original> {
+    map.execute @producer capability<bulk_copy> -> @TMA
+    map.execute @matrix capability<matrix.mma> -> @WGMMA
+    map.store @ab_stage -> @SMEM
+    map.store @output -> @SMEM
+    map.route @input_route capability<bulk_copy> @HBM -> @SMEM via<@tma_route>
+  }
+  flow.region @second schedule<ref_h100_gemm_v0_1_0> target<sm90> origin<@gemm_reference> after[@first] {
+    static.let %tile = (%cta + (%wave * 1))
+    static.let %group = floordiv(%tile, 4)
+    static.let %group_start = (%group * 2)
+    static.let %group_width = min(2, (2 - %group_start))
+    static.let %group_tile = (%tile - (%group_start * 2))
+    static.let %row = floordiv(%group_tile, %group_width)
+    static.let %column = (%group_start + (%group_tile mod %group_width))
+    static.pred %valid_tile = (%tile < 4)
+    static.pred %has_previous_k = (%k > 0)
+    static.pred %previous_wave_start = ((%k == 0) and (%wave > 0))
+    static.pred %reuse_current_wave = (%k >= 2)
+    static.pred %has_previous_fragment = has_previous_fragment(%executor)
+    static.pred %in_pipeline = (%scope == 'pipeline')
+    static.pred %in_epilogue = (%scope == 'epilogue')
+    static.pred %has_previous_chunk = (%chunk > 0)
+    flow.math @matmul category<matrix> cost<none> dtype<fp32> inputs[%H, %W1] output[%acc] reduction[k]
+    flow.math @cast_output category<convert> cost<none> dtype<fp16> inputs[%acc] output[%Y] reduction[]
+    flow.tensor @H : tensor<256x256xfp16, row_major>
+    flow.tensor @W1 : tensor<256x512xfp16, row_major>
+    flow.tensor @Y : tensor<256x512xfp16, row_major>
+    flow.schedule_config tile(128x256x64) stages(2)
+        warps(12) consumer_warps(8)
+        producer_warp(8) warpgroup(4)
+        matrix_tile(64x64x16)
+    flow.loop @cta %cta = 0 to 1 step 1
+    flow.loop @wave %wave = 0 to 4 step 1
+    static.if <%has_previous_k> {
+      flow.dependency_rule @previous_load from[@load_A.complete, @load_B.complete] at[%wave = %wave, %k = (%k - 1)] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @previous_load from[@load_A.complete, @load_B.complete] at[%wave = (%wave - 1), %k = 3] select<all>
+    }
+    static.if <%reuse_current_wave> {
+      flow.dependency_rule @buffer_reuse from[@matmul.complete] at[%wave = %wave, %k = (%k - 2)] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @buffer_reuse from[@matmul.complete] at[%wave = (%wave - 1), %k = 2] select<all>
+    }
+    static.if <((%k == 1) and (%wave > 0))> {
+      flow.dependency_rule @buffer_reuse from[@matmul.complete] at[%wave = (%wave - 1), %k = 3] select<all>
+    }
+    static.if <%previous_wave_start> {
+      flow.dependency_rule @previous_tile_store from[@store.complete] at[%wave = (%wave - 1)] select<all>
+    }
+    flow.dependency_rule @final_round from[@matmul.complete] at[%wave = %wave, %k = 3] select<all>
+    static.if <%has_previous_fragment> {
+      flow.dependency_rule @previous_fragment from[@matmul.complete] at[%wave = %wave] select<last_per_executor>
+    }
+    static.if <%in_pipeline> {
+      flow.dependency_rule @warp_tail from[@matmul.complete] at[%wave = %wave, %k = %k] select<last_per_executor>
+    }
+    static.if <%in_epilogue> {
+      flow.dependency_rule @warp_tail from[@matmul.complete] at[%wave = %wave, %k = 3] select<last_per_executor>
+    }
+    static.if <%has_previous_chunk> {
+      flow.dependency_rule @previous_chunk from[@store.issue] at[%wave = %wave, %chunk = (%chunk - 1)] select<all>
+    }
+    flow.executor %producer role<producer> organization<independent>
+    flow.executor %matrix role<matrix> organization<cooperative>
+    flow.buffer %ab_stage slots(2) access<read_write> : bytes_per_slot<49152>
+    flow.buffer %output slots(1) access<read_write> : bytes_per_slot<65536>
+    flow.buffer_view %a_stage of %ab_stage offset<0> : buffer<128x64xfp16>
+    flow.buffer_view %b_stage of %ab_stage offset<16384> : buffer<64x256xfp16>
+    static.if <%valid_tile> scope[%cta, %wave] {
+      flow.pipeline @k_loop %k = 0 to 4 step 1 depth(2)
+          generation_counts_per_wave[2, 2] {
+        flow.acquire @acquire scope<pipeline> slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:buffer_reuse]
+        %load_A, !load_A_ready = flow.load_async @load_A @H[(%row * 128), (%k * 64)]<128x64> to %a_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.complete:previous_load, @load_B.complete:previous_load] requires<bulk_copy> : tensor<128x64xfp16>
+        %load_B, !load_B_ready = flow.load_async @load_B @W1[(%k * 64), (%column * 256)]<64x256> to %b_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.complete:previous_load, @load_B.complete:previous_load] requires<bulk_copy> : tensor<64x256xfp16>
+        %matmul, !matmul_done = flow.matmul @matmul implements<@matmul> reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@Y[(%row * 128), (%column * 256)]<128x256>> by %matrix after[@load_A.ready:load_A, @load_B.ready:load_B, @matmul.complete:previous_fragment, @store.complete:previous_tile_store] requires<matrix.mma> : tensor<128x256xfp32>
+        flow.release @release slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:warp_tail]
+      }
+      !store_done = flow.store_async @store implements<@cast_output> reads[%matmul] cast<fp16> to @Y[(%row * 128), (%column * 256)]<128x256> by %producer after[@matmul.complete:warp_tail, @matmul.complete:final_round, @store.issue:previous_chunk] requires<bulk_copy>
+    }
+  }
+  
+  mapping.program @second_mapping flow<@second>
+      target<sm90> placement<original> {
+    map.execute @producer capability<bulk_copy> -> @TMA
+    map.execute @matrix capability<matrix.mma> -> @WGMMA
+    map.store @ab_stage -> @SMEM
+    map.store @output -> @SMEM
+    map.route @input_route capability<bulk_copy> @HBM -> @SMEM via<@tma_route>
+  }
+}

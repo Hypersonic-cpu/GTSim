@@ -1,7 +1,7 @@
 """Parser and serializer for the serving frontend's MLIR-like text form."""
 
 import re
-from .ast import Module, Node, Operation, Statement
+from .ast import Module, Node, Operation, Statement, StaticBranch, StaticBranchKind
 
 
 def _operation_name(header: str) -> str:
@@ -9,11 +9,11 @@ def _operation_name(header: str) -> str:
 
 
 def _is_operation(line: str) -> bool:
-    return line.lstrip().startswith(("prog.", "algo.", "flow.", "mapping."))
+    return line.lstrip().startswith(("prog.", "algo.", "flow.", "mapping.", "static."))
 
 
 def _statement_opcode(line: str) -> str:
-    match = re.search(r"\b(?:prog|algo|flow|mapping|map)\.[\w.]+", line)
+    match = re.search(r"\b(?:prog|algo|flow|mapping|map|static)\.[\w.]+", line)
     return match.group(0) if match else ""
 
 
@@ -58,9 +58,37 @@ def parse(text: str) -> Module:
                 header, index = block
                 body, index = read_nodes(index, True)
                 indent = header[0][: len(header[0]) - len(header[0].lstrip())]
-                nodes.append(
-                    Operation(_operation_name(header[0]), header, indent, body)
-                )
+                name = _operation_name(header[0])
+                if name in ("static.if", "static.elif", "static.else"):
+                    text = " ".join(header).strip()
+                    branch = re.fullmatch(
+                        r"static\.(if|elif)\s*<(.*?)>\s*(?:scope\[(.*?)\])?\s*\{|static\.(else)\s*\{",
+                        text,
+                    )
+                    if branch is None:
+                        raise ValueError(f"invalid static branch: {text}")
+                    kind = StaticBranchKind(branch[1] or branch[4])
+                    if kind != StaticBranchKind.IF:
+                        if not nodes or not isinstance(nodes[-1], StaticBranch):
+                            raise ValueError(
+                                f"static.{kind.value} requires a preceding branch"
+                            )
+                        if nodes[-1].kind == StaticBranchKind.ELSE:
+                            raise ValueError("no branch may follow static.else")
+                    nodes.append(
+                        StaticBranch(
+                            kind,
+                            branch[2],
+                            tuple(
+                                v.strip().lstrip("%")
+                                for v in (branch[3] or "").split(",")
+                                if v.strip()
+                            ),
+                            body,
+                        )
+                    )
+                else:
+                    nodes.append(Operation(name, header, indent, body))
             else:
                 nodes.append(Statement(line, _statement_opcode(line)))
                 index += 1
@@ -79,6 +107,19 @@ def parse(text: str) -> Module:
 def _emit(node: Node, lines: list[str]) -> None:
     if isinstance(node, Statement):
         lines.append(node.text)
+        return
+
+    if isinstance(node, StaticBranch):
+        condition = f" <{node.condition}>" if node.condition is not None else ""
+        scope = (
+            " scope[" + ", ".join("%" + v for v in node.iterations) + "]"
+            if node.iterations
+            else ""
+        )
+        lines.append(f"static.{node.kind.value}{condition}{scope} {{")
+        for child in node.body:
+            _emit(child, lines)
+        lines.append("}")
         return
 
     lines.extend(node.header)

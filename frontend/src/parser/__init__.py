@@ -16,7 +16,14 @@ def _parse(text):
             from .json_codec import loads
 
             return loads(text)
-        module = syntax.parse(text)
+        return from_module(syntax.parse(text))
+    except (ValueError, KeyError, IndexError, TypeError) as error:
+        raise ParseError(str(error)) from error
+
+
+def from_module(module):
+    """Decode an already parsed/specialized syntax AST without source rewriting."""
+    try:
         if any(
             isinstance(node, ast.Statement) and node.text.strip()
             for node in module.nodes
@@ -25,15 +32,30 @@ def _parse(text):
         roots = [node for node in module.nodes if isinstance(node, ast.Operation)]
         if not roots:
             raise ValueError("expected an IR root operation")
-        root = roots[0]
+        from .static import declarations
+
+        root, static = declarations(roots[0])
         if root.name == "prog.program" and len(roots) == 1:
-            return semantic.prog(root)
+            return semantic.prog(root, static)
+        if root.name == "flow.program" and len(roots) == 1:
+            return semantic.flow_program(root, static)
         if root.name == "algo.kernel" and len(roots) == 1:
-            return semantic.algo(root)
+            return semantic.algo(root, static)
         if root.name == "flow.kernel" and len(roots) <= 2:
             if len(roots) == 2 and roots[1].name != "mapping.program":
                 raise ValueError("expected mapping.program after flow.kernel")
-            return semantic.flow(root, roots[1] if len(roots) == 2 else None)
+            empty = ast.StaticDeclarations((), (), (), ())
+            region = semantic.flow_region(
+                root, roots[1] if len(roots) == 2 else None, empty
+            )
+            return ast.FlowIR(
+                root.header[0].split("@")[1].split()[0],
+                static,
+                region.tensors,
+                (region,),
+                None,
+                (),
+            )
         raise ValueError(f"unsupported IR root: {root.name}")
     except (ValueError, KeyError, IndexError, TypeError) as error:
         raise ParseError(str(error)) from error

@@ -158,3 +158,18 @@ class BufferView:
     offset: int
     shape: tuple[int | str, ...]
     dtype: DataType
+
+
+class Selection(str, Enum):
+    ALL = "all"
+    LAST_PER_EXECUTOR = "last_per_executor"
+
+
+@dataclass(frozen=True)
+class DependencyRule:
+    id: str
+    sources: tuple[str, ...]
+    phase: Phase
+    selection: Selection
+    static_if: str
+    producer_bindings: tuple[tuple[str, str], ...]

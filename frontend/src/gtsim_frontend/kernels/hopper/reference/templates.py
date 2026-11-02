@@ -165,7 +165,10 @@ def operations(family, d, profile=None, dtype="fp16"):
             "C", (index(V.ROW, p.bm), index(V.COLUMN, p.bn)), (p.bm, p.bn)
         )
         reuse = dep(R.MATMUL, L.BUFFER_REUSE)
-        loads = (reuse, dep(R.LOAD_A, L.PREVIOUS_LOAD, P.ISSUE))
+        loads = (
+            reuse,
+            dep(R.LOAD_A, L.PREVIOUS_LOAD, P.COMPLETE if p == GEMM else P.ISSUE),
+        )
         return (
             op(R.ACQUIRE, K.ACQUIRE, E.PRODUCER, (reuse,), buffer=B.AB),
             op(R.LOAD_A, K.COPY, E.PRODUCER, loads, region=a, buffer=B.AB),

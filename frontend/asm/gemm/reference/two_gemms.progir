@@ -1,0 +1,20 @@
+prog.program @two_gemms {
+  static.param %NUM_SMS : index range[1, *]
+  prog.tensor @X : tensor<256x192xfp16> storage<HBM> external readonly
+  prog.tensor @W0 : tensor<192x256xfp16> storage<HBM> external readonly
+  prog.tensor @H : tensor<256x256xfp16> storage<HBM>
+  prog.tensor @W1 : tensor<256x512xfp16> storage<HBM> external readonly
+  prog.tensor @Y : tensor<256x512xfp16> storage<HBM>
+  prog.stream @compute ordered {
+    %H, !first_done = prog.launch @first
+        callee<@gemm_reference> implementation<@gemm_reference_flow>
+        inputs[@X, @W0] outputs[@H]
+        attrs{M=256, N=256, K=192, NUM_SMS=%NUM_SMS}
+    %Y, !second_done = prog.launch @second
+        callee<@gemm_reference> implementation<@gemm_reference_flow>
+        inputs[@H, @W1] outputs[@Y]
+        attrs{M=256, N=512, K=256, NUM_SMS=%NUM_SMS}
+    prog.synchronize @compute after[!second_done]
+  }
+  prog.return @Y after[!second_done]
+}

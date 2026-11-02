@@ -1,6 +1,6 @@
 # Reference GEMM textual example
 
-The three assembly sources describe a single symbolic GEMM program:
+The reusable assembly sources describe a symbolic GEMM program:
 
 - `example.progir`: ordered invocation and tensor bindings.
 - `gemm.algoir`: algorithm expressions, typed timing operations, and stages.
@@ -40,4 +40,8 @@ are retained in `gtsim_frontend/ir/`. `ArchIR` and `ExecIR` definitions are copi
 as well; their structural JSON read/write path is supported, while their
 MLIR-like assembly syntax is not implemented in this step.
 
-Symbol binding and lowering to simulator IR are outside this parser step.
+`two_gemms.progir` invokes the same algorithm and schedule twice, with K=192 and
+K=256. `two_gemms.flowir` is the generated unified FlowIR: two actual scheduled
+bodies connected through tensor H, with odd/even K-count branches specialized.
+The compilation command is in `frontend/README.md`. Native/DAG lowering remains
+outside this implementation.

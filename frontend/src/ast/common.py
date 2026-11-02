@@ -30,6 +30,43 @@ class ConstantValue(str, Enum):
 
 
 @dataclass(frozen=True)
+class StaticParameter:
+    id: str
+    dtype: DataType
+    lower: str | None
+    upper: str | None
+
+
+@dataclass(frozen=True)
+class StaticBinding:
+    id: str
+    expression: str
+
+
+@dataclass(frozen=True)
+class StaticPredicate:
+    id: str
+    expression: str
+
+
+@dataclass(frozen=True)
+class StaticDeclarations:
+    parameters: tuple[StaticParameter, ...]
+    bindings: tuple[StaticBinding, ...]
+    predicates: tuple[StaticPredicate, ...]
+    constraints: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StaticIf:
+    """Compiler condition applying to an iteration scope."""
+
+    id: str
+    condition: str
+    iterations: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Constant:
     id: str
     value: int | float | ConstantValue
@@ -50,3 +87,4 @@ class Tensor:
 @dataclass(frozen=True)
 class Header:
     symbol: str
+    static: StaticDeclarations

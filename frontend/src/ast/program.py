@@ -36,6 +36,5 @@ class ProgIR(Header):
     tensors: tuple[Tensor, ...]
     launches: tuple[Invocation, ...]
     commands: tuple[Command, ...]
-    parameters: tuple[tuple[str, DataType], ...]
     returns: tuple[str, ...]
     return_after: tuple[str, ...]

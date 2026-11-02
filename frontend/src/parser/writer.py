@@ -1,6 +1,7 @@
 """Render independent AST fields to assembly; no original source text is used."""
 
 from . import ast as A
+from .static import emit as static_declarations
 
 
 def enum(value):
@@ -54,6 +55,7 @@ def flowop(op):
         if op.dependencies
         else ""
     )
+    implements = f" implements<@{op.implements}>" if op.implements else ""
     reads = "reads[" + ", ".join(operand(v) for v in op.operands) + "]"
     capabilities = (
         " requires<" + ", ".join(op.capabilities) + ">" if op.capabilities else ""
@@ -82,22 +84,19 @@ def flowop(op):
         return (
             f"%{role}, "
             + event
-            + f"flow.matmul @{op.id} {reads} on_tile<{region(op.region)}> by %matrix{deps}{capabilities} : tensor<{ty}>"
+            + f"flow.matmul @{op.id}{implements} {reads} on_tile<{region(op.region)}> by %matrix{deps}{capabilities} : tensor<{ty}>"
         )
     return (
         event
-        + f"flow.store_async @{op.id} {reads}"
+        + f"flow.store_async @{op.id}{implements} {reads}"
         + (f" cast<{enum(op.cast)}>" if op.cast else "")
         + f" to {region(op.region)} by %producer{deps}{capabilities}"
     )
 
 
 def prog(ir):
-    lines = [
-        f"prog.program @{ir.symbol} params("
-        + ", ".join(f"%{n}: {enum(ty)}" for n, ty in ir.parameters)
-        + ") {"
-    ]
+    lines = [f"prog.program @{ir.symbol} {{"]
+    lines += static_declarations(ir.static)
     for t in ir.tensors:
         lines.append(
             f"  prog.tensor @{t.id} : {tensor(t, symbolic=True)} storage<{enum(t.tier)}>"
@@ -134,19 +133,14 @@ def prog(ir):
 
 
 def algo(ir):
-    outputs = {
-        match[0].lstrip("%")
-        for computation in ir.computations
-        for result in (computation.result,)
-        if (match := result.split("["))
-    }
-    accumulators = {constant.id for constant in ir.accumulators}
-    inputs = [t for t in ir.tensors if t.id not in outputs and t.id not in accumulators]
-    outs = [t for t in ir.tensors if t.id in outputs and t.id not in accumulators]
+    by_name = {t.id: t for t in ir.tensors}
+    inputs = [by_name[name] for name in ir.inputs]
+    outs = [by_name[name] for name in ir.outputs]
     sig = lambda ts: ", ".join(f"%{t.id}: {tensor(t)}" for t in ts)
     lines = [
         f"algo.kernel @{ir.symbol}({sig(inputs)})",
         f"    -> ({sig(outs)}) {{",
+        *static_declarations(ir.static),
         "  algo.domain "
         + ", ".join(f"%{n} in [{lo}, {hi})" for n, lo, hi in ir.domains),
     ]
@@ -195,19 +189,20 @@ def algo(ir):
     return "\n".join(lines) + "\n"
 
 
-def flow(ir):
+def flow_region(ir):
     lines = [
-        f"flow.kernel @{ir.symbol} schedule<{ir.schedule_id}> target<{ir.mapping.target}> {{"
+        f"flow.region @{ir.symbol} schedule<{ir.schedule_id}> target<{ir.mapping.target}>"
+        + (f" origin<@{ir.origin}>" if ir.origin else "")
+        + f" after[{names(ir.after, '@')}] {{"
     ]
-    lines += [f"  flow.symbol %{name} range[{lo}, {hi}]" for name, lo, hi in ir.symbols]
-    lines += ["  flow.require <" + ", ".join(ir.requirements) + ">"]
+    lines += static_declarations(ir.static)
+    for math in {op.math.id: op.math for op in ir.ops if op.math is not None}.values():
+        lines.append(
+            f"  flow.math @{math.id} category<{enum(math.category)}> cost<{enum(math.cost) if math.cost is not None else 'none'}> dtype<{enum(math.dtype)}> inputs[{names(math.inputs, '%')}] output[%{math.output}] reduction[{', '.join(math.reduction_axes)}]"
+        )
     lines += [
         f"  flow.tensor @{t.id} : {tensor(t, layout=True, symbolic=True)}"
         for t in ir.tensors
-    ]
-    lines += [
-        "  flow.domain "
-        + "\n      ".join(f"%{n} = {expr}" for n, expr in ir.expressions)
     ]
     p = ir.config
     lines += [
@@ -220,10 +215,16 @@ def flow(ir):
         f"  flow.loop @{loop.id} %{loop.variable} = {loop.start} to {loop.stop} step {loop.step}"
         for loop in ir.domain.loops
     ]
-    lines += [
-        "  flow.tile_map "
-        + "\n      ".join(f"%{n} = {expr}" for n, expr in ir.tile_map)
-    ]
+    for rule in ir.dependency_rules:
+        sources = ", ".join(f"@{source}.{enum(rule.phase)}" for source in rule.sources)
+        bindings = ", ".join(
+            f"%{key} = {value}" for key, value in rule.producer_bindings
+        )
+        declaration = f"flow.dependency_rule @{rule.id} from[{sources}] at[{bindings}] select<{enum(rule.selection)}>"
+        if rule.static_if == "true":
+            lines.append("  " + declaration)
+        else:
+            lines += [f"  static.if <{rule.static_if}> {{", "    " + declaration, "  }"]
     lines += [
         f"  flow.executor %{executor.id} role<{enum(executor.role)}> organization<{enum(executor.organization)}>"
         for executor in ir.executors
@@ -236,6 +237,11 @@ def flow(ir):
         f"  flow.buffer_view %{view.id} of %{view.buffer} offset<{view.offset}> : buffer<{'x'.join(map(str, view.shape))}x{enum(view.dtype)}>"
         for view in ir.buffer_views
     ]
+    for branch in ir.static_ifs:
+        lines.append(
+            f"  static.if <{branch.condition}> scope[{names(branch.iterations, '%')}] {{"
+        )
+    body_start = len(lines)
     pipe = ir.domain.pipeline
     lines += [
         f"  flow.pipeline @{pipe.id} %{pipe.loop.variable} = {pipe.loop.start} to {pipe.loop.stop} step {pipe.loop.step} depth({pipe.depth})",
@@ -244,11 +250,13 @@ def flow(ir):
         + "] {",
     ]
     lines += ["    " + flowop(op) for op in ir.ops if op.scope == A.Scope.PIPELINE]
-    lines += (
-        ["  }"]
-        + ["  " + flowop(op) for op in ir.ops if op.scope != A.Scope.PIPELINE]
-        + ["}"]
-    )
+    lines += ["  }"] + [
+        "  " + flowop(op) for op in ir.ops if op.scope != A.Scope.PIPELINE
+    ]
+    if ir.static_ifs:
+        lines[body_start:] = ["  " + line for line in lines[body_start:]]
+        lines += ["  }" for _ in ir.static_ifs]
+    lines.append("}")
     if ir.mapping_symbol:
         m = ir.mapping
         lines += [
@@ -268,6 +276,24 @@ def flow(ir):
             for src, dst, cap in m.routes
         ] + ["}"]
     return "\n".join(lines) + "\n"
+
+
+def flow(ir):
+    header = f"flow.program @{ir.symbol}"
+    if ir.stream:
+        header += f" stream<@{ir.stream}>"
+    header += f" outputs[{names(ir.outputs, '@')}] {{"
+    lines = [header, *static_declarations(ir.static)]
+    lines += [
+        f"  flow.tensor @{t.id} : {tensor(t, layout=True, symbolic=True)}"
+        + (f" storage<{enum(t.tier)}>" if t.tier else "")
+        + (" external" if t.external else "")
+        + (" readonly" if t.read_only else "")
+        for t in ir.tensors
+    ]
+    for region in ir.regions:
+        lines.extend("  " + line for line in flow_region(region).rstrip().splitlines())
+    return "\n".join([*lines, "}"]) + "\n"
 
 
 def serialize(ir):

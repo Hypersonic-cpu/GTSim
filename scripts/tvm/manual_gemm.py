@@ -50,12 +50,12 @@ def manual_gemm(m, n, k, sms=132):
                     reuse = previous_compute
                 if step >= 2:
                     reuse = compute[step - 2]
-                issue = previous_loads if step == 0 else loads[-1]
+                previous_batch = previous_loads if step == 0 else loads[-1]
                 stage_loads = [emit(f"_TMA_LoadA_k{step}", "cp.dram2sram_tma", 8, 0,
-                                    (row, step * 64, 128, 64), reuse, issue)]
+                                    (row, step * 64, 128, 64), reuse + previous_batch)]
                 for chunk in range(4):
                     stage_loads.append(emit(f"_TMA_LoadB_k{step}_c{chunk}", "cp.dram2sram_tma", 8, 1,
-                                            (step * 64, column + chunk * 64, 64, 64), reuse, issue))
+                                            (step * 64, column + chunk * 64, 64, 64), reuse + previous_batch))
                 loads.append(stage_loads)
                 stage_compute = []
                 for warp in range(8):

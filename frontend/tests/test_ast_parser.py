@@ -22,7 +22,8 @@ class ASTParserTests(unittest.TestCase):
         prog = parser.parse_file(REFERENCE / "example.progir")
         self.assertIs(type(prog), A.ProgIR)
         self.assertEqual(
-            prog.parameters, (("M", "index"), ("N", "index"), ("K", "index"))
+            tuple((p.id, p.dtype) for p in prog.static.parameters),
+            (("M", "index"), ("N", "index"), ("K", "index")),
         )
         self.assertIs(type(prog.tensors[0]), A.Tensor)
         self.assertEqual(prog.tensors[0].shape, ("M", "K"))
@@ -37,14 +38,16 @@ class ASTParserTests(unittest.TestCase):
         self.assertEqual(algo.stages[1].after, ("operand_acquisition",))
         flow = parser.parse_file(REFERENCE / "gemm.flowir")
         self.assertIs(type(flow), A.FlowIR)
-        self.assertEqual(len(flow.ops), 6)
-        self.assertEqual(flow.config.tile_shape, (128, 256, 64))
-        self.assertEqual(flow.domain.pipeline.depth, 2)
-        self.assertEqual(flow.ops[1].region.shape, (128, 64))
-        self.assertIs(type(flow.ops[1].dependencies[0]), A.Dependency)
-        self.assertEqual(flow.ops[1].dependencies[0].source, "matmul")
-        self.assertEqual(flow.ops[3].operands[-1].iteration_delta, -1)
-        self.assertEqual(dict(flow.mapping.execute)[A.ExecutorRole.MATRIX], "WGMMA")
+        self.assertEqual(len(flow.regions[0].ops), 6)
+        self.assertEqual(flow.regions[0].config.tile_shape, (128, 256, 64))
+        self.assertEqual(flow.regions[0].domain.pipeline.depth, 2)
+        self.assertEqual(flow.regions[0].ops[1].region.shape, (128, 64))
+        self.assertIs(type(flow.regions[0].ops[1].dependencies[0]), A.Dependency)
+        self.assertEqual(flow.regions[0].ops[1].dependencies[0].source, "matmul")
+        self.assertEqual(flow.regions[0].ops[3].operands[-1].iteration_delta, -1)
+        self.assertEqual(
+            dict(flow.regions[0].mapping.execute)[A.ExecutorRole.MATRIX], "WGMMA"
+        )
 
     def test_assembly_roundtrip_and_mutations_use_fields(self):
         for file in ("example.progir", "gemm.algoir", "gemm.flowir"):
@@ -53,17 +56,165 @@ class ASTParserTests(unittest.TestCase):
             self.assertEqual(parser.parse(dumps(obj)), obj)
             changed = replace(obj, symbol=obj.symbol + "_edited")
             if isinstance(changed, A.FlowIR):
-                changed = replace(changed, mapping_symbol="edited_mapping")
+                changed = replace(
+                    changed,
+                    regions=(
+                        replace(changed.regions[0], mapping_symbol="edited_mapping"),
+                    ),
+                )
             self.assertEqual(parser.parse(parser.serialize(changed)), changed)
         flow = parser.parse_file(REFERENCE / "gemm.flowir")
-        changed = replace(flow, config=replace(flow.config, tile_shape=(64, 256, 64)))
+        changed = replace(
+            flow,
+            regions=(
+                replace(
+                    flow.regions[0],
+                    config=replace(flow.regions[0].config, tile_shape=(64, 256, 64)),
+                ),
+            ),
+        )
         self.assertEqual(
-            parser.parse(parser.serialize(changed)).config.tile_shape, (64, 256, 64)
+            parser.parse(parser.serialize(changed)).regions[0].config.tile_shape,
+            (64, 256, 64),
         )
         with TemporaryDirectory() as temp:
             output = Path(temp) / "copy.flowir"
             parser.serialize_file(changed, output)
             self.assertEqual(parser.parse_file(output), changed)
+
+    def test_static_conditions_are_typed_and_roundtrip_from_fields(self):
+        source = (REFERENCE / "gemm.flowir").read_text()
+        flow = parser.parse(source)
+        self.assertIs(type(flow.static.predicates[0]), A.StaticPredicate)
+        self.assertIs(type(flow.regions[0].static_ifs[0]), A.StaticIf)
+        self.assertEqual(flow.regions[0].static_ifs[0].condition, "%valid_tile")
+        self.assertEqual(
+            flow.regions[0].dependency_rules[0].static_if, "%has_previous_k"
+        )
+        self.assertIn(
+            A.StaticPredicate(
+                "odd_k_count",
+                "%k_count mod 2 == 1",
+            ),
+            flow.static.predicates,
+        )
+        changed = replace(
+            flow,
+            static=replace(
+                flow.static,
+                predicates=(
+                    replace(flow.static.predicates[0], expression="%tile < 7"),
+                    *flow.static.predicates[1:],
+                ),
+            ),
+            regions=(
+                replace(
+                    flow.regions[0],
+                    dependency_rules=(
+                        replace(flow.regions[0].dependency_rules[0], static_if="false"),
+                        *flow.regions[0].dependency_rules[1:],
+                    ),
+                ),
+            ),
+        )
+        text = parser.serialize(changed)
+        self.assertIn("static.pred %valid_tile = %tile < 7", text)
+        self.assertIn("static.if <false>", text)
+        self.assertNotIn("when<", text)
+        self.assertEqual(parser.parse(text), changed)
+        self.assertEqual(parser.parse(dumps(changed)), changed)
+        with self.assertRaises(parser.ParseError):
+            parser.parse(
+                source.replace("static.if <%has_previous_k>", "when <%has_previous_k>")
+            )
+
+    def test_shared_static_branch_syntax_and_flow_alternatives(self):
+        from parser import syntax
+
+        for dialect in ("prog", "algo", "flow", "arch", "exec"):
+            text = f"""{dialect}.kernel @example {{
+  static.if <%B == 1> {{
+    {dialect}.operation @one
+  }}
+  static.elif <%B == 8> {{
+    {dialect}.operation @eight
+  }}
+  static.else {{
+    {dialect}.operation @other
+  }}
+}}
+"""
+            module = syntax.parse(text)
+            branches = module.nodes[0].body
+            self.assertEqual(
+                tuple(branch.kind for branch in branches),
+                (
+                    A.StaticBranchKind.IF,
+                    A.StaticBranchKind.ELIF,
+                    A.StaticBranchKind.ELSE,
+                ),
+            )
+            self.assertEqual(syntax.parse(syntax.serialize(module)), module)
+        with self.assertRaises(ValueError):
+            syntax.parse("static.else {\n}\n")
+        with self.assertRaises(ValueError):
+            syntax.parse(
+                "static.if <true> {\n}\nstatic.else {\n}\nstatic.elif <false> {\n}\n"
+            )
+
+        source = (REFERENCE / "gemm.flowir").read_text()
+        first = """  static.if <%has_previous_k> {
+    flow.dependency_rule @previous_load from[@load_A.complete, @load_B.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }"""
+        alternatives = (
+            first
+            + """
+  static.elif <%previous_wave_start> {
+    flow.dependency_rule @alternative from[@load_A.complete] at[%k = 0] select<all>
+  }
+  static.else {
+    flow.dependency_rule @fallback from[@load_B.complete] at[%k = 0] select<all>
+  }"""
+        )
+        flow = parser.parse(source.replace(first, alternatives))
+        self.assertEqual(flow.regions[0].dependency_rules[1].id, "alternative")
+        self.assertIn("not", flow.regions[0].dependency_rules[1].static_if)
+        self.assertIn("%has_previous_k", flow.regions[0].dependency_rules[2].static_if)
+        self.assertIn(
+            "%previous_wave_start", flow.regions[0].dependency_rules[2].static_if
+        )
+        self.assertEqual(parser.parse(parser.serialize(flow)), flow)
+
+    def test_static_declarations_use_one_parser_and_one_shared_container(self):
+        declaration = """  static.param %compiler_input : index range[1, 16]
+  static.let %compiler_count = %compiler_input * 2
+  static.pred %compiler_enabled = %compiler_count > 1
+  static.require <%compiler_count > 0>
+"""
+        for filename in ("example.progir", "gemm.algoir", "gemm.flowir"):
+            source = (REFERENCE / filename).read_text()
+            source = source.replace("{\n", "{\n" + declaration, 1)
+            root = parser.parse(source)
+            self.assertIs(type(root.static), A.StaticDeclarations)
+            self.assertEqual(
+                root.static.parameters[0],
+                A.StaticParameter("compiler_input", A.DataType.INDEX, "1", "16"),
+            )
+            self.assertIn(
+                A.StaticBinding("compiler_count", "%compiler_input * 2"),
+                root.static.bindings,
+            )
+            self.assertIn(
+                A.StaticPredicate("compiler_enabled", "%compiler_count > 1"),
+                root.static.predicates,
+            )
+            self.assertIn("%compiler_count > 0", root.static.constraints)
+            self.assertEqual(parser.parse(parser.serialize(root)), root)
+        for cls in (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR, A.ExecIR):
+            self.assertEqual(
+                next(f for f in fields(cls) if f.name == "static").type,
+                A.StaticDeclarations,
+            )
 
     def test_all_five_ir_class_structural_roundtrip(self):
         prog = parser.parse_file(REFERENCE / "example.progir")
@@ -71,19 +222,20 @@ class ASTParserTests(unittest.TestCase):
         flow = parser.parse_file(REFERENCE / "gemm.flowir")
         arch = A.ArchIR(
             "native",
-            flow.mapping.target,
-            flow.schedule_id,
-            flow.config,
-            flow.domain,
+            flow.static,
+            flow.regions[0].mapping.target,
+            flow.regions[0].schedule_id,
+            flow.regions[0].config,
+            flow.regions[0].domain,
             flow.tensors,
-            flow.mapping,
+            flow.regions[0].mapping,
             A.ResourceFootprint(12, 98304, 163840),
             (),
             A.RegisterLayout(A.DataType.FP32, (64, 64), 8, 32, 163840),
             A.AsyncProtocol(2, 1, 0, A.Phase.COMPLETE),
             (),
         )
-        execution = A.ExecIR("dag", "sm90", (), (), (), (), ())
+        execution = A.ExecIR("dag", flow.static, "sm90", (), (), (), (), ())
         for obj in (prog, algo, flow, arch, execution):
             parsed = parser.parse(dumps(obj))
             self.assertIs(type(parsed), type(obj))
@@ -217,10 +369,10 @@ class ASTParserTests(unittest.TestCase):
         )
         text = text.replace("tile(128x256x64)", "tile(64x32x16)")
         flow = parser.parse(text)
-        self.assertEqual(flow.config.tile_shape, (64, 32, 16))
-        self.assertEqual(flow.ops[1].id, "read_left")
-        self.assertEqual(flow.ops[1].slot.buffer, "staging")
-        self.assertEqual(flow.domain.pipeline.loop.variable, "reduction")
+        self.assertEqual(flow.regions[0].config.tile_shape, (64, 32, 16))
+        self.assertEqual(flow.regions[0].ops[1].id, "read_left")
+        self.assertEqual(flow.regions[0].ops[1].slot.buffer, "staging")
+        self.assertEqual(flow.regions[0].domain.pipeline.loop.variable, "reduction")
         self.assertEqual(parser.parse(parser.serialize(flow)), flow)
 
     def test_raw_strings_legacy_fields_and_missing_config_are_rejected(self):

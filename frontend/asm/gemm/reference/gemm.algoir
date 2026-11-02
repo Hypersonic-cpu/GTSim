@@ -1,5 +1,8 @@
 algo.kernel @gemm_reference(%A: tensor<MxKxfp16>, %B: tensor<KxNxfp16>)
     -> (%C: tensor<MxNxfp16>) {
+  static.param %M : index
+  static.param %N : index
+  static.param %K : index
   algo.domain %m in [0, M), %n in [0, N), %k in [0, K)
   algo.accumulator @acc : tensor<MxNxfp32> init<zero>
   algo.compute @matmul result<%acc[%m,%n]>

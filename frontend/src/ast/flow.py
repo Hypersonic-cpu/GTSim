@@ -1,7 +1,7 @@
 """Explicit scheduled operations; no algorithm-family dispatch or presets."""
 
 from dataclasses import dataclass
-from .common import Header, Tensor, DataType
+from .common import Header, Tensor, DataType, StaticIf
 from .algorithm import MathOperation
 from .profiles import ScheduleConfig
 from .schedule import (
@@ -17,6 +17,7 @@ from .schedule import (
     Executor,
     Buffer,
     BufferView,
+    DependencyRule,
 )
 from .mapping import Mapping
 
@@ -37,21 +38,33 @@ class FlowOp:
     destination: str | None
     event: str | None
     cast: DataType | None
+    implements: str | None
 
 
 @dataclass(frozen=True)
-class FlowIR(Header):
+class FlowRegion(Header):
     schedule_id: str
     config: ScheduleConfig
     domain: ScheduleDomain
     tensors: tuple[Tensor, ...]
     mapping: Mapping
     ops: tuple[FlowOp, ...]
-    symbols: tuple[tuple[str, str, str], ...]
-    requirements: tuple[str, ...]
-    expressions: tuple[tuple[str, str], ...]
-    tile_map: tuple[tuple[str, str], ...]
     executors: tuple[Executor, ...]
     buffers: tuple[Buffer, ...]
     buffer_views: tuple[BufferView, ...]
     mapping_symbol: str | None
+    dependency_rules: tuple[DependencyRule, ...]
+    static_ifs: tuple[StaticIf, ...]
+
+    after: tuple[str, ...]
+    origin: str | None
+
+
+@dataclass(frozen=True)
+class FlowIR(Header):
+    """Ordered scheduled code; regions provide local resource/symbol scopes."""
+
+    tensors: tuple[Tensor, ...]
+    regions: tuple[FlowRegion, ...]
+    stream: str | None
+    outputs: tuple[str, ...]

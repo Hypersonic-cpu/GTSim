@@ -138,7 +138,7 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
             // Loader warpgroup (warp 8..11) issues TMA loads
             for (int k = 0; k < tiles_k; ++k) {
                 std::vector<int> tma_deps;
-                const auto& previous_tma_issue =
+                const auto& previous_tma_loads =
                     k == 0 ? prev_tile_last_tma : tma_all_per_k[k - 1];
                 if (options.gemm_baseline() && k == 0) {
                     // k and k-2 reuse the same ping-pong input buffer. The
@@ -146,11 +146,10 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                     // prior tile's final use of that buffer.
                     const bool reuse_last_k_buffer = (tiles_k % 2) != 0;
                     const auto& cross_wgmma = reuse_last_k_buffer
-                                                   ? prev_tile_last_wgmma
-                                                   : prev_tile_prev_wgmma;
+                                                  ? prev_tile_last_wgmma
+                                                  : prev_tile_prev_wgmma;
                     if (!cross_wgmma.empty()) {
-                        tma_deps.insert(tma_deps.end(),
-                                        cross_wgmma.begin(),
+                        tma_deps.insert(tma_deps.end(), cross_wgmma.begin(),
                                         cross_wgmma.end());
                     }
                 }
@@ -163,22 +162,27 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                                     prev_tile_last_wgmma.end());
                 }
                 if (options.gemm_baseline() && k > 1) {
-                    tma_deps.insert(tma_deps.end(),
-                                    wgmma_per_k[k - 2].begin(),
+                    tma_deps.insert(tma_deps.end(), wgmma_per_k[k - 2].begin(),
                                     wgmma_per_k[k - 2].end());
                 }
 
                 if (!options.gemm_baseline()) {
                     const auto& consumed = buffer_consumers[k % options.stages];
-                    tma_deps.insert(tma_deps.end(), consumed.begin(), consumed.end());
+                    tma_deps.insert(tma_deps.end(), consumed.begin(),
+                                    consumed.end());
                 }
+                // Preserve the original completion-order contract across K
+                // stages and output waves, for every A/B transfer in the batch.
+                tma_deps.insert(tma_deps.end(), previous_tma_loads.begin(),
+                                previous_tma_loads.end());
                 int loader_warp = warp_base + 8;
 
                 auto tma_a = add_node("TB" + std::to_string(tb_id) + "_Tile" +
-                                      std::to_string(tile_id) + "_TMA_LoadA_k" +
-                                      std::to_string(k),
+                                          std::to_string(tile_id) +
+                                          "_TMA_LoadA_k" + std::to_string(k),
                                       "LD", "cp.dram2sram_tma", loader_warp,
-                                      base_tb_r, k_base + k * bk_tile, live_rows, bk_tile, 0, tma_deps);
+                                      base_tb_r, k_base + k * bk_tile,
+                                      live_rows, bk_tile, 0, tma_deps);
                 tma_a->sm_id = sm_id;
                 tma_a->thread_block_id = tb_id;
                 tma_a->matrix_id = TensorID_A;
@@ -191,12 +195,12 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                 tma_b_all.reserve(4);
                 for (int chunk = 0; chunk < bn_tile / 64; ++chunk) {
                     int off_c = base_tb_c + chunk * 64;
-                    auto tma_b = add_node("TB" + std::to_string(tb_id) + "_Tile" +
-                                          std::to_string(tile_id) + "_TMA_LoadB_k" +
-                                          std::to_string(k) + "_c" +
-                                          std::to_string(chunk),
-                                          "LD", "cp.dram2sram_tma", loader_warp,
-                                          k_base + k * bk_tile, off_c, bk_tile, 64, 0, tma_deps);
+                    auto tma_b = add_node(
+                        "TB" + std::to_string(tb_id) + "_Tile" +
+                            std::to_string(tile_id) + "_TMA_LoadB_k" +
+                            std::to_string(k) + "_c" + std::to_string(chunk),
+                        "LD", "cp.dram2sram_tma", loader_warp,
+                        k_base + k * bk_tile, off_c, bk_tile, 64, 0, tma_deps);
                     tma_b->sm_id = sm_id;
                     tma_b->thread_block_id = tb_id;
                     tma_b->matrix_id = TensorID_B;
@@ -207,23 +211,13 @@ DAG* build_gemm_h100(int M = 1024, int N = 1024, int K = 1024,
                     tma_b_all.push_back(tma_b->id);
                     tma_all_per_k[k].push_back(tma_b->id);
                 }
-                if (!previous_tma_issue.empty()) {
-                    // Keep TMA stages in issue order, but allow the previous
-                    // stage's transfers to remain in flight.
-                    for (int previous_tma : previous_tma_issue) {
-                        dag->add_issue_dependency(previous_tma, tma_a->id);
-                        for (int tma_b : tma_b_all) {
-                            dag->add_issue_dependency(previous_tma, tma_b);
-                        }
-                    }
-                }
 
                 // Compute warps (0..7): two warp groups, 2 m-halves, 4 k-steps per k
                 for (int warp_lane = 0; warp_lane < bn_tile / 32; ++warp_lane) {
                     int warp_id = warp_base + warp_lane;
-                    int wg = warp_lane / 4;           // 0 or 1
-                    int lane_in_wg = warp_lane % 4;   // 0..3
-                    int n_chunk_base = wg * 2;        // 0 or 2
+                    int wg = warp_lane / 4;         // 0 or 1
+                    int lane_in_wg = warp_lane % 4; // 0..3
+                    int n_chunk_base = wg * 2;      // 0 or 2
 
                     for (int m_half = 0; m_half < bm_tile / 64; ++m_half) {
                         int base_r = base_tb_r + m_half * 64 + lane_in_wg * 16;

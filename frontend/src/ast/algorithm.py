@@ -65,6 +65,8 @@ class AlgorithmStage:
 
 @dataclass(frozen=True)
 class AlgoIR(Header):
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
     tensors: tuple[Tensor, ...]
     domains: tuple[tuple[str, str, str], ...]
     accumulators: tuple[Constant, ...]

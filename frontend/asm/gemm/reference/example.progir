@@ -1,4 +1,7 @@
-prog.program @gemm_reference_example params(%M: index, %N: index, %K: index) {
+prog.program @gemm_reference_example {
+  static.param %M : index
+  static.param %N : index
+  static.param %K : index
   prog.tensor @A : tensor<%Mx%Kxfp16> storage<HBM> external readonly
   prog.tensor @B : tensor<%Kx%Nxfp16> storage<HBM> external readonly
   prog.tensor @C : tensor<%Mx%Nxfp16> storage<HBM>
