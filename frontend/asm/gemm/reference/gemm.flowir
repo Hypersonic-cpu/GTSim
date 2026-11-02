@@ -10,10 +10,10 @@ flow.kernel @gemm_reference_flow schedule<ref_h100_gemm_v0_1_0> target<sm90> {
   flow.domain %tile_count = ceildiv(%M,128)*ceildiv(%N,256)
       %cta_count = min(%NUM_SMS, %tile_count)
       %wave_count = ceildiv(%tile_count, %cta_count)
-  flow.schedule_config bm(128) bn(256) bk(64) stages(2)
+  flow.schedule_config tile(128x256x64) stages(2)
       warps(12) consumer_warps(8)
       producer_warp(8) warpgroup(4)
-      mma_tile(64x64x16)
+      matrix_tile(64x64x16)
   flow.loop @cta %cta = 0 to %cta_count step 1
   flow.loop @wave %wave = 0 to %wave_count step 1
   flow.tile_map %tile = %cta + %wave*%cta_count

@@ -1,22 +1,43 @@
 # Reference GEMM textual example
 
-`export_textual.py` calls the existing `gemm_single.build` and canonical
-`passes.instantiate` generator, then writes the three MLIR-style artifacts shown
-by `docs/serving-ir/llm_serving_ir_design_v0_2.md`:
+The three assembly sources describe a single symbolic GEMM program:
 
-- `gemm.algoir`: GEMM semantics and symbolic `M`, `N`, and `K` domains.
-- `gemm.flowir`: the generated H100 Reference tile schedule, its operations,
-  dependencies, and mapping.
-- `example.progir`: one ordered stream that launches this GEMM and synchronizes.
+- `example.progir`: ordered invocation and tensor bindings.
+- `gemm.algoir`: algorithm expressions, typed timing operations, and stages.
+- `gemm.flowir`: explicit tile schedule, dependencies, and resource mapping.
 
-The workload dimensions and `NUM_SMS` remain symbolic in the emitted files.
-The numeric tile dimensions are fixed by the existing Reference profile
-(`BM=128`, `BN=256`, `BK=64`, two stages, fp16). This profile requires complete
-tiles. Regenerate the files with:
+The dimensions and `NUM_SMS` remain symbolic. Tile geometry is explicit through
+`tile(128x256x64)` and `matrix_tile(64x64x16)`, with two pipeline stages.
+`algo.traits` uses enum-backed structural traits. The historical
+`export_textual.py` exports the previous syntax from the legacy implementation;
+it is not part of the independent AST/parser path and does not regenerate this
+revised syntax.
+
+These files use the design document's proposed inspection syntax.
+`frontend/src/parser/` reads them into independent typed AST definitions in
+`frontend/src/ast/`: `ProgIR`, `AlgoIR`, and `FlowIR`. Tensor shapes, invocation
+references, algorithm expressions, loops, operations, dependencies, and mappings
+are parsed into fields. Writing uses these fields rather than the original text.
+Assembly round trips preserve AST values; whitespace is normalized.
 
 ```sh
-python3 frontend/asm/gemm/reference/export_textual.py
+PYTHONPATH=frontend/src python3 -m unittest discover -s frontend/tests -v
+PYTHONPATH=frontend/src python3 - <<'PYTHON'
+from pathlib import Path
+from parser import parse_file, parse, serialize
+
+for path in sorted(Path("frontend/asm/gemm/reference").glob("*ir")):
+    ir = parse_file(path)
+    print(path.name, type(ir).__name__, ir.symbol)
+    assert parse(serialize(ir)) == ir
+PYTHON
 ```
 
-These files use the design document's proposed inspection syntax; the current
-frontend does not yet parse this textual form.
+`parser` and the copied AST do not import `gtsim_frontend`. The `ast/` source
+directory is loaded under the private Python namespace `gtsim_text_ast` to avoid
+shadowing Python's standard-library `ast` module. The original IR definitions
+are retained in `gtsim_frontend/ir/`. `ArchIR` and `ExecIR` definitions are copied
+as well; their structural JSON read/write path is supported, while their
+MLIR-like assembly syntax is not implemented in this step.
+
+Symbol binding and lowering to simulator IR are outside this parser step.

@@ -6,9 +6,11 @@ algo.kernel @gemm_reference(%A: tensor<MxKxfp16>, %B: tensor<KxNxfp16>)
       semantics<sum_k(cast_f32(%A[%m,%k]) * cast_f32(%B[%k,%n]))>
   algo.compute @cast_output result<%C[%m,%n]>
       semantics<cast_fp16(%acc[%m,%n])>
+  algo.op @matmul category<matrix> cost<none> dtype<fp32> inputs[%A, %B] output[%acc] reduction[k]
+  algo.op @cast_output category<convert> cost<none> dtype<fp16> inputs[%acc] output[%C] reduction[]
   algo.stage @operand_acquisition reads[%A, %B]
   algo.stage @matrix_accumulate after[@operand_acquisition] produces[%acc]
   algo.stage @epilogue after[@matrix_accumulate] writes[%C]
-  algo.family <tiled_matrix, producer_consumer_pipeline>
+  algo.traits <tiled_matrix, producer_consumer_pipeline>
   algo.require <same_result, reduction_complete, output_complete>
 }
