@@ -1,0 +1,2952 @@
+{
+  "outputs": [
+    "Y"
+  ],
+  "record": "ArchIR",
+  "regions": [
+    {
+      "after": [],
+      "async_protocol": {
+        "commit_groups": 1,
+        "mbarrier_phases": 2,
+        "record": "AsyncProtocol",
+        "reuse_phase": {
+          "enum": "Phase",
+          "value": "complete"
+        },
+        "wait_group": 0
+      },
+      "cta_variable": "cta",
+      "dependency_rules": [
+        {
+          "id": "previous_load",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "load_A",
+            "load_B"
+          ],
+          "static_if": "%has_previous_k"
+        },
+        {
+          "id": "previous_load",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "load_A",
+            "load_B"
+          ],
+          "static_if": "%previous_wave_start"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k-2"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%reuse_current_wave"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(%odd_k_count) and (%previous_wave_start)"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-2"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(not ((%odd_k_count)) and (true)) and (%previous_wave_start)"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(not ((%odd_k_count)) and (true)) and (%k == 1 and %wave > 0)"
+        },
+        {
+          "id": "previous_tile_store",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "store"
+          ],
+          "static_if": "%previous_wave_start"
+        },
+        {
+          "id": "final_round",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "true"
+        },
+        {
+          "id": "previous_fragment",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%has_previous_fragment"
+        },
+        {
+          "id": "warp_tail",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%in_pipeline"
+        },
+        {
+          "id": "warp_tail",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%in_epilogue"
+        },
+        {
+          "id": "previous_chunk",
+          "phase": {
+            "enum": "Phase",
+            "value": "issue"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "chunk",
+              "%chunk-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "store"
+          ],
+          "static_if": "%has_previous_chunk"
+        }
+      ],
+      "domain": {
+        "loops": [
+          {
+            "id": "cta",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "%cta_count",
+            "variable": "cta"
+          },
+          {
+            "id": "wave",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "%wave_count",
+            "variable": "wave"
+          }
+        ],
+        "pipeline": {
+          "depth": 2,
+          "id": "k_loop",
+          "loop": {
+            "id": "k_loop",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "ceildiv(%K,64)",
+            "variable": "k"
+          },
+          "record": "PipelineRegion",
+          "stage": {
+            "generation_counts_per_wave": [
+              "ceildiv(ceildiv(%K,64),2)",
+              "floordiv(ceildiv(%K,64),2)"
+            ],
+            "iteration": {
+              "index": {
+                "expression": "%k",
+                "record": "IndexExpr"
+              },
+              "record": "IterationId"
+            },
+            "modulus": 2,
+            "record": "PipelineStage"
+          }
+        },
+        "record": "ScheduleDomain"
+      },
+      "layouts": [
+        {
+          "buffer": "ab_stage",
+          "bytes_per_slot": 49152,
+          "layout": "row_major",
+          "record": "SharedLayout",
+          "slots": 2
+        },
+        {
+          "buffer": "output",
+          "bytes_per_slot": 65536,
+          "layout": "row_major",
+          "record": "SharedLayout",
+          "slots": 1
+        }
+      ],
+      "ops": [
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            }
+          ],
+          "id": "acquire",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": []
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            }
+          ],
+          "id": "load_A",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "buffer_reuse"
+                  },
+                  "label": "buffer_reuse",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": {
+                "expression": "%K",
+                "record": "IndexExpr"
+              },
+              "loops": [],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.dram2sram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%row*128",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "%k*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  128,
+                  64
+                ],
+                "tensor": "X"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "load"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            }
+          ],
+          "id": "load_B",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "buffer_reuse"
+                  },
+                  "label": "buffer_reuse",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": {
+                "expression": "%N",
+                "record": "IndexExpr"
+              },
+              "loops": [
+                {
+                  "id": "chunk",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": "ceildiv(256,64)",
+                  "variable": "chunk"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.dram2sram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%k*64",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + %chunk*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  64,
+                  64
+                ],
+                "tensor": "W0"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "load"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "load_A",
+              "phase": {
+                "enum": "Phase",
+                "value": "ready"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "load_B",
+              "phase": {
+                "enum": "Phase",
+                "value": "ready"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_fragment",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "output_order"
+              },
+              "label": "previous_tile_store",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "store"
+            }
+          ],
+          "id": "matmul",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "load_A",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "ready"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "load_B",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "ready"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_fragment",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "output_order"
+                  },
+                  "label": "previous_tile_store",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "store"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp32"
+              },
+              "executor": {
+                "expression": "%executor",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": null,
+              "loops": [
+                {
+                  "id": "executor",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "executor"
+                },
+                {
+                  "id": "m_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "m_fragment"
+                },
+                {
+                  "id": "n_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "n_fragment"
+                },
+                {
+                  "id": "k_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 4,
+                  "variable": "k_fragment"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "wgmma.m64n64k16"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "(%row*128) + %m_fragment*64 + (%executor mod 4)*16",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + floordiv(%executor,4)*128 + %n_fragment*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  16,
+                  64
+                ],
+                "tensor": "H"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "matrix"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "warp_tail",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            }
+          ],
+          "id": "release",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": []
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "warp_tail",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "final_round",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "output_order"
+              },
+              "label": "previous_chunk",
+              "phase": {
+                "enum": "Phase",
+                "value": "issue"
+              },
+              "record": "Dependency",
+              "source": "store"
+            }
+          ],
+          "id": "store",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "epilogue"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "warp_tail",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "final_round",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "%executor",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": null,
+              "loops": [
+                {
+                  "id": "executor",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "executor"
+                },
+                {
+                  "id": "m_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "m_fragment"
+                },
+                {
+                  "id": "n_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "n_fragment"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "st.reg2sram"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "(%row*128) + %m_fragment*64 + (%executor mod 4)*16",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + floordiv(%executor,4)*128 + %n_fragment*16",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  16,
+                  16
+                ],
+                "tensor": "H"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "store"
+              }
+            },
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "output_order"
+                  },
+                  "label": "previous_chunk",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "issue"
+                  },
+                  "record": "Dependency",
+                  "source": "store"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [
+                0
+              ],
+              "leading_dim": {
+                "expression": "%N",
+                "record": "IndexExpr"
+              },
+              "loops": [
+                {
+                  "id": "chunk",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": "ceildiv(256,64)",
+                  "variable": "chunk"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.sram2dram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%row*128",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + %chunk*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  128,
+                  64
+                ],
+                "tensor": "H"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "store"
+              }
+            }
+          ]
+        }
+      ],
+      "origin": "gemm_reference",
+      "record": "ArchRegion",
+      "registers": {
+        "accumulator_dtype": {
+          "enum": "DataType",
+          "value": "fp32"
+        },
+        "base_registers_per_thread": 32,
+        "consumer_warps": 8,
+        "fragment_shape": [
+          16,
+          64
+        ],
+        "per_cta_bytes": 180224,
+        "record": "RegisterLayout"
+      },
+      "resources": {
+        "record": "ResourceFootprint",
+        "register_bytes": 180224,
+        "shared_bytes": 163840,
+        "warps": 12
+      },
+      "sm": {
+        "expression": "%cta",
+        "record": "IndexExpr"
+      },
+      "static": {
+        "arguments": [
+          {
+            "expression": "256",
+            "id": "M",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "256",
+            "id": "N",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "192",
+            "id": "K",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%NUM_SMS",
+            "id": "NUM_SMS",
+            "record": "StaticBinding"
+          }
+        ],
+        "bindings": [
+          {
+            "expression": "ceildiv(%M,128)",
+            "id": "m_tiles",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%N,256)",
+            "id": "n_tiles",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%K,64)",
+            "id": "k_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%m_tiles*%n_tiles",
+            "id": "tile_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(%NUM_SMS, %tile_count)",
+            "id": "cta_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%tile_count, %cta_count)",
+            "id": "wave_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(8, %n_tiles)",
+            "id": "column_group",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%cta + %wave*%cta_count",
+            "id": "tile",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "floordiv(%tile, %m_tiles*%column_group)",
+            "id": "group",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%group*%column_group",
+            "id": "group_start",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(%column_group, %n_tiles-%group_start)",
+            "id": "group_width",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%tile-%group_start*%m_tiles",
+            "id": "group_tile",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "floordiv(%group_tile, %group_width)",
+            "id": "row",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%group_start + %group_tile mod %group_width",
+            "id": "column",
+            "record": "StaticBinding"
+          }
+        ],
+        "constraints": [
+          "%M divisible_by 128",
+          "%N divisible_by 256",
+          "%K divisible_by 64"
+        ],
+        "parameters": [
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "M",
+            "lower": "128",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "N",
+            "lower": "256",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "K",
+            "lower": "64",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "NUM_SMS",
+            "lower": "1",
+            "record": "StaticParameter",
+            "upper": "*"
+          }
+        ],
+        "predicates": [
+          {
+            "expression": "%tile < %tile_count",
+            "id": "valid_tile",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k > 0",
+            "id": "has_previous_k",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k == 0 and %wave > 0",
+            "id": "previous_wave_start",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k >= 2",
+            "id": "reuse_current_wave",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k_count mod 2 == 1",
+            "id": "odd_k_count",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "has_previous_fragment(%executor)",
+            "id": "has_previous_fragment",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%scope == \"pipeline\"",
+            "id": "in_pipeline",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%scope == \"epilogue\"",
+            "id": "in_epilogue",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%chunk > 0",
+            "id": "has_previous_chunk",
+            "record": "StaticPredicate"
+          }
+        ],
+        "record": "StaticDeclarations"
+      },
+      "static_ifs": [
+        {
+          "condition": "%valid_tile",
+          "id": "valid_tile",
+          "iterations": [
+            "cta",
+            "wave"
+          ],
+          "record": "StaticIf"
+        }
+      ],
+      "symbol": "first",
+      "target": "sm90",
+      "tensors": [
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "X",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "M",
+            "K"
+          ],
+          "tier": null
+        },
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "W0",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "K",
+            "N"
+          ],
+          "tier": null
+        },
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "H",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "M",
+            "N"
+          ],
+          "tier": null
+        }
+      ]
+    },
+    {
+      "after": [
+        "first"
+      ],
+      "async_protocol": {
+        "commit_groups": 1,
+        "mbarrier_phases": 2,
+        "record": "AsyncProtocol",
+        "reuse_phase": {
+          "enum": "Phase",
+          "value": "complete"
+        },
+        "wait_group": 0
+      },
+      "cta_variable": "cta",
+      "dependency_rules": [
+        {
+          "id": "previous_load",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "load_A",
+            "load_B"
+          ],
+          "static_if": "%has_previous_k"
+        },
+        {
+          "id": "previous_load",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "load_A",
+            "load_B"
+          ],
+          "static_if": "%previous_wave_start"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k-2"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%reuse_current_wave"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(%odd_k_count) and (%previous_wave_start)"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-2"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(not ((%odd_k_count)) and (true)) and (%previous_wave_start)"
+        },
+        {
+          "id": "buffer_reuse",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "(not ((%odd_k_count)) and (true)) and (%k == 1 and %wave > 0)"
+        },
+        {
+          "id": "previous_tile_store",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "store"
+          ],
+          "static_if": "%previous_wave_start"
+        },
+        {
+          "id": "final_round",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "true"
+        },
+        {
+          "id": "previous_fragment",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%has_previous_fragment"
+        },
+        {
+          "id": "warp_tail",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%in_pipeline"
+        },
+        {
+          "id": "warp_tail",
+          "phase": {
+            "enum": "Phase",
+            "value": "complete"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "k",
+              "%k_count-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "last_per_executor"
+          },
+          "sources": [
+            "matmul"
+          ],
+          "static_if": "%in_epilogue"
+        },
+        {
+          "id": "previous_chunk",
+          "phase": {
+            "enum": "Phase",
+            "value": "issue"
+          },
+          "producer_bindings": [
+            [
+              "wave",
+              "%wave"
+            ],
+            [
+              "chunk",
+              "%chunk-1"
+            ]
+          ],
+          "record": "DependencyRule",
+          "selection": {
+            "enum": "Selection",
+            "value": "all"
+          },
+          "sources": [
+            "store"
+          ],
+          "static_if": "%has_previous_chunk"
+        }
+      ],
+      "domain": {
+        "loops": [
+          {
+            "id": "cta",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "%cta_count",
+            "variable": "cta"
+          },
+          {
+            "id": "wave",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "%wave_count",
+            "variable": "wave"
+          }
+        ],
+        "pipeline": {
+          "depth": 2,
+          "id": "k_loop",
+          "loop": {
+            "id": "k_loop",
+            "record": "TileLoop",
+            "start": 0,
+            "step": 1,
+            "stop": "ceildiv(%K,64)",
+            "variable": "k"
+          },
+          "record": "PipelineRegion",
+          "stage": {
+            "generation_counts_per_wave": [
+              "ceildiv(ceildiv(%K,64),2)",
+              "floordiv(ceildiv(%K,64),2)"
+            ],
+            "iteration": {
+              "index": {
+                "expression": "%k",
+                "record": "IndexExpr"
+              },
+              "record": "IterationId"
+            },
+            "modulus": 2,
+            "record": "PipelineStage"
+          }
+        },
+        "record": "ScheduleDomain"
+      },
+      "layouts": [
+        {
+          "buffer": "ab_stage",
+          "bytes_per_slot": 49152,
+          "layout": "row_major",
+          "record": "SharedLayout",
+          "slots": 2
+        },
+        {
+          "buffer": "output",
+          "bytes_per_slot": 65536,
+          "layout": "row_major",
+          "record": "SharedLayout",
+          "slots": 1
+        }
+      ],
+      "ops": [
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            }
+          ],
+          "id": "acquire",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": []
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            }
+          ],
+          "id": "load_A",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "buffer_reuse"
+                  },
+                  "label": "buffer_reuse",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": {
+                "expression": "%K",
+                "record": "IndexExpr"
+              },
+              "loops": [],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.dram2sram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%row*128",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "%k*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  128,
+                  64
+                ],
+                "tensor": "H"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "load"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "buffer_reuse"
+              },
+              "label": "buffer_reuse",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_load",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            }
+          ],
+          "id": "load_B",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "buffer_reuse"
+                  },
+                  "label": "buffer_reuse",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_load",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": {
+                "expression": "%N",
+                "record": "IndexExpr"
+              },
+              "loops": [
+                {
+                  "id": "chunk",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": "ceildiv(256,64)",
+                  "variable": "chunk"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.dram2sram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%k*64",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + %chunk*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  64,
+                  64
+                ],
+                "tensor": "W1"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "load"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "load_A",
+              "phase": {
+                "enum": "Phase",
+                "value": "ready"
+              },
+              "record": "Dependency",
+              "source": "load_A"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "load_B",
+              "phase": {
+                "enum": "Phase",
+                "value": "ready"
+              },
+              "record": "Dependency",
+              "source": "load_B"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "previous_fragment",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "output_order"
+              },
+              "label": "previous_tile_store",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "store"
+            }
+          ],
+          "id": "matmul",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "load_A",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "ready"
+                  },
+                  "record": "Dependency",
+                  "source": "load_A"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "load_B",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "ready"
+                  },
+                  "record": "Dependency",
+                  "source": "load_B"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "previous_fragment",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "output_order"
+                  },
+                  "label": "previous_tile_store",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "store"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp32"
+              },
+              "executor": {
+                "expression": "%executor",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": null,
+              "loops": [
+                {
+                  "id": "executor",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "executor"
+                },
+                {
+                  "id": "m_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "m_fragment"
+                },
+                {
+                  "id": "n_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "n_fragment"
+                },
+                {
+                  "id": "k_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 4,
+                  "variable": "k_fragment"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "wgmma.m64n64k16"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "(%row*128) + %m_fragment*64 + (%executor mod 4)*16",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + floordiv(%executor,4)*128 + %n_fragment*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  16,
+                  64
+                ],
+                "tensor": "Y"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "matrix"
+              }
+            }
+          ]
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "warp_tail",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            }
+          ],
+          "id": "release",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "pipeline"
+          },
+          "steps": []
+        },
+        {
+          "dependencies": [
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "data"
+              },
+              "label": "warp_tail",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "loop_carried"
+              },
+              "label": "final_round",
+              "phase": {
+                "enum": "Phase",
+                "value": "complete"
+              },
+              "record": "Dependency",
+              "source": "matmul"
+            },
+            {
+              "kind": {
+                "enum": "DependencyKind",
+                "value": "output_order"
+              },
+              "label": "previous_chunk",
+              "phase": {
+                "enum": "Phase",
+                "value": "issue"
+              },
+              "record": "Dependency",
+              "source": "store"
+            }
+          ],
+          "id": "store",
+          "record": "NativePattern",
+          "scope": {
+            "enum": "Scope",
+            "value": "epilogue"
+          },
+          "steps": [
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "data"
+                  },
+                  "label": "warp_tail",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                },
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "loop_carried"
+                  },
+                  "label": "final_round",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "complete"
+                  },
+                  "record": "Dependency",
+                  "source": "matmul"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "%executor",
+                "record": "IndexExpr"
+              },
+              "input_steps": [],
+              "leading_dim": null,
+              "loops": [
+                {
+                  "id": "executor",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "executor"
+                },
+                {
+                  "id": "m_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 2,
+                  "variable": "m_fragment"
+                },
+                {
+                  "id": "n_fragment",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": 8,
+                  "variable": "n_fragment"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "st.reg2sram"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "(%row*128) + %m_fragment*64 + (%executor mod 4)*16",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + floordiv(%executor,4)*128 + %n_fragment*16",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  16,
+                  16
+                ],
+                "tensor": "Y"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "store"
+              }
+            },
+            {
+              "dependencies": [
+                {
+                  "kind": {
+                    "enum": "DependencyKind",
+                    "value": "output_order"
+                  },
+                  "label": "previous_chunk",
+                  "phase": {
+                    "enum": "Phase",
+                    "value": "issue"
+                  },
+                  "record": "Dependency",
+                  "source": "store"
+                }
+              ],
+              "dtype": {
+                "enum": "DataType",
+                "value": "fp16"
+              },
+              "executor": {
+                "expression": "8",
+                "record": "IndexExpr"
+              },
+              "input_steps": [
+                0
+              ],
+              "leading_dim": {
+                "expression": "%N",
+                "record": "IndexExpr"
+              },
+              "loops": [
+                {
+                  "id": "chunk",
+                  "record": "TileLoop",
+                  "start": 0,
+                  "step": 1,
+                  "stop": "ceildiv(256,64)",
+                  "variable": "chunk"
+                }
+              ],
+              "opcode": {
+                "enum": "NativeOpcode",
+                "value": "cp.sram2dram_tma"
+              },
+              "record": "NativeStep",
+              "region": {
+                "offsets": [
+                  {
+                    "expression": "%row*128",
+                    "record": "IndexExpr"
+                  },
+                  {
+                    "expression": "(%column*256) + %chunk*64",
+                    "record": "IndexExpr"
+                  }
+                ],
+                "record": "SymbolicRegion",
+                "shape": [
+                  128,
+                  64
+                ],
+                "tensor": "Y"
+              },
+              "resource": {
+                "enum": "ExecutionResource",
+                "value": "store"
+              }
+            }
+          ]
+        }
+      ],
+      "origin": "gemm_reference",
+      "record": "ArchRegion",
+      "registers": {
+        "accumulator_dtype": {
+          "enum": "DataType",
+          "value": "fp32"
+        },
+        "base_registers_per_thread": 32,
+        "consumer_warps": 8,
+        "fragment_shape": [
+          16,
+          64
+        ],
+        "per_cta_bytes": 180224,
+        "record": "RegisterLayout"
+      },
+      "resources": {
+        "record": "ResourceFootprint",
+        "register_bytes": 180224,
+        "shared_bytes": 163840,
+        "warps": 12
+      },
+      "sm": {
+        "expression": "%cta",
+        "record": "IndexExpr"
+      },
+      "static": {
+        "arguments": [
+          {
+            "expression": "256",
+            "id": "M",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "512",
+            "id": "N",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "256",
+            "id": "K",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%NUM_SMS",
+            "id": "NUM_SMS",
+            "record": "StaticBinding"
+          }
+        ],
+        "bindings": [
+          {
+            "expression": "ceildiv(%M,128)",
+            "id": "m_tiles",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%N,256)",
+            "id": "n_tiles",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%K,64)",
+            "id": "k_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%m_tiles*%n_tiles",
+            "id": "tile_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(%NUM_SMS, %tile_count)",
+            "id": "cta_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "ceildiv(%tile_count, %cta_count)",
+            "id": "wave_count",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(8, %n_tiles)",
+            "id": "column_group",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%cta + %wave*%cta_count",
+            "id": "tile",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "floordiv(%tile, %m_tiles*%column_group)",
+            "id": "group",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%group*%column_group",
+            "id": "group_start",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "min(%column_group, %n_tiles-%group_start)",
+            "id": "group_width",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%tile-%group_start*%m_tiles",
+            "id": "group_tile",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "floordiv(%group_tile, %group_width)",
+            "id": "row",
+            "record": "StaticBinding"
+          },
+          {
+            "expression": "%group_start + %group_tile mod %group_width",
+            "id": "column",
+            "record": "StaticBinding"
+          }
+        ],
+        "constraints": [
+          "%M divisible_by 128",
+          "%N divisible_by 256",
+          "%K divisible_by 64"
+        ],
+        "parameters": [
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "M",
+            "lower": "128",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "N",
+            "lower": "256",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "K",
+            "lower": "64",
+            "record": "StaticParameter",
+            "upper": "*"
+          },
+          {
+            "dtype": {
+              "enum": "DataType",
+              "value": "index"
+            },
+            "id": "NUM_SMS",
+            "lower": "1",
+            "record": "StaticParameter",
+            "upper": "*"
+          }
+        ],
+        "predicates": [
+          {
+            "expression": "%tile < %tile_count",
+            "id": "valid_tile",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k > 0",
+            "id": "has_previous_k",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k == 0 and %wave > 0",
+            "id": "previous_wave_start",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k >= 2",
+            "id": "reuse_current_wave",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%k_count mod 2 == 1",
+            "id": "odd_k_count",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "has_previous_fragment(%executor)",
+            "id": "has_previous_fragment",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%scope == \"pipeline\"",
+            "id": "in_pipeline",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%scope == \"epilogue\"",
+            "id": "in_epilogue",
+            "record": "StaticPredicate"
+          },
+          {
+            "expression": "%chunk > 0",
+            "id": "has_previous_chunk",
+            "record": "StaticPredicate"
+          }
+        ],
+        "record": "StaticDeclarations"
+      },
+      "static_ifs": [
+        {
+          "condition": "%valid_tile",
+          "id": "valid_tile",
+          "iterations": [
+            "cta",
+            "wave"
+          ],
+          "record": "StaticIf"
+        }
+      ],
+      "symbol": "second",
+      "target": "sm90",
+      "tensors": [
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "H",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "M",
+            "K"
+          ],
+          "tier": null
+        },
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "W1",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "K",
+            "N"
+          ],
+          "tier": null
+        },
+        {
+          "dtype": {
+            "enum": "DataType",
+            "value": "fp16"
+          },
+          "external": false,
+          "id": "Y",
+          "layout": {
+            "enum": "Layout",
+            "value": "row_major"
+          },
+          "read_only": false,
+          "record": "Tensor",
+          "shape": [
+            "M",
+            "N"
+          ],
+          "tier": null
+        }
+      ]
+    }
+  ],
+  "static": {
+    "arguments": [
+      {
+        "expression": "1",
+        "id": "NUM_SMS",
+        "record": "StaticBinding"
+      }
+    ],
+    "bindings": [],
+    "constraints": [],
+    "parameters": [
+      {
+        "dtype": {
+          "enum": "DataType",
+          "value": "index"
+        },
+        "id": "NUM_SMS",
+        "lower": "1",
+        "record": "StaticParameter",
+        "upper": "*"
+      }
+    ],
+    "predicates": [],
+    "record": "StaticDeclarations"
+  },
+  "stream": "compute",
+  "symbol": "two_gemms",
+  "tensors": [
+    {
+      "dtype": {
+        "enum": "DataType",
+        "value": "fp16"
+      },
+      "external": true,
+      "id": "X",
+      "layout": null,
+      "read_only": true,
+      "record": "Tensor",
+      "shape": [
+        256,
+        192
+      ],
+      "tier": {
+        "enum": "MemorySpace",
+        "value": "HBM"
+      }
+    },
+    {
+      "dtype": {
+        "enum": "DataType",
+        "value": "fp16"
+      },
+      "external": true,
+      "id": "W0",
+      "layout": null,
+      "read_only": true,
+      "record": "Tensor",
+      "shape": [
+        192,
+        256
+      ],
+      "tier": {
+        "enum": "MemorySpace",
+        "value": "HBM"
+      }
+    },
+    {
+      "dtype": {
+        "enum": "DataType",
+        "value": "fp16"
+      },
+      "external": false,
+      "id": "H",
+      "layout": null,
+      "read_only": false,
+      "record": "Tensor",
+      "shape": [
+        256,
+        256
+      ],
+      "tier": {
+        "enum": "MemorySpace",
+        "value": "HBM"
+      }
+    },
+    {
+      "dtype": {
+        "enum": "DataType",
+        "value": "fp16"
+      },
+      "external": true,
+      "id": "W1",
+      "layout": null,
+      "read_only": true,
+      "record": "Tensor",
+      "shape": [
+        256,
+        512
+      ],
+      "tier": {
+        "enum": "MemorySpace",
+        "value": "HBM"
+      }
+    },
+    {
+      "dtype": {
+        "enum": "DataType",
+        "value": "fp16"
+      },
+      "external": false,
+      "id": "Y",
+      "layout": null,
+      "read_only": false,
+      "record": "Tensor",
+      "shape": [
+        256,
+        512
+      ],
+      "tier": {
+        "enum": "MemorySpace",
+        "value": "HBM"
+      }
+    }
+  ]
+}

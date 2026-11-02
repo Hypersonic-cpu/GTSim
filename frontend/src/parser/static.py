@@ -8,7 +8,14 @@ from . import ast as A
 def declarations(root):
     from .semantic import statements, match, assignments, split_balanced
 
-    parameters, bindings, predicates, constraints, body = [], [], [], [], []
+    parameters, bindings, predicates, constraints, arguments, body = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     for node in statements(root.body):
         if not isinstance(node, str) or not node.startswith("static."):
             body.append(
@@ -24,6 +31,11 @@ def declarations(root):
                 raise ValueError(f"invalid static parameter: {node}")
             name, dtype, lower, upper = parsed.groups()
             parameters.append(A.StaticParameter(name, A.DataType(dtype), lower, upper))
+        elif node.startswith("static.bind"):
+            arguments.extend(
+                A.StaticBinding(name, expression)
+                for name, expression in assignments(node)
+            )
         elif node.startswith("static.let"):
             values = assignments(node)
             if not values:
@@ -41,7 +53,11 @@ def declarations(root):
         else:
             raise ValueError(f"unsupported static declaration: {node}")
     return replace(root, body=tuple(body)), A.StaticDeclarations(
-        tuple(parameters), tuple(bindings), tuple(predicates), tuple(constraints)
+        tuple(parameters),
+        tuple(bindings),
+        tuple(predicates),
+        tuple(constraints),
+        tuple(arguments),
     )
 
 
@@ -52,6 +68,10 @@ def emit(declarations):
         if parameter.lower is not None:
             line += f" range[{parameter.lower}, {parameter.upper}]"
         lines.append(line)
+    lines += [
+        f"static.bind %{value.id} = {value.expression}"
+        for value in declarations.arguments
+    ]
     lines += [
         f"static.let %{value.id} = {value.expression}"
         for value in declarations.bindings

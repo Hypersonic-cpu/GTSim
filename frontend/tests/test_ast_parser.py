@@ -220,22 +220,21 @@ class ASTParserTests(unittest.TestCase):
         prog = parser.parse_file(REFERENCE / "example.progir")
         algo = parser.parse_file(REFERENCE / "gemm.algoir")
         flow = parser.parse_file(REFERENCE / "gemm.flowir")
-        arch = A.ArchIR(
-            "native",
-            flow.static,
-            flow.regions[0].mapping.target,
-            flow.regions[0].schedule_id,
-            flow.regions[0].config,
-            flow.regions[0].domain,
-            flow.tensors,
-            flow.regions[0].mapping,
-            A.ResourceFootprint(12, 98304, 163840),
+        from compile import lower_flow
+
+        arch = lower_flow(flow)
+        execution = A.ExecIR(
+            "dag",
+            A.StaticDeclarations((), (), (), (), ()),
+            "sm90",
             (),
-            A.RegisterLayout(A.DataType.FP32, (64, 64), 8, 32, 163840),
-            A.AsyncProtocol(2, 1, 0, A.Phase.COMPLETE),
             (),
+            (),
+            (),
+            (),
+            (),
+            None,
         )
-        execution = A.ExecIR("dag", flow.static, "sm90", (), (), (), (), ())
         for obj in (prog, algo, flow, arch, execution):
             parsed = parser.parse(dumps(obj))
             self.assertIs(type(parsed), type(obj))

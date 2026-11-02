@@ -2,15 +2,13 @@
 
 from dataclasses import replace
 from pathlib import Path
-from parser import ast as A, from_module
+from parser import ast as A, parse_file
 from .algo_to_flow import compile_algorithm
-from .bind import specialize
-from .static import EMPTY, specialize_source, source_symbol
+from .static import source_symbol
 
 
 def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
-    module, resolver = specialize_source(Path(program_path), parameters)
-    program = specialize(from_module(module), resolver)
+    program = parse_file(program_path)
     (stream,) = program.streams
     algorithms = {source_symbol(path): Path(path) for path in algorithm_paths}
     schedules = {source_symbol(path): Path(path) for path in schedule_paths}
@@ -33,12 +31,8 @@ def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
         invocation = invocations[command.target]
         if not set(invocation.inputs) <= produced:
             raise ValueError(f"input has no preceding producer: {invocation.id}")
-        attributes = {
-            key: resolver.value(value) for key, value in invocation.attributes
-        }
-        values = {**parameters, **attributes}
-        algorithm_source, _ = specialize_source(algorithms[invocation.callee], values)
-        algorithm = from_module(algorithm_source)
+        values = dict(invocation.attributes)
+        algorithm = parse_file(algorithms[invocation.callee])
         if len(algorithm.inputs) != len(invocation.inputs) or len(
             algorithm.outputs
         ) != len(invocation.outputs):
@@ -56,6 +50,17 @@ def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
             bindings,
             tensors,
         )
+        if invocation.guard:
+            region = replace(
+                region,
+                static=replace(
+                    region.static,
+                    arguments=region.static.arguments
+                    + (A.StaticBinding("__program_guard", invocation.guard.condition),),
+                ),
+                static_ifs=region.static_ifs
+                + (A.StaticIf(invocation.id, "%__program_guard", ()),),
+            )
         regions.append(
             replace(
                 region,
@@ -72,5 +77,15 @@ def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
     ):
         raise ValueError("return references unavailable tensors/events")
     return A.FlowIR(
-        program.symbol, EMPTY, program.tensors, tuple(regions), stream, program.returns
+        program.symbol,
+        replace(
+            program.static,
+            arguments=tuple(
+                A.StaticBinding(name, repr(value)) for name, value in parameters.items()
+            ),
+        ),
+        program.tensors,
+        tuple(regions),
+        stream,
+        program.returns,
     )

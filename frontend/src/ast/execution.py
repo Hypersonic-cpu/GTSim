@@ -7,8 +7,18 @@ from .common import Header
 
 
 @dataclass(frozen=True)
+class ExecRegion:
+    id: str
+    nodes: tuple[int, ...]
+    ctas: tuple[int, ...]
+    after: tuple[str, ...]
+    outputs: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class ExecIR(FlatKernel):
-    pass
+    regions: tuple[ExecRegion, ...]
+    stream: str | None
 
 
 @dataclass(frozen=True)

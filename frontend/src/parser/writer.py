@@ -110,6 +110,7 @@ def prog(ir):
             if command.kind == A.CommandKind.LAUNCH:
                 inv = launches[command.target]
                 lhs = names(inv.outputs, "%") + ", " + names(inv.events, "!")
+                begin = len(lines)
                 lines += [
                     f"    {lhs} = prog.launch @{inv.id}",
                     f"        callee<@{inv.callee}> implementation<@{inv.implementation}>",
@@ -120,6 +121,12 @@ def prog(ir):
                     + ", ".join(f"{k}={v}" for k, v in inv.attributes)
                     + "}",
                 ]
+                if inv.guard:
+                    lines[begin:] = [
+                        "    static.if <" + inv.guard.condition + "> {",
+                        *("  " + line for line in lines[begin:]),
+                        "    }",
+                    ]
             else:
                 lines.append(
                     f"    prog.synchronize @{command.target} after[{names(command.after, '!')}]"

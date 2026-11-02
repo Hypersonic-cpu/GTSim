@@ -58,6 +58,26 @@ def assignments(text):
     )
 
 
+def guarded_statements(nodes, condition="true"):
+    alternatives = []
+    for node in statements(nodes):
+        if isinstance(node, A.StaticBranch):
+            if node.kind == A.StaticBranchKind.IF:
+                alternatives = []
+            prior = " or ".join(f"({v})" for v in alternatives)
+            selected = node.condition or "true"
+            if prior:
+                selected = f"not ({prior}) and ({selected})"
+            combined = (
+                selected if condition == "true" else f"({condition}) and ({selected})"
+            )
+            yield from guarded_statements(node.body, combined)
+            if node.condition is not None:
+                alternatives.append(node.condition)
+        else:
+            yield node, condition
+
+
 def prog(root, static):
     header = " ".join(root.header)
     symbol = match(r"prog.program\s+@(\w+)", header)[1]
@@ -67,7 +87,7 @@ def prog(root, static):
         if isinstance(node, A.Operation):
             stream = match(r"prog.stream\s+@(\w+)\s+ordered", " ".join(node.header))[1]
             streams.append(stream)
-            for line in statements(node.body):
+            for line, guard in guarded_statements(node.body):
                 if not isinstance(line, str):
                     raise ValueError("unexpected nested program region")
                 if "prog.launch" in line:
@@ -85,6 +105,8 @@ def prog(root, static):
                             if part.strip()
                         )
                     )
+                    if any(inv.id == identity for inv in launches):
+                        identity += "_" + str(len(launches))
                     launches.append(
                         A.Invocation(
                             identity,
@@ -94,6 +116,9 @@ def prog(root, static):
                             callee=callee,
                             implementation=implementation,
                             attributes=attributes,
+                            guard=A.StaticIf(identity, guard, ())
+                            if guard != "true"
+                            else None,
                         )
                     )
                     commands.append(A.Command(A.CommandKind.LAUNCH, identity, ()))

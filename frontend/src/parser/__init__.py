@@ -44,7 +44,7 @@ def from_module(module):
         if root.name == "flow.kernel" and len(roots) <= 2:
             if len(roots) == 2 and roots[1].name != "mapping.program":
                 raise ValueError("expected mapping.program after flow.kernel")
-            empty = ast.StaticDeclarations((), (), (), ())
+            empty = ast.StaticDeclarations((), (), (), (), ())
             region = semantic.flow_region(
                 root, roots[1] if len(roots) == 2 else None, empty
             )

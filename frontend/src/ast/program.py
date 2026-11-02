@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from .common import Header, Tensor, DataType
+from .common import Header, Tensor, StaticIf
 
 
 class CommandKind(str, Enum):
@@ -21,6 +21,7 @@ class Invocation:
     outputs: tuple[str, ...]
     events: tuple[str, ...]
     attributes: tuple[tuple[str, str], ...]
+    guard: StaticIf | None
 
 
 @dataclass(frozen=True)

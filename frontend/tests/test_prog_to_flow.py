@@ -7,8 +7,8 @@ import unittest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
-from compile import compile_program
-from compile.static import Resolver, EMPTY, specialize_source
+from compile import compile_program, lower_flow, lower_arch
+from compile.static import Resolver, EMPTY, specialize_source, bound_resolver
 from parser import ast as A, parse_file, parse, serialize, from_module
 from parser.json_codec import dumps
 
@@ -35,12 +35,13 @@ class ProgramToFlowTests(unittest.TestCase):
         self.assertEqual(second.after, ("first",))
         self.assertEqual((first.origin, second.origin), ("gemm_reference",) * 2)
         self.assertEqual(tuple(len(r.ops) for r in flow.regions), (6, 6))
+        self.assertEqual(first.domain.pipeline.loop.stop, "ceildiv(%K,64)")
+        self.assertEqual(second.domain.pipeline.loop.stop, "ceildiv(%K,64)")
         self.assertEqual(
-            (first.domain.pipeline.loop.stop, second.domain.pipeline.loop.stop), (3, 4)
+            dict((v.id, v.expression) for v in first.static.arguments)["K"], "192"
         )
-        self.assertEqual(first.domain.pipeline.stage.generation_counts_per_wave, (2, 1))
         self.assertEqual(
-            second.domain.pipeline.stage.generation_counts_per_wave, (2, 2)
+            dict((v.id, v.expression) for v in second.static.arguments)["K"], "256"
         )
         self.assertEqual(first.ops[-1].region.tensor, "H")
         self.assertEqual(second.ops[1].region.tensor, "H")
@@ -55,22 +56,24 @@ class ProgramToFlowTests(unittest.TestCase):
         )
         self.assertEqual(parse(serialize(flow)), flow)
         self.assertEqual(parse(dumps(flow)), flow)
-        self.assertNotIn("%K", serialize(flow))
+        self.assertIn("%K", serialize(flow))
         self.assertNotIn("prog.launch", serialize(flow))
 
     def test_parameter_branch_selects_different_buffer_dependencies(self):
         first, second = build().regions
         self.assertEqual(
-            len([r for r in first.dependency_rules if r.id == "buffer_reuse"]), 2
+            len([r for r in first.dependency_rules if r.id == "buffer_reuse"]), 4
         )
         self.assertEqual(
-            len([r for r in second.dependency_rules if r.id == "buffer_reuse"]), 3
+            len([r for r in second.dependency_rules if r.id == "buffer_reuse"]), 4
         )
         # Independent oracle for the selected cross-wave ping-pong edges.
         expected = ({0: 2}, {0: 2, 1: 3})
         for region, oracle in zip((first, second), expected):
             for k in (0, 1):
-                resolver = Resolver(region.static, {"k": k, "wave": 1})
+                root = bound_resolver(build().static, Resolver(EMPTY, {}))
+                bound = bound_resolver(region.static, root)
+                resolver = Resolver(region.static, {**bound.values, "k": k, "wave": 1})
                 edges = [
                     dict(rule.producer_bindings)
                     for rule in region.dependency_rules
@@ -104,7 +107,8 @@ class ProgramToFlowTests(unittest.TestCase):
                 module, _ = specialize_source(path, {"NUM_SMS": sms})
                 program = from_module(module)
                 self.assertEqual(dict(program.launches[0].attributes)["N"], expected)
-            self.assertEqual(len(build(path).regions), 2)
+            self.assertEqual(len(build(path).regions), 4)
+            self.assertEqual(len(lower_arch(lower_flow(build(path))).regions), 2)
 
     def test_generic_expression_folding_and_constraints(self):
         declarations = A.StaticDeclarations(
@@ -112,6 +116,7 @@ class ProgramToFlowTests(unittest.TestCase):
             (A.StaticBinding("count", "ceildiv(%K,64)"),),
             (A.StaticPredicate("odd", "%count mod 2 == 1"),),
             ("%K divisible_by 64",),
+            (),
         )
         self.assertIs(Resolver(declarations, {"K": 192}).value("%odd"), True)
         self.assertIs(Resolver(declarations, {"K": 256}).value("%odd"), False)
@@ -121,7 +126,7 @@ class ProgramToFlowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Resolver(EMPTY, {}).value('__import__("os")')
 
-    def test_shape_mismatch_is_rejected_before_composition(self):
+    def test_shape_mismatch_is_rejected_at_final_resolution(self):
         with TemporaryDirectory() as temp:
             path = Path(temp) / "wrong.progir"
             path.write_text(
@@ -130,13 +135,19 @@ class ProgramToFlowTests(unittest.TestCase):
                 .replace("tensor<256x192xfp16>", "tensor<256x128xfp16>")
             )
             with self.assertRaisesRegex(ValueError, "tensor binding mismatch"):
-                build(path)
+                lower_arch(lower_flow(build(path)))
 
     def test_target_parameter_changes_cta_allocation_without_changing_shapes(self):
         one, two = build(sms=1), build(sms=2)
         self.assertEqual(one.tensors, two.tensors)
-        self.assertEqual([r.domain.loops[0].stop for r in one.regions], [1, 1])
-        self.assertEqual([r.domain.loops[0].stop for r in two.regions], [2, 2])
+        self.assertEqual(
+            [r.domain.loops[0].stop for r in one.regions], ["%cta_count"] * 2
+        )
+        self.assertEqual(
+            [r.domain.loops[0].stop for r in two.regions], ["%cta_count"] * 2
+        )
+        self.assertEqual(len(lower_arch(lower_flow(one)).ctas), 2)
+        self.assertEqual(len(lower_arch(lower_flow(two)).ctas), 4)
 
 
 if __name__ == "__main__":

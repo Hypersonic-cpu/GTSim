@@ -41,7 +41,9 @@ as well; their structural JSON read/write path is supported, while their
 MLIR-like assembly syntax is not implemented in this step.
 
 `two_gemms.progir` invokes the same algorithm and schedule twice, with K=192 and
-K=256. `two_gemms.flowir` is the generated unified FlowIR: two actual scheduled
-bodies connected through tensor H, with odd/even K-count branches specialized.
-The compilation command is in `frontend/README.md`. Native/DAG lowering remains
-outside this implementation.
+K=256. `two_gemms.flowir` is the generated unified FlowIR: two symbolic scheduled
+bodies connected through tensor H, with distinct `static.bind` arguments.
+`two_gemms.nvir` retains structured Native loops and conditions;
+`two_gemms.dag.json` contains the final 3,718-node ExecIR DAG. Parameter resolution,
+odd/even branch selection, and loop expansion occur only at Arch → Exec.
+Compilation commands and current scope are in `frontend/README.md`.

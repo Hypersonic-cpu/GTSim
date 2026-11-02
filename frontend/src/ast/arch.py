@@ -1,30 +1,48 @@
-"""Structured target operations with explicit resource and synchronization data."""
+"""Structured native instructions: loops, address expressions and phased events."""
 
 from dataclasses import dataclass
-from .common import Header, Tensor, DataType
-from .algorithm import MathOperation
-from .flow import FlowOp
-from .mapping import Mapping
-from .profiles import ScheduleConfig, ResourceFootprint
-from .schedule import ScheduleDomain, Dependency, TileLoop, ValueId, Phase
+from enum import Enum
+from .common import Header, Tensor, DataType, StaticIf
+from .profiles import ResourceFootprint
+from .schedule import (
+    ScheduleDomain,
+    Dependency,
+    TileLoop,
+    SymbolicRegion,
+    IndexExpr,
+    Scope,
+    DependencyRule,
+    Phase,
+)
+from .graph import ExecutionResource
+
+
+class NativeOpcode(str, Enum):
+    TMA_LOAD = "cp.dram2sram_tma"
+    MATRIX = "wgmma.m64n64k16"
+    SHARED_STORE = "st.reg2sram"
+    TMA_STORE = "cp.sram2dram_tma"
 
 
 @dataclass(frozen=True)
 class NativeStep:
-    opcode: str
-    dependencies: tuple[Dependency, ...]
-    fragment_shape: tuple[int | str, ...]
-    collective_warps: int
+    opcode: NativeOpcode
+    resource: ExecutionResource
+    executor: IndexExpr
     loops: tuple[TileLoop, ...]
-    operands: tuple[ValueId, ...]
-    math: MathOperation | None
+    region: SymbolicRegion
+    dtype: DataType
+    leading_dim: IndexExpr | None
+    dependencies: tuple[Dependency, ...]
     input_steps: tuple[int, ...]
 
 
 @dataclass(frozen=True)
 class NativePattern:
-    source: FlowOp
+    id: str
+    scope: Scope
     steps: tuple[NativeStep, ...]
+    dependencies: tuple[Dependency, ...]
 
 
 @dataclass(frozen=True)
@@ -53,15 +71,26 @@ class AsyncProtocol:
 
 
 @dataclass(frozen=True)
-class ArchIR(Header):
+class ArchRegion(Header):
     target: str
-    schedule_id: str
-    config: ScheduleConfig
     domain: ScheduleDomain
     tensors: tuple[Tensor, ...]
-    mapping: Mapping
     resources: ResourceFootprint
     layouts: tuple[SharedLayout, ...]
     registers: RegisterLayout
     async_protocol: AsyncProtocol
     ops: tuple[NativePattern, ...]
+    dependency_rules: tuple[DependencyRule, ...]
+    static_ifs: tuple[StaticIf, ...]
+    cta_variable: str
+    sm: IndexExpr
+    after: tuple[str, ...]
+    origin: str | None
+
+
+@dataclass(frozen=True)
+class ArchIR(Header):
+    tensors: tuple[Tensor, ...]
+    regions: tuple[ArchRegion, ...]
+    stream: str | None
+    outputs: tuple[str, ...]

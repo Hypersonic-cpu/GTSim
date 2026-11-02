@@ -8,7 +8,7 @@ from pathlib import Path
 from parser import ast as A, syntax
 from parser.static import declarations
 
-EMPTY = A.StaticDeclarations((), (), (), ())
+EMPTY = A.StaticDeclarations((), (), (), (), ())
 _BINARY = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -85,7 +85,8 @@ def render(node):
 
 
 class Resolver:
-    def __init__(self, declarations, parameters):
+    def __init__(self, declarations, parameters, functions=None):
+        self.functions = {**_FUNCTIONS, **(functions or {})}
         self.context = declarations
         self.values = dict(parameters)
         self.definitions = {
@@ -181,14 +182,14 @@ class Resolver:
             and isinstance(node.func, ast.Name)
             and not node.keywords
         ):
-            if node.func.id not in (*_FUNCTIONS, "has_previous_fragment"):
+            if node.func.id not in (*self.functions, "has_previous_fragment"):
                 raise ValueError(f"unsupported static function: {node.func.id}")
             values = [self.fold(v) for v in node.args]
-            if node.func.id in _FUNCTIONS and all(
+            if node.func.id in self.functions and all(
                 isinstance(v, ast.Constant) for v in values
             ):
                 return ast.Constant(
-                    _FUNCTIONS[node.func.id](*(v.value for v in values))
+                    self.functions[node.func.id](*(v.value for v in values))
                 )
             return ast.Call(node.func, values, [])
         raise ValueError(f"unsupported static expression: {ast.dump(node)}")
@@ -203,7 +204,7 @@ class Resolver:
                 value = self.expression(definition.expression)
                 if not isinstance(value, ast.Constant):
                     destination.append(cls(definition.id, render(value)))
-        return A.StaticDeclarations((), tuple(bindings), tuple(predicates), ())
+        return A.StaticDeclarations((), tuple(bindings), tuple(predicates), (), ())
 
 
 def select(nodes, resolver):
@@ -275,3 +276,9 @@ def source_symbol(path):
         if isinstance(v, A.Operation)
     )
     return re.search(r"@(\w+)", " ".join(root.header))[1]
+
+
+def bound_resolver(context, parent):
+    """Instantiate a lexical static scope at the final lowering boundary."""
+    arguments = {arg.id: parent.value(arg.expression) for arg in context.arguments}
+    return Resolver(context, {**parent.values, **arguments})

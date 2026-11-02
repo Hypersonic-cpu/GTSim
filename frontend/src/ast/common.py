@@ -55,6 +55,7 @@ class StaticDeclarations:
     bindings: tuple[StaticBinding, ...]
     predicates: tuple[StaticPredicate, ...]
     constraints: tuple[str, ...]
+    arguments: tuple[StaticBinding, ...]
 
 
 @dataclass(frozen=True)
