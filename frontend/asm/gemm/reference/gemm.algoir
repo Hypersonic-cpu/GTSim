@@ -1,0 +1,14 @@
+algo.kernel @gemm_reference(%A: tensor<MxKxfp16>, %B: tensor<KxNxfp16>)
+    -> (%C: tensor<MxNxfp16>) {
+  algo.domain %m in [0, M), %n in [0, N), %k in [0, K)
+  algo.accumulator @acc : tensor<MxNxfp32> init<zero>
+  algo.compute @matmul result<%acc[%m,%n]>
+      semantics<sum_k(cast_f32(%A[%m,%k]) * cast_f32(%B[%k,%n]))>
+  algo.compute @cast_output result<%C[%m,%n]>
+      semantics<cast_fp16(%acc[%m,%n])>
+  algo.stage @operand_acquisition reads[%A, %B]
+  algo.stage @matrix_accumulate after[@operand_acquisition] produces[%acc]
+  algo.stage @epilogue after[@matrix_accumulate] writes[%C]
+  algo.family <tiled_matrix, producer_consumer_pipeline>
+  algo.require <same_result, reduction_complete, output_complete>
+}

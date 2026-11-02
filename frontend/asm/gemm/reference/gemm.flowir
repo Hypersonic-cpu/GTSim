@@ -1,0 +1,45 @@
+flow.kernel @gemm_reference_flow schedule<ref_h100_gemm_v0_1_0> target<sm90> {
+  flow.symbol %M range[128, *]
+  flow.symbol %N range[256, *]
+  flow.symbol %K range[64, *]
+  flow.symbol %NUM_SMS range[1, *]
+  flow.require <%M divisible_by 128, %N divisible_by 256, %K divisible_by 64>
+  flow.tensor @A : tensor<%Mx%Kxfp16, row_major>
+  flow.tensor @B : tensor<%Kx%Nxfp16, row_major>
+  flow.tensor @C : tensor<%Mx%Nxfp16, row_major>
+  flow.domain %tile_count = ceildiv(%M,128)*ceildiv(%N,256)
+      %cta_count = min(%NUM_SMS, %tile_count)
+      %wave_count = ceildiv(%tile_count, %cta_count)
+  flow.schedule_config bm(128) bn(256) bk(64) stages(2)
+      warps(12) consumer_warps(8)
+      producer_warp(8) warpgroup(4)
+      mma_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %cta_count step 1
+  flow.loop @wave %wave = 0 to %wave_count step 1
+  flow.tile_map %tile = %cta + %wave*%cta_count
+      %row = floordiv(%tile, ceildiv(%N,256))
+      %column = %tile mod ceildiv(%N,256)
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %ab_stage slots(2) access<read_write> : bytes_per_slot<49152>
+  flow.buffer_view %a_stage of %ab_stage offset<0> : buffer<128x64xfp16>
+  flow.buffer_view %b_stage of %ab_stage offset<16384> : buffer<64x256xfp16>
+  flow.pipeline @k_loop %k = 0 to ceildiv(%K,64) step 1 depth(2)
+      generation_counts_per_wave[ceildiv(ceildiv(%K,64),2), floordiv(ceildiv(%K,64),2)] {
+    flow.acquire @acquire scope<pipeline> slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:buffer_reuse]
+    %load_A, !load_A_ready = flow.load_async @load_A @A[%row*128, %k*64]<128x64> to %a_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.issue:previous_load] requires<bulk_copy> : tensor<128x64xfp16>
+    %load_B, !load_B_ready = flow.load_async @load_B @B[%k*64, %column*256]<64x256> to %b_stage.s(%k mod 2) by %producer after[@matmul.complete:buffer_reuse, @load_A.issue:previous_load] requires<bulk_copy> : tensor<64x256xfp16>
+    %matmul, !matmul_done = flow.matmul @matmul reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@C[%row*128, %column*256]<128x256>> by %matrix after[@load_A.ready:load_A, @load_B.ready:load_B, @matmul.complete:previous_fragment, @store.complete:previous_tile_store] requires<matrix.mma> : tensor<128x256xfp32>
+    flow.release @release slots[%ab_stage.s(%k mod 2)] after[@matmul.complete:warp_tail]
+  }
+  !store_done = flow.store_async @store reads[%matmul] cast<fp16> to @C[%row*128, %column*256]<128x256> by %producer after[@matmul.complete:warp_tail, @matmul.complete:final_round, @store.issue:previous_chunk] requires<bulk_copy>
+}
+
+mapping.program @gemm_reference_mapping flow<@gemm_reference_flow>
+    target<sm90> placement<original> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @ab_stage -> @SMEM
+  map.store @output -> @SMEM
+  map.route @input_route capability<bulk_copy> @HBM -> @SMEM via<@tma_route>
+}

@@ -1,0 +1,13 @@
+prog.program @gemm_reference_example params(%M: index, %N: index, %K: index) {
+  prog.tensor @A : tensor<%Mx%Kxfp16> storage<HBM> external readonly
+  prog.tensor @B : tensor<%Kx%Nxfp16> storage<HBM> external readonly
+  prog.tensor @C : tensor<%Mx%Nxfp16> storage<HBM>
+  prog.stream @compute ordered {
+    %C, !e0 = prog.launch @gemm0
+        callee<@gemm_reference> implementation<@gemm_reference_flow>
+        inputs[@A, @B] outputs[@C]
+        attrs{M=%M, N=%N, K=%K}
+    prog.synchronize @compute after[!e0]
+  }
+  prog.return @C after[!e0]
+}
