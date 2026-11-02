@@ -157,7 +157,10 @@ if(BUILD_TESTING)
       add_test(NAME ir_native_reference_parity
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/test_native_parity.py
                 --oracle $<TARGET_FILE:reference_graph_dump>)
-      set_tests_properties(execution_program ir_native_reference_parity PROPERTIES TIMEOUT 300)
+      add_test(NAME ir_old_new_frontend_parity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/test_two_gemm_frontend_parity.py)
+      set_tests_properties(execution_program ir_native_reference_parity ir_old_new_frontend_parity
+                           PROPERTIES TIMEOUT 300)
       add_test(NAME ir_frontend_contracts
         COMMAND ${CMAKE_COMMAND} -E env
                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/frontend/src"

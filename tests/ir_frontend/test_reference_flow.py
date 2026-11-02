@@ -1,7 +1,13 @@
 import unittest
 from dataclasses import replace
 from gtsim_frontend.ir.common import VerificationError
-from gtsim_frontend.ir.schedule import OpRole, Phase, IndexExpr, LoopVar
+from gtsim_frontend.ir.schedule import (
+    OpRole,
+    Phase,
+    IndexExpr,
+    LoopVar,
+    Relation,
+)
 from gtsim_frontend.programs.gemm_single import build as gemm
 from gtsim_frontend.programs.fa3_single import build as fa3
 from gtsim_frontend.passes.instantiate import instantiate
@@ -27,6 +33,28 @@ class ReferenceFlowTests(unittest.TestCase):
             self.assertEqual(
                 a.region.offsets_at({LoopVar.ROW: 2, LoopVar.K: 1}), (256, 64)
             )
+
+    def test_pingpong_buffer_one_waits_for_previous_even_wave(self):
+        for k in (128, 256):
+            flow = instantiate(gemm(k=k).launches[0].algorithm, 2)
+            kernel = expand(lower(flow))
+            load = next(op for op in kernel.ops if op.name == "TB0_Tile2_TMA_LoadA_k1")
+            previous = {
+                op.id
+                for op in kernel.ops
+                if op.name.startswith("TB0_Tile0_WGMMA_")
+                and f"_k{k // 64 - 1}_" in op.name
+            }
+            self.assertTrue(previous)
+            self.assertTrue(previous <= set(load.after_complete))
+            for role in (OpRole.LOAD_A, OpRole.LOAD_B):
+                scheduled = next(op for op in flow.ops if op.role == role)
+                prior_load = next(
+                    dep
+                    for dep in scheduled.dependencies
+                    if dep.relation == Relation.PREVIOUS_LOAD
+                )
+                self.assertEqual(prior_load.phase, Phase.COMPLETE)
 
     def test_fa3_gqa_compact_body(self):
         small = instantiate(fa3().launches[0].algorithm)
