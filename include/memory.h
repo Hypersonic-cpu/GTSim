@@ -1303,6 +1303,7 @@ public:
 
     std::vector<int> step(int current_cycle) {
         last_step_cycle_ = current_cycle;
+        admit_prefetch_queue();
         std::vector<int> completed = l2_->step(current_cycle);
         collect_l2_requests(current_cycle);
         launch_pending_requests(current_cycle);
@@ -1331,10 +1332,84 @@ public:
         return completed;
     }
 
-    bool idle() const {
+    struct ReadAlias {
+        MemoryTier tier;
+        std::uint64_t token, address, bytes;
+        std::uint64_t queue_id{};
+    };
+
+    ReadAlias prefetch_range(int tensor_id, std::uint64_t offset, std::uint64_t bytes) const {
+        const auto& tensor = tensors_.at(tensor_id);
+        const auto size = tensor.byte_size();
+        const auto line_size = static_cast<std::uint64_t>(l2_->get_line_size_bytes());
+        if (!tensor.preloaded || !tensor.read_only || !bytes ||
+            offset > size || bytes > size - offset ||
+            offset % line_size || bytes % line_size)
+            throw std::invalid_argument("prefetch range must cover aligned lines of a preloaded read-only tensor");
+        const auto tier = tensor.initial_memory_tier;
+        const auto address = tensor.global_base_address + offset;
+        return {tier, 0, address, bytes};
+    }
+
+    ReadAlias reserve_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes) {
+        auto alias = prefetch_range(tensor_id, offset, bytes);
+        alias.token = device(alias.tier).reserve_prefetch(alias.address, alias.bytes);
+        return alias;
+    }
+
+    ReadAlias enqueue_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes) {
+        auto alias = prefetch_range(tensor_id, offset, bytes);
+        alias.queue_id = next_queue_id_++;
+        queued_prefetches_.emplace(alias.queue_id, alias);
+        prefetch_queue_.push_back(alias.queue_id);
+        return alias;
+    }
+
+    void start_prefetch(const ReadAlias& alias) {
+        device(alias.tier).start_prefetch(alias.token);
+    }
+
+    bool prefetch_ready(const ReadAlias& alias) const {
+        const auto& current = alias.queue_id ? queued_prefetches_.at(alias.queue_id) : alias;
+        return current.token && device(current.tier).prefetch_ready(current.token);
+    }
+
+    void release_prefetch(const ReadAlias& alias) {
+        if (!foreground_idle())
+            throw std::logic_error("release requires foreground retirement");
+        if (alias.queue_id) {
+            const auto queued = queued_prefetches_.at(alias.queue_id);
+            if (queued.token) device(queued.tier).release_prefetch(queued.token);
+            queued_prefetches_.erase(alias.queue_id);
+        } else {
+            device(alias.tier).release_prefetch(alias.token);
+        }
+    }
+
+    void bind_read_aliases(std::vector<ReadAlias> aliases) {
+        if (!foreground_idle()) throw std::logic_error("cannot change active read aliases");
+        std::sort(aliases.begin(), aliases.end(), [](const auto& a, const auto& b) {
+            return a.address < b.address;
+        });
+        for (std::size_t i = 1; i < aliases.size(); ++i)
+            if (aliases[i - 1].address + aliases[i - 1].bytes > aliases[i].address)
+                throw std::invalid_argument("overlapping read aliases");
+        read_aliases_ = std::move(aliases);
+    }
+
+    std::size_t pending_background_requests() const {
+        return (hbm_ ? hbm_->pending_background_requests() : 0) +
+               (hbf_ ? hbf_->pending_background_requests() : 0);
+    }
+
+    bool foreground_idle() const {
         return l2_->idle() && request_routes_.empty() &&
                (!hbm_ || hbm_->pending_requests() == 0) &&
                (!hbf_ || hbf_->pending_requests() == 0);
+    }
+
+    bool idle() const {
+        return foreground_idle() && pending_background_requests() == 0;
     }
 
     MemoryBackendStatistics hbm_backend_statistics() const {
@@ -1402,6 +1477,40 @@ private:
     std::deque<MemResponse> pending_hbf_response_;
     std::deque<MemResponse> pending_hbm_to_hbf_response_;
     std::unordered_map<std::uint64_t, RequestRoute> request_routes_;
+    std::vector<ReadAlias> read_aliases_;
+    std::deque<std::uint64_t> prefetch_queue_;
+    std::map<std::uint64_t, ReadAlias> queued_prefetches_;
+    std::uint64_t next_queue_id_{1}, blocked_head_{}, blocked_epoch_{};
+
+    void admit_prefetch_queue() {
+        while (!prefetch_queue_.empty()) {
+            const auto id = prefetch_queue_.front();
+            const auto found = queued_prefetches_.find(id);
+            if (found == queued_prefetches_.end()) {
+                // The last consumer finished before this request could issue.
+                prefetch_queue_.pop_front();
+                continue;
+            }
+            auto& alias = found->second;
+            auto& backend = device(alias.tier);
+            const auto epoch = backend.residency_epoch();
+            if (blocked_head_ == id && blocked_epoch_ == epoch) return;
+            alias.token = backend.reserve_prefetch(alias.address, alias.bytes);
+            if (!alias.token) {
+                blocked_head_ = id;
+                blocked_epoch_ = epoch;
+                return;
+            }
+            backend.start_prefetch(alias.token);
+            prefetch_queue_.pop_front();
+        }
+    }
+
+    MemoryBackend& device(MemoryTier tier) const {
+        auto* selected = tier == MemoryTier::HBM ? hbm_.get() : hbf_.get();
+        if (!selected) throw std::invalid_argument("no active device for requested tier");
+        return *selected;
+    }
     TierMemoryStatistics hbm_statistics_{};
     TierMemoryStatistics hbf_statistics_{};
 
@@ -1467,10 +1576,21 @@ private:
         return tier == MemoryTier::HBM ? hbm_statistics_ : hbf_statistics_;
     }
 
-    void route_request(const MemRequest& request, int current_cycle) {
+    void route_request(MemRequest request, int current_cycle) {
         tensors_.validate_access(request.global_addr, request.size_bytes, request.tier,
                                  request.operation != MemoryOperation::Read);
         const MemoryTier tier = effective_tier(request.tier);
+        if (request.operation == MemoryOperation::Read) {
+            for (const auto& alias : read_aliases_)
+                if (alias.tier == tier && request.global_addr >= alias.address &&
+                    request.global_addr - alias.address < alias.bytes &&
+                    static_cast<std::uint64_t>(request.size_bytes) <=
+                        alias.bytes - (request.global_addr - alias.address)) {
+                    request.read_alias = alias.queue_id
+                        ? queued_prefetches_.at(alias.queue_id).token : alias.token;
+                    break;
+                }
+        }
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id, RequestRoute{tier, current_cycle});
         if (!inserted) {

@@ -31,6 +31,7 @@ struct MemRequest {
     MemoryOperation operation;
     MemoryTier tier;
     MemoryRoutingHint routing{};
+    std::uint64_t read_alias{};
 };
 
 struct MemResponse {
@@ -87,6 +88,18 @@ public:
     virtual bool try_submit(const MemRequest& request, int now) = 0;
     virtual std::vector<MemResponse> step(int now) = 0;
     virtual std::size_t pending_requests() const = 0;
+    virtual std::uint64_t reserve_prefetch(std::uint64_t, std::uint64_t) {
+        throw std::invalid_argument("device does not support prefetch");
+    }
+    virtual void start_prefetch(std::uint64_t) {
+        throw std::invalid_argument("device does not support prefetch");
+    }
+    virtual bool prefetch_ready(std::uint64_t) const { return false; }
+    virtual void release_prefetch(std::uint64_t) {
+        throw std::invalid_argument("device does not support prefetch");
+    }
+    virtual std::uint64_t residency_epoch() const { return 0; }
+    virtual std::size_t pending_background_requests() const { return 0; }
     virtual MemoryBackendStatistics backend_statistics() const { return {}; }
     virtual DeviceCounters device_counters() const { return {}; }
     virtual HBFBackendStatistics hbf_statistics() const { return {}; }

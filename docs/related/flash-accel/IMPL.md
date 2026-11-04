@@ -349,12 +349,56 @@ rather than the number of groups simultaneously sensing.
    - Release reclaims the SRAM only when no outstanding consumer still uses it.
 10. Avoid real page-table/TLB implementation. Document the assumed mapping and SRAM access latency; do not silently treat them as zero if the model requires a timing parameter.
 
-The existing `Simulator::run()` waits for `MemorySystem::idle()` after all DAG nodes complete; it does **not** flush L2 or reset HBFine. Change only what is necessary to support separately owned background requests. Avoid removing correctness checks for foreground memory completion.
+### Implemented interface and validation
 
-**Acceptance:**
+HBFine supports optional SRAM read paths through the same controller as ordinary
+demand reads. A prefetch uses existing NAND queues, sense engines and page
+buffers. It fills SRAM through a timed internal port, with no GPU-link transfer.
+A resident read uses the SRAM port and then the normal host channel and GPU link.
+The backend charges capacity in 4 KiB pages, preferring the source plane SRAM
+and spilling to that stack's base-die SRAM. Reservation is atomic and release
+waits for both fills and accepted consumers.
 
-- [ ] An asynchronous prefetch can overlap Kernel A and remain active when Kernel B begins; ordinary kernels retain their original completion semantics.
-- [ ] SRAM allocation, completion, fallback access, release, physical contention, and unchanged non-prefetch behavior pass dedicated tests.
+The read SRAM path is opt-in through `hbf.controller.enable_read_sram`. The
+existing `sram_bytes_per_plane` and `base_die_sram_bytes_per_stack` fields set
+capacity. `read_sram_access_latency_ns` and
+`read_sram_bandwidth_GBps_per_stack` must be positive when enabled. The current
+timing model uses one shared read/write SRAM port per stack for both locations.
+The experiment uses 20 ns and 1,536 GB/s as explicit modeling assumptions.
+
+IR-05 programs can declare `prefetches` entries with `id`, `tensor`, `offset`
+and `bytes`. A `Prefetch` command reserves and starts that range. A launch opts
+in with `read_aliases`, and a `Release` command ends the allocation lifetime.
+The original logical address remains the L2 identity. At device admission,
+an aliased miss uses the original NAND path until the whole range is resident.
+An unaliased read uses the ordinary path regardless of SRAM residency.
+Manual programs must fit their reservations into available capacity. Automatic
+queue scheduling and retry on capacity pressure belong to Step 7.
+
+Kernel drain and retirement wait for foreground requests. Background requests
+share the global cycle clock and survive kernel boundaries. Stream
+synchronization and program completion drain all outstanding work.
+
+```sh
+cmake --build build-backends --target gtsim_program hbf_prefetch_check
+build-backends/hbf_prefetch_check
+python3 scripts/hbf/check_prefetch.py --build-dir build-backends
+```
+
+The two-GEMM check uses 2F3M with Ramulator2 HBM3 and grouped HBFine. Kernel A
+completes at cycle 6,602 while the prefetch is outstanding. Kernel B launches
+at that same cycle and transfers 64 KiB through fallback and 192 KiB from
+SRAM. The prefetch transfers 256 KiB internally and B issues zero new NAND
+sense bytes. Total cycles are 29,236 without prefetch and 14,921 with prefetch
+for this controlled case. The backend check covers atomic capacity limits,
+base-die spill, shared NAND contention, unaliased reads and deferred release.
+All ten Step 4 cases reproduced their prior timings, placements and device
+counters with SRAM disabled. CTest was skipped.
+
+**Acceptance**
+
+- [x] An asynchronous prefetch overlaps Kernel A and remains active when Kernel B begins.
+- [x] SRAM allocation, completion, fallback access, release, physical contention and the non-prefetch baselines pass focused checks.
 
 ## Step 7 — Automatic Tiling and Prefetch Scheduling Passes
 
@@ -362,7 +406,7 @@ The existing `Simulator::run()` waits for `MemorySystem::idle()` after all DAG n
 
 ### Tasks
 
-1. Implement experiment-specific compiler passes under `frontend/related/flash_accel/`, reusing existing compiler ASTs and lowering interfaces.
+1. Implement experiment-specific compiler passes under `frontend/src/compile/opt/`, reusing existing compiler ASTs and lowering interfaces.
 2. Keep the copied ProgIR coarse-grained:
    - Kernel invocations and dependencies.
    - Tensor inputs and outputs.

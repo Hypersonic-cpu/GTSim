@@ -379,11 +379,11 @@ bool Simulator::run(int max_cycles, bool verbose) {
             // traffic separately, including dirty eviction writebacks, without
             // adding an implicit L2 flush or changing reference kernel cycles.
             int drain_cycle = cycle;
-            while (!simulated_gpu->memory_system->idle() &&
+            while (!simulated_gpu->memory_system->foreground_idle() &&
                    drain_cycle < max_cycles) {
                 simulated_gpu->memory_system->step(++drain_cycle);
             }
-            if (!simulated_gpu->memory_system->idle()) {
+            if (!simulated_gpu->memory_system->foreground_idle()) {
                 *output_stream << "Memory drain timed out at cycle "
                                << drain_cycle << "\n";
                 return false;

@@ -31,7 +31,7 @@ def tensor_record(tensor):
     )
 
 
-def export_runtime(execution, directory, launch_overhead_cycles=0):
+def export_runtime(execution, directory, launch_overhead_cycles=0, prefetch=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     tensors = [tensor_record(t) for t in execution.tensors]
@@ -129,6 +129,8 @@ def export_runtime(execution, directory, launch_overhead_cycles=0):
         launches=launches,
         commands=commands,
     )
+    if prefetch is not None:
+        prefetch.decorate(program)
     path = directory / "program.gtsir"
     path.write_text(json.dumps(program, indent=2) + "\n")
     return path

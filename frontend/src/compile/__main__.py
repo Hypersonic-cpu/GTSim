@@ -18,6 +18,7 @@ def main():
     cli.add_argument("--flow", action="append", default=[])
     cli.add_argument("--param", action="append", default=[], metavar="NAME=JSON_VALUE")
     cli.add_argument("--runtime-dir", type=Path)
+    cli.add_argument("--prefetch-config", type=Path)
     cli.add_argument("--launch-overhead", type=int, default=0)
     cli.add_argument("-o", "--output", required=True)
     args = cli.parse_args()
@@ -45,6 +46,14 @@ def main():
             ),
         )
     suffix = Path(args.output).suffix
+    prefetch = None
+    if args.prefetch_config:
+        if not isinstance(source, A.FlowIR) or not args.runtime_dir or suffix in (".flowir", ".nvir"):
+            cli.error("--prefetch-config requires Program/Flow input and runtime export")
+        from .opt.prefetch import Residency, optimize
+
+        prefetch = optimize(source, Residency(**json.loads(args.prefetch_config.read_text())))
+        source = prefetch.flow
     if isinstance(source, A.FlowIR) and suffix != ".flowir":
         source = lower_flow(source)
     if isinstance(source, A.ArchIR) and suffix != ".nvir":
@@ -53,7 +62,7 @@ def main():
     if args.runtime_dir:
         if not isinstance(source, A.ExecIR):
             cli.error("--runtime-dir requires ExecIR output")
-        export_runtime(source, args.runtime_dir, args.launch_overhead)
+        export_runtime(source, args.runtime_dir, args.launch_overhead, prefetch)
     print(f"{args.output}: {type(source).__name__}")
 
 

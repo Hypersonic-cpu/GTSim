@@ -1,13 +1,20 @@
 #pragma once
 #include "execution_ir/kernel_graph.h"
+#include <optional>
 
 namespace GTSim::ExecutionIR {
 struct Launch {
     std::string record, id, kernel_file;
     std::vector<std::array<int, 2>> bindings;
+    std::optional<std::vector<std::string>> read_aliases;
 };
 struct Command {
     std::string record, kind, target;
+};
+struct PrefetchRegion {
+    std::string id;
+    int tensor{};
+    std::uint64_t offset{}, bytes{};
 };
 struct Program {
     std::string record, format, symbol, source_hash;
@@ -16,6 +23,7 @@ struct Program {
     std::vector<Tensor> tensors;
     std::vector<Launch> launches;
     std::vector<Command> commands;
+    std::optional<std::vector<PrefetchRegion>> prefetches;
 };
 Program read_program(const std::filesystem::path& path);
 struct TierTiming {
@@ -29,6 +37,7 @@ struct KernelTiming {
         complete_cycle{}, device_cycles{};
     std::size_t l2_lines_before{}, l2_lines_after{};
     std::map<std::string, TierTiming> memory;
+    std::size_t background_at_launch{}, background_at_completion{};
 };
 struct ProgramTiming {
     int total_cycles{};

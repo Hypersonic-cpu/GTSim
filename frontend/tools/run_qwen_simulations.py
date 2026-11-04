@@ -28,10 +28,16 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def plan_program(source, lib, params):
+def plan_program(source, lib, params, residency=None):
     flow = compile_program(
         source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
     )
+    prefetch = None
+    if residency is not None:
+        from compile.opt.prefetch import Residency, optimize
+
+        prefetch = optimize(flow, Residency(**residency))
+        flow = prefetch.flow
     arch = lower_flow(flow)
     root = bound_resolver(arch.static, Resolver(EMPTY, {})).materialize_constants()
     tensors = []
@@ -89,6 +95,8 @@ def plan_program(source, lib, params):
         ]
         + [dict(record="Command", kind="StreamSynchronize", target="")],
     )
+    if prefetch is not None:
+        prefetch.decorate(manifest)
     return manifest, regions, lambda r: lower_region(arch, r)
 
 
@@ -192,12 +200,14 @@ def main():
     parser.add_argument("--runner", type=Path, required=True)
     parser.add_argument("--architecture", type=Path, required=True)
     parser.add_argument("--memory", type=Path, required=True)
+    parser.add_argument("--prefetch-config", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     params = json.loads(args.params.read_text())
     start = perf_counter()
-    manifest, plans, expand = plan_program(args.source, args.lib, params)
+    residency = json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
+    manifest, plans, expand = plan_program(args.source, args.lib, params, residency)
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]
         if path.exists():
@@ -215,6 +225,7 @@ def main():
     provenance = dict(
         version="new",
         params=params,
+        residency=residency,
         launch_overhead_cycles=0,
         runner_sha256=sha(args.runner),
         architecture_sha256=sha(args.architecture),

@@ -4,7 +4,7 @@
 namespace GTSim {
 void KernelExecutionSession::retire(const Simulator& simulator) {
     if (simulator.completed_node_count != simulator.dag->nodes.size() ||
-        !simulator.simulated_gpu->memory_system->idle())
+        !simulator.simulated_gpu->memory_system->foreground_idle())
         throw std::logic_error(
             "kernel retirement requires output and memory completion");
     const auto* gpu = simulator.simulated_gpu;

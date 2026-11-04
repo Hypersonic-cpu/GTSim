@@ -52,13 +52,33 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         launches[l.id] = &l;
         timing.state_history[l.id].push_back("CREATED");
     }
+    std::map<std::string, PrefetchRegion> regions;
+    if (p.prefetches)
+        for (const auto& region : *p.prefetches)
+            if (region.id.empty() || !regions.emplace(region.id, region).second)
+                throw std::invalid_argument("duplicate/empty prefetch region ID");
+    std::set<std::string> active_aliases, started_prefetches;
+    bool has_launch = false;
     std::set<std::string> submitted, recorded;
     for (const auto& c : p.commands) {
         if (c.kind == "LaunchKernel") {
             if (!launches.contains(c.target) ||
                 !submitted.insert(c.target).second)
                 throw std::invalid_argument("unknown/duplicate kernel launch");
+            const auto& launch = *launches.at(c.target);
+            if (launch.read_aliases)
+                for (const auto& alias : *launch.read_aliases)
+                    if (!active_aliases.contains(alias))
+                        throw std::invalid_argument("launch binds an inactive read alias");
             timing.state_history[c.target].push_back("QUEUED");
+            has_launch = true;
+        } else if ((c.kind == "Prefetch" || c.kind == "QueuePrefetch")) {
+            if (!regions.contains(c.target) || !started_prefetches.insert(c.target).second)
+                throw std::invalid_argument("unknown or repeated prefetch region");
+            active_aliases.insert(c.target);
+        } else if (c.kind == "Release") {
+            if (!has_launch || !active_aliases.erase(c.target))
+                throw std::invalid_argument("release requires an active prefetch and an initialized stream");
         } else if (c.kind == "RecordEvent") {
             if (c.target.empty() || !recorded.insert(c.target).second)
                 throw std::invalid_argument("empty/duplicate event");
@@ -66,8 +86,12 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             if (!recorded.contains(c.target))
                 throw std::invalid_argument(
                     "wait before record or unknown event");
-        } else if (c.kind != "StreamSynchronize" || !c.target.empty())
+        } else if (c.kind == "StreamSynchronize" && c.target.empty()) {
+            if (!has_launch && !active_aliases.empty())
+                throw std::invalid_argument("prefetch synchronization requires an initialized stream");
+        } else {
             throw std::invalid_argument("unsupported stream command");
+        }
     }
     if (submitted.size() != launches.size())
         throw std::invalid_argument("unsubmitted kernel launch");
@@ -79,6 +103,27 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
     GPU* gpu = nullptr;
     MemorySystem* memory = nullptr;
     L2Cache* l2 = nullptr;
+    std::map<std::string, MemorySystem::ReadAlias> aliases;
+    std::vector<Command> initial_prefetches;
+    const auto prefetch = [&](const Command& command) {
+        const auto& region = regions.at(command.target);
+        if (command.kind == "QueuePrefetch") {
+            aliases.emplace(command.target, memory->enqueue_prefetch(
+                region.tensor, region.offset, region.bytes));
+            return;
+        }
+        const auto alias = memory->reserve_prefetch(region.tensor, region.offset, region.bytes);
+        if (!alias.token) throw std::runtime_error("prefetch residency capacity exhausted");
+        memory->start_prefetch(alias);
+        aliases.emplace(command.target, alias);
+    };
+    const auto synchronize = [&] {
+        if (!context) return;
+        while (!memory->idle() && context->cycle < max_cycles)
+            memory->step(++context->cycle);
+        if (!memory->idle()) throw std::runtime_error("stream memory drain timed out");
+        timing.total_cycles = context->cycle;
+    };
     for (const auto& c : p.commands) {
         if (c.kind == "LaunchKernel") {
             const auto& specification = *launches.at(c.target);
@@ -94,6 +139,8 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 gpu = context->simulated_gpu;
                 memory = gpu->memory_system.get();
                 l2 = gpu->l2;
+                for (const auto& id : initial_prefetches) prefetch(id);
+                initial_prefetches.clear();
             } else {
                 // Rebind on the existing GPU. The prior DAG remains alive until
                 // KernelExecutionSession has retired it and installed this one.
@@ -106,7 +153,13 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 active_dag = current_dag.get();
             }
 
+            std::vector<MemorySystem::ReadAlias> bindings_for_launch;
+            if (specification.read_aliases)
+                for (const auto& alias : *specification.read_aliases)
+                    bindings_for_launch.push_back(aliases.at(alias));
+            memory->bind_read_aliases(std::move(bindings_for_launch));
             KernelTiming launch;
+            launch.background_at_launch = memory->pending_background_requests();
             launch.id = c.target;
             if (timing.state_history.at(c.target).back() != "QUEUED")
                 throw std::logic_error("invalid launch transition");
@@ -142,6 +195,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                     if (after.device.unit_busy_ticks[unit] > before.device.unit_busy_ticks.at(unit))
                         delta.active_units.push_back(unit);
             }
+            launch.background_at_completion = memory->pending_background_requests();
             launch.state = "COMPLETED";
             timing.state_history[c.target].push_back("COMPLETED");
             timing.per_kernel.push_back(launch);
@@ -150,13 +204,24 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             if (context->simulated_gpu != gpu ||
                 gpu->memory_system.get() != memory || gpu->l2 != l2)
                 throw std::logic_error("GPU context was recreated");
+        } else if ((c.kind == "Prefetch" || c.kind == "QueuePrefetch")) {
+            if (memory) prefetch(c);
+            else initial_prefetches.push_back(c);
+        } else if (c.kind == "Release") {
+            memory->release_prefetch(aliases.at(c.target));
+            aliases.erase(c.target);
+        } else if (c.kind == "StreamSynchronize") {
+            synchronize();
         } else if (c.kind == "RecordEvent")
             timing.events[c.target] = timing.total_cycles;
         else if (c.kind == "WaitEvent" &&
                  timing.events.at(c.target) > timing.total_cycles)
             throw std::logic_error("event completion clock is in the future");
     }
+    if (!initial_prefetches.empty())
+        throw std::invalid_argument("prefetch program requires a kernel launch");
     if (context) {
+        synchronize();
         for (const auto& [tier, stats] : memory->tier_counters()) {
             const std::string name = memory_tier_name(tier);
             timing.traffic_bytes.emplace(name + "_read", stats.read_bytes);
