@@ -48,11 +48,19 @@ def main():
     suffix = Path(args.output).suffix
     prefetch = None
     if args.prefetch_config:
-        if not isinstance(source, A.FlowIR) or not args.runtime_dir or suffix in (".flowir", ".nvir"):
-            cli.error("--prefetch-config requires Program/Flow input and runtime export")
+        if (
+            not isinstance(source, A.FlowIR)
+            or not args.runtime_dir
+            or suffix in (".flowir", ".nvir")
+        ):
+            cli.error(
+                "--prefetch-config requires Program/Flow input and runtime export"
+            )
         from .opt.prefetch import Residency, optimize
 
-        prefetch = optimize(source, Residency(**json.loads(args.prefetch_config.read_text())))
+        prefetch = optimize(
+            source, Residency(**json.loads(args.prefetch_config.read_text()))
+        )
         source = prefetch.flow
     if isinstance(source, A.FlowIR) and suffix != ".flowir":
         source = lower_flow(source)

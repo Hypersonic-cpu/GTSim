@@ -206,7 +206,9 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     params = json.loads(args.params.read_text())
     start = perf_counter()
-    residency = json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
+    residency = (
+        json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
+    )
     manifest, plans, expand = plan_program(args.source, args.lib, params, residency)
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]

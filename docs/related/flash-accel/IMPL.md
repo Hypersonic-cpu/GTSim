@@ -439,10 +439,37 @@ counters with SRAM disabled. CTest was skipped.
 
 Do not modify existing `lib/*.algoir` or `lib/*.flowir`. If current lowering cannot represent an operation, add a general-purpose IR transformation or runtime interface rather than FlashAccel-specific handling.
 
-**Acceptance:**
+The opt-in pass is `frontend/src/compile/opt/prefetch.py`. It runs on bound
+FlowIR before ArchIR lowering. It derives read spans from scheduled memory
+operations and models physical page charges per plane and stack. Oversized
+launches are split along the CTA loop after checking independent output
+tiles. Each CTA retains the full reduction loop. A capacity smaller than one
+full-reduction CTA is rejected, and split-K is outside this implementation.
 
-- [ ] Given a ProgIR and SRAM configuration, the passes automatically produce valid compute tiling, Prefetch Queue, and Release events.
-- [ ] Transformed GEMM computations preserve original semantics, and the generated memory schedule satisfies SRAM capacity and dependency constraints.
+The pass emits a side schedule of enqueue boundaries, consumer aliases and
+last-use releases. Trace-dependent weight addresses are gated at their
+original launch boundary. The generic runtime admits the FIFO head as SRAM
+becomes available and lets kernels use the original read path while waiting.
+The ProgIR and standard operator libraries contain no prefetch instructions.
+
+Use `--prefetch-config frontend/asm/flash-accel/residency.json` with
+`python -m compile --runtime-dir ...` or the streaming simulation runner.
+The residency JSON must match the grouped, aligned memory configuration and
+its opt-in SRAM capacities. The Qwen run uses the Step 6 SRAM timing assumptions.
+
+| Check | Result |
+| --- | --- |
+| Capacity-limited GEMM | Two launches preserve all 4,240 instructions and their CTA-local dependencies. Cycles are 13,622 without prefetch and 19,278 with slicing and prefetch. |
+| Qwen B=1 | All 18 kernel DAG hashes match Step 5. 23 reservations are generated. Cycles are 4,291,764 without prefetch and 1,604,395 with prefetch. |
+| Qwen HBF traffic | 104,058,240 B resident reads and 9,720,960 B fallback reads. Expert reservations are enqueued only after the preceding routing-related launches. |
+
+The focused planner regression and Step 6 runtime checks pass. Logs and
+manifests are under `validation/results/flash-accel/step7/`.
+
+**Acceptance**
+
+- [x] The bound FlowIR and residency configuration produce CTA slices, a FIFO prefetch plan and last-use releases.
+- [x] The tiled GEMM preserves compute coverage and dependencies, with runtime capacity admission and non-blocking fallback.
 
 ## Step 8 — Prefetch Validation and Performance Evaluation
 

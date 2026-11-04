@@ -353,3 +353,15 @@ def bound_resolver(context, parent):
     """Instantiate a lexical static scope at the final lowering boundary."""
     arguments = {arg.id: parent.value(arg.expression) for arg in context.arguments}
     return Resolver(context, {**parent.values, **arguments})
+
+
+def iterations(loops, resolver, values):
+    if not loops:
+        yield values
+        return
+    loop, *rest = loops
+    current = resolver.at(values)
+    for value in range(
+        current.value(loop.start), current.value(loop.stop), current.value(loop.step)
+    ):
+        yield from iterations(rest, resolver, {**values, loop.variable: value})

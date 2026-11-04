@@ -2,19 +2,7 @@
 
 from dataclasses import dataclass
 from parser import ast as A
-from .static import Resolver
-
-
-def iterations(loops, resolver, values):
-    if not loops:
-        yield values
-        return
-    loop, *rest = loops
-    current = resolver.at(values)
-    for value in range(
-        current.value(loop.start), current.value(loop.stop), current.value(loop.step)
-    ):
-        yield from iterations(rest, resolver, {**values, loop.variable: value})
+from .static import Resolver, iterations
 
 
 @dataclass
