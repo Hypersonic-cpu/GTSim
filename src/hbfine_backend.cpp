@@ -69,7 +69,12 @@ public:
                 background_.erase(it);
                 if (completion.error != hbfine::Error::None)
                     throw std::runtime_error("device prefetch failed");
-                --regions_.at(token).outstanding;
+                auto& region = regions_.at(token);
+                --region.outstanding;
+                if (region.ready()) {
+                    --active_fills_;
+                    ++completed_fills_;
+                }
                 reclaim(token);
                 continue;
             }
@@ -118,6 +123,8 @@ public:
             page += size;
         }
         const auto token = next_token_++;
+        reserved_bytes_ += region.pages.size() * config_.page_bytes;
+        peak_reserved_bytes_ = std::max(peak_reserved_bytes_, reserved_bytes_);
         regions_.emplace(token, std::move(region));
         plane_sram_used_ = std::move(planes);
         stack_sram_used_ = std::move(stacks);
@@ -129,6 +136,9 @@ public:
         if (region.started || region.released)
             throw std::invalid_argument("invalid prefetch start");
         region.started = true;
+        ++started_fills_;
+        ++active_fills_;
+        peak_active_fills_ = std::max(peak_active_fills_, active_fills_);
     }
 
     bool prefetch_ready(std::uint64_t token) const override {
@@ -146,16 +156,19 @@ public:
     std::uint64_t residency_epoch() const override { return residency_epoch_; }
 
     std::size_t pending_background_requests() const override {
-        return std::count_if(regions_.begin(), regions_.end(), [](const auto& item) {
-            return item.second.started && !item.second.ready();
-        });
+        return active_fills_;
     }
     DeviceCounters device_counters() const override {
         const auto& stats = device_.statistics();
         DeviceCounters counters{{{"sensed_bytes", stats.sensed_bytes},
-                                 {"sensed_pages", stats.senses}}, stats.bank_busy_ps};
+                                 {"sensed_pages", stats.senses}}, stats.bank_busy_ps, {}};
         if (config_.enable_read_sram) {
             counters.cumulative.emplace("prefetch_bytes", prefetch_bytes_);
+            counters.cumulative.emplace("prefetch_started", started_fills_);
+            counters.cumulative.emplace("prefetch_completed", completed_fills_);
+            counters.gauges = {{"sram_reserved_bytes", reserved_bytes_},
+                               {"sram_peak_reserved_bytes", peak_reserved_bytes_},
+                               {"prefetch_peak_outstanding", peak_active_fills_}};
             counters.cumulative.emplace("resident_read_bytes", resident_read_bytes_);
             counters.cumulative.emplace("fallback_read_bytes", fallback_read_bytes_);
         }
@@ -208,6 +221,7 @@ private:
             auto& used = page.plane ? plane_sram_used_ : stack_sram_used_;
             used[page.unit] -= config_.page_bytes;
         }
+        reserved_bytes_ -= region.pages.size() * config_.page_bytes;
         regions_.erase(token);
         ++residency_epoch_;
     }
@@ -234,6 +248,8 @@ private:
     std::unordered_map<std::uint64_t, std::uint64_t> background_;
     std::uint64_t next_token_{1}, next_background_id_{background_id_base};
     std::uint64_t residency_epoch_{};
+    std::uint64_t reserved_bytes_{}, peak_reserved_bytes_{};
+    std::uint64_t started_fills_{}, completed_fills_{}, active_fills_{}, peak_active_fills_{};
     std::uint64_t prefetch_bytes_{}, resident_read_bytes_{}, fallback_read_bytes_{};
     std::unordered_map<std::uint64_t, MemRequest> pending_;
 };

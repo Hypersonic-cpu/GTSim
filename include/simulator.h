@@ -230,6 +230,7 @@ public:
     GPU* simulated_gpu;
     DAG* dag;
     int cycle;
+    std::uint64_t background_cycles_at_device_complete{};
     int memory_drain_cycle{0};
     std::ofstream* log_file;
     std::ostream* output_stream;

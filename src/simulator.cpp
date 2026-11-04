@@ -378,6 +378,8 @@ bool Simulator::run(int max_cycles, bool verbose) {
             // Kernel timing remains the last DAG completion cycle. Drain issued
             // traffic separately, including dirty eviction writebacks, without
             // adding an implicit L2 flush or changing reference kernel cycles.
+            background_cycles_at_device_complete =
+                simulated_gpu->memory_system->background_cycles();
             int drain_cycle = cycle;
             while (!simulated_gpu->memory_system->foreground_idle() &&
                    drain_cycle < max_cycles) {

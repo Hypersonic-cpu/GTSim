@@ -19,6 +19,7 @@ class Residency:
     plane_bytes: int
     stack_bytes: int
     line_bytes: int = 128
+    align_tensors_to_command_group: bool = True
     eligible_tensors: tuple[str, ...] | None = None
 
     def __post_init__(self):
@@ -368,9 +369,8 @@ def optimize(flow, config):
             continue
         bases[tensor.id] = cursor
         size = sizes[tensor.id]
-        cursor += (
-            (size + config.group_bytes - 1) // config.group_bytes
-        ) * config.group_bytes
+        alignment = config.group_bytes if config.align_tensors_to_command_group else config.page_bytes
+        cursor += ((size + alignment - 1) // alignment) * alignment
         if (
             tensor.external
             and tensor.read_only

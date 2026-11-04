@@ -67,11 +67,13 @@ struct MemoryBackendStatistics {
 struct DeviceCounters {
     std::map<std::string, std::uint64_t> cumulative;
     std::vector<std::uint64_t> unit_busy_ticks;
+    std::map<std::string, std::uint64_t> gauges;
 };
 
 struct TierCounterSnapshot {
     std::uint64_t read_bytes{}, write_bytes{};
     DeviceCounters device;
+    std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
 };
 
 // Placement runs before construction of the persistent memory system.

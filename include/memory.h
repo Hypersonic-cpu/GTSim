@@ -857,6 +857,7 @@ struct TierMemoryStatistics {
     std::uint64_t write_bytes{};
     std::uint64_t completed_requests{};
     std::uint64_t total_latency_cycles{};
+    std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
 
     double average_latency_cycles() const {
         return completed_requests == 0
@@ -1329,8 +1330,13 @@ public:
         // appropriate route in this same cycle, as the integrated model did.
         collect_l2_requests(current_cycle);
         launch_pending_requests(current_cycle);
+        if (pending_background_requests()) ++background_cycles_;
         return completed;
     }
+
+    std::uint64_t background_cycles() const { return background_cycles_; }
+    std::uint64_t prefetch_capacity_stalls() const { return prefetch_capacity_stalls_; }
+    std::uint64_t prefetch_canceled() const { return prefetch_canceled_; }
 
     struct ReadAlias {
         MemoryTier tier;
@@ -1380,6 +1386,7 @@ public:
         if (alias.queue_id) {
             const auto queued = queued_prefetches_.at(alias.queue_id);
             if (queued.token) device(queued.tier).release_prefetch(queued.token);
+            else ++prefetch_canceled_;
             queued_prefetches_.erase(alias.queue_id);
         } else {
             device(alias.tier).release_prefetch(alias.token);
@@ -1425,7 +1432,9 @@ public:
         const auto snapshot = [&](MemoryTier tier, const MemoryBackend* device,
                                   const TierMemoryStatistics& traffic) {
             result.emplace(tier, TierCounterSnapshot{traffic.read_bytes, traffic.write_bytes,
-                                                    device ? device->device_counters() : DeviceCounters{}});
+                                                    device ? device->device_counters() : DeviceCounters{},
+                                                    traffic.read_completions, traffic.read_latency_cycles,
+                                                    traffic.unadmitted_alias_read_bytes});
         };
         snapshot(MemoryTier::HBM, hbm_.get(), hbm_statistics_);
         snapshot(MemoryTier::HBF, hbf_.get(), hbf_statistics_);
@@ -1480,6 +1489,7 @@ private:
     std::vector<ReadAlias> read_aliases_;
     std::deque<std::uint64_t> prefetch_queue_;
     std::map<std::uint64_t, ReadAlias> queued_prefetches_;
+    std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{}, prefetch_canceled_{};
     std::uint64_t next_queue_id_{1}, blocked_head_{}, blocked_epoch_{};
 
     void admit_prefetch_queue() {
@@ -1497,6 +1507,7 @@ private:
             if (blocked_head_ == id && blocked_epoch_ == epoch) return;
             alias.token = backend.reserve_prefetch(alias.address, alias.bytes);
             if (!alias.token) {
+                ++prefetch_capacity_stalls_;
                 blocked_head_ = id;
                 blocked_epoch_ = epoch;
                 return;
@@ -1588,6 +1599,8 @@ private:
                         alias.bytes - (request.global_addr - alias.address)) {
                     request.read_alias = alias.queue_id
                         ? queued_prefetches_.at(alias.queue_id).token : alias.token;
+                    if (!request.read_alias)
+                        statistics_for(tier).unadmitted_alias_read_bytes += request.size_bytes;
                     break;
                 }
         }
@@ -1821,6 +1834,11 @@ private:
             }
             TierMemoryStatistics& stats = statistics_for(route->second.tier);
             ++stats.completed_requests;
+            if (response.operation == MemoryOperation::Read) {
+                ++stats.read_completions;
+                stats.read_latency_cycles += static_cast<std::uint64_t>(
+                    std::max(0, current_cycle - route->second.start_cycle));
+            }
             stats.total_latency_cycles += static_cast<std::uint64_t>(
                 std::max(0, current_cycle - route->second.start_cycle));
             request_routes_.erase(route);

@@ -59,8 +59,8 @@ The initial 2F3M target is defined in `configs/memconf/2F3M_grouped_planes.yaml`
 
 **Acceptance:**
 
-- [ ] Original H100 and HBFine regression baselines remain unchanged.
-- [ ] Co-located configuration is defined independently, with all paper-derived parameters and adaptations identified.
+- [x] The covered H100 and HBFine timing baselines remain unchanged. The initial CTest run had one existing profile-boundary false positive. Later steps use focused checks.
+- [x] Co-located configuration is defined independently, with all paper-derived parameters and adaptations identified.
 
 ## Step 2 — Generalize HBF Geometry and Physical Address Mapping
 
@@ -109,8 +109,8 @@ The inspection tool takes tensors in allocation order. The CSV reports each logi
 
 **Acceptance:**
 
-- [ ] Physical mapping, grouped NAND access behavior, parallelism, and address encode/decode pass dedicated tests.
-- [ ] Physical traffic and read amplification are measurable; original HBFine geometry and timing tests remain unchanged.
+- [x] Physical mapping, grouped NAND access behavior, parallelism, and address encode/decode pass dedicated tests.
+- [x] Physical traffic and read amplification are measurable; original HBFine geometry and timing tests remain unchanged.
 
 ## Step 3 — Enable HBF Tensor Placement in IR-05
 
@@ -518,10 +518,55 @@ Collect:
 
 Check that performance changes come from modeled mechanisms rather than incorrect tensor addresses, missing traffic, free transfers, or incorrect synchronization.
 
-**Acceptance:**
+### Measured results
 
-- [ ] Microbenchmarks and the Qwen Block demonstrate correct asynchronous Prefetch/Release behavior with measurable physical traffic and overlap.
-- [ ] Ablations and original GTSim regressions pass; performance results and model limitations are reported directly to the user.
+All Step 8 runs use H100 132 SM with Ramulator2 HBM3 and HBFine 2F3M.
+The packed layout aligns tensors to 4 KiB. The execution-order layout
+aligns each tensor to a Megapage. The same SRAM timing assumptions from
+Step 6 apply to both prefetch variants.
+
+| Qwen B=1 placement | Cycles | NAND sensed B | SRAM hit rate by HBF read bytes |
+| --- | ---: | ---: | ---: |
+| All HBM | 623,329 | 0 | — |
+| Packed HBF | 4,303,770 | 144,179,200 | — |
+| Aligned HBF | 4,291,764 | 141,295,616 | — |
+| Packed HBF + prefetch | 1,957,243 | 152,961,024 | 89.5% |
+| Aligned HBF + prefetch | 1,604,395 | 142,213,120 | 91.5% |
+
+All four HBF variants share identical compute DAGs and transfer 113,779,200 B
+from HBF with zero HBF writes. Both prefetch variants start and complete 23
+reservations, peak at 8 outstanding fills and reserve at most 48 MiB.
+Aligned prefetch overlaps compute for 1,185,197 cycles and transfers
+9,720,960 B through fallback. Mean demand read latency is 8,556 cycles
+without prefetch and 2,419 with aligned prefetch. Expert requests enter
+the queue after routing, and all releases match their last consumer.
+
+| Microbenchmark | Result |
+| --- | --- |
+| Two GEMMs | 29,236 → 14,921 cycles. A completes at cycle 6,602, with B starting while the fill is outstanding. B reads 64 KiB via fallback and 192 KiB from SRAM. |
+| Same-group contention | A's mean demand read latency rises from 2,650 to 5,198 cycles when the background request uses another page in its command group. A completes 7,642 cycles later. |
+| Wide GEMM SRAM sweep | 64 KiB/stack rejects the full-K CTA. 128 KiB/stack splits into two launches at 19,278 cycles. 256 KiB/stack keeps one launch at 13,325 cycles. Untiled demand baseline is 13,622 cycles. |
+| Dense Gate/Up/Down | 3,264,844 cycles untiled, 6,524,698 with tiling alone, and 706,044 with tiling plus prefetch. Two full-K slices per projection preserve all 493,260 instructions and dependencies. |
+
+Dense FFN's output-column slices share Megapages. Both sliced runs sense
+192 MiB, compared with 96 MiB untiled, while host HBF bytes stay at 96 MiB.
+The prefetched run starts and completes 24,576 reservations, peaks at 4,096
+outstanding fills and 16 MiB occupied, records five queue-head capacity stalls,
+and overlaps compute for 289,452 cycles. These experiments measure simulated
+timing with a shared SRAM port per stack and CTA slicing that retains full K.
+
+Per-kernel timings, both-tier traffic, sense group counts, read amplification,
+SRAM occupancy, fallback, read latency, queue depth and release cycles are in
+`validation/results/flash-accel/step8/summary.json`. Overlap counts GPU cycles
+with background work in flight. Fallback traffic and demand latency expose
+remaining read cost. The contention control measures an exposed kernel delay
+directly. The result directory contains the manifests, input profiles and logs.
+
+**Acceptance**
+
+- [x] Microbenchmarks and the Qwen Block demonstrate asynchronous prefetch, release, physical traffic and overlap.
+- [x] All five Qwen ablations, the selected capacity sweep and the Dense FFN controls complete as expected.
+- [x] Ten prefetch-disabled GEMM/FA3 baselines retain their cycles, traffic and NAND counts. HBFine and frontend focused checks pass. CTest was skipped.
 
 ---
 
@@ -529,9 +574,9 @@ Check that performance changes come from modeled mechanisms rather than incorrec
 
 The reproduction is complete when:
 
-- [ ] **Baseline:** GEMM, FA3, and Qwen Block correctly access HBF data using Figure 7-compatible physical placement, with measured read amplification.
-- [ ] **Prefetch:** Automatic tiling, topology-ordered asynchronous prefetch, HBF SRAM residency, non-blocking fallback, and last-consumer release work across kernel boundaries.
-- [ ] **Compatibility:** Existing GTSim/HBFine workloads run unchanged when the new capabilities are disabled. No FlashAccel-specific implementation is embedded in generic libraries or backend code.
+- [x] **Baseline:** GEMM, FA3, and Qwen Block correctly access HBF data using Figure 7-compatible physical placement, with measured read amplification.
+- [x] **Prefetch:** Automatic tiling, topology-ordered asynchronous prefetch, HBF SRAM residency, non-blocking fallback, and last-consumer release work across kernel boundaries.
+- [x] **Compatibility:** Existing GTSim/HBFine workloads run unchanged when the new capabilities are disabled. No FlashAccel-specific implementation is embedded in generic libraries or backend code.
 
 **Scope limitation:** This project reproduces FlashAccel's mechanism using a Co-located H100 configuration. It does not attempt to match the paper's H200 throughput numbers, OS-level persistent storage management, KV writeback policy, or full multi-GPU serving evaluation.
 

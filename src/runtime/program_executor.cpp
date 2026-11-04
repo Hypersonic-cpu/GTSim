@@ -175,6 +175,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             // Launch overhead advances the stream clock but admits no CTA work.
             launch.start_cycle = context->cycle;
             launch.l2_lines_before = l2->resident_line_count();
+            const auto background_before = memory->background_cycles();
             if (!context->run(max_cycles, false))
                 throw std::runtime_error("kernel execution timeout");
             launch.l2_lines_after = l2->resident_line_count();
@@ -182,6 +183,8 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             KernelExecutionSession::retire(*context);
             launch.complete_cycle =
                 std::max(context->cycle, context->memory_drain_cycle);
+            launch.background_compute_cycles =
+                context->background_cycles_at_device_complete - background_before;
             launch.device_cycles =
                 launch.device_complete_cycle - launch.start_cycle;
             for (const auto& [tier, after] : memory->tier_counters()) {
@@ -189,6 +192,11 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 auto& delta = launch.memory[memory_tier_name(tier)];
                 delta.read_bytes = after.read_bytes - before.read_bytes;
                 delta.write_bytes = after.write_bytes - before.write_bytes;
+                delta.read_completions = after.read_completions - before.read_completions;
+                delta.read_latency_cycles = after.read_latency_cycles - before.read_latency_cycles;
+                delta.unadmitted_alias_read_bytes =
+                    after.unadmitted_alias_read_bytes - before.unadmitted_alias_read_bytes;
+                delta.gauges = after.device.gauges;
                 for (const auto& [name, value] : after.device.cumulative)
                     delta.counters.emplace(name, value - before.device.cumulative.at(name));
                 for (std::size_t unit = 0; unit < after.device.unit_busy_ticks.size(); ++unit)
@@ -210,6 +218,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         } else if (c.kind == "Release") {
             memory->release_prefetch(aliases.at(c.target));
             aliases.erase(c.target);
+            timing.prefetch_release_cycles.emplace(c.target, context->cycle);
         } else if (c.kind == "StreamSynchronize") {
             synchronize();
         } else if (c.kind == "RecordEvent")
@@ -222,6 +231,9 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         throw std::invalid_argument("prefetch program requires a kernel launch");
     if (context) {
         synchronize();
+        timing.background_cycles = memory->background_cycles();
+        timing.prefetch_capacity_stalls = memory->prefetch_capacity_stalls();
+        timing.prefetch_canceled = memory->prefetch_canceled();
         for (const auto& [tier, stats] : memory->tier_counters()) {
             const std::string name = memory_tier_name(tier);
             timing.traffic_bytes.emplace(name + "_read", stats.read_bytes);
