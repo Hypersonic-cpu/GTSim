@@ -18,13 +18,17 @@ struct Program {
     std::vector<Command> commands;
 };
 Program read_program(const std::filesystem::path& path);
+struct TierTiming {
+    std::uint64_t read_bytes{}, write_bytes{};
+    std::map<std::string, std::uint64_t> counters;
+    std::vector<std::size_t> active_units;
+};
 struct KernelTiming {
     std::string id, state;
     int launch_cycle{}, start_cycle{}, device_complete_cycle{},
         complete_cycle{}, device_cycles{};
     std::size_t l2_lines_before{}, l2_lines_after{};
-    std::uint64_t hbm_read_bytes{}, hbm_write_bytes{}, hbf_read_bytes{},
-        hbf_write_bytes{};
+    std::map<std::string, TierTiming> memory;
 };
 struct ProgramTiming {
     int total_cycles{};
@@ -32,6 +36,7 @@ struct ProgramTiming {
     std::map<std::string, int> events;
     std::map<std::string, std::vector<std::string>> state_history;
     std::map<std::string, std::uint64_t> traffic_bytes;
+    std::map<std::string, std::map<std::string, std::uint64_t>> tensor_addresses;
     bool persistent_gpu{}, persistent_memory{}, persistent_l2{},
         stable_allocations{};
 };

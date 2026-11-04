@@ -6,6 +6,29 @@ namespace GTSim {
 std::unique_ptr<MemoryBackend> make_bank_plane_hbf_backend(
     const HBFConfig&, double, std::uint64_t);
 
+TensorPlacement make_bank_plane_tensor_placement(const MemorySystemConfig&);
+
+void allocate_contiguous_tensor(TensorRegistry& registry, TensorMetadata tensor) {
+    registry.allocate_tensor(tensor.id, std::move(tensor.name),
+                             std::move(tensor.shape), std::move(tensor.strides),
+                             tensor.dtype, tensor.initial_memory_tier,
+                             tensor.preloaded, tensor.read_only);
+}
+
+TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTier tier) {
+    switch (tier) {
+    case MemoryTier::HBM:
+        return allocate_contiguous_tensor;
+    case MemoryTier::HBF:
+        if (!config.address_layout.enabled ||
+            config.topology == MemoryTopology::FullHBM ||
+            config.hbf.backend != HBFBackend::BankPlane)
+            throw std::invalid_argument("HBF program tensors require an active HBFine segment");
+        return make_bank_plane_tensor_placement(config);
+    }
+    throw std::invalid_argument("unknown placement tier");
+}
+
 namespace {
 // Per-channel copies of the existing HBM service law. Only active channels are
 // advanced; historical aggregate-naive profiles retain their original model.

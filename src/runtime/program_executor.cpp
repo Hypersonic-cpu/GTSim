@@ -17,26 +17,34 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         throw std::invalid_argument("exactly one ordered stream and "
                                     "nonnegative launch overhead required");
     TensorRegistry registry(config.memory.address_layout);
+    std::map<MemoryTier, TensorPlacement> placement_policies;
+    ProgramTiming timing;
     std::set<std::string> names;
     std::map<int, std::tuple<std::uint64_t, std::vector<std::uint64_t>,
                              std::vector<std::uint64_t>, DataType>>
         allocations;
     for (const auto& t : p.tensors) {
         if (t.id < 0 || t.name.empty() || !names.insert(t.name).second ||
-            t.tier != "HBM" || t.shape.size() != 2 || t.strides.size() != 2 ||
-            !t.shape[0] || !t.shape[1] || t.strides[1] != 1 ||
-            t.strides[0] != t.shape[1])
+            t.shape.size() != 2 ||
+            t.strides.size() != 2 || !t.shape[0] || !t.shape[1] ||
+            t.strides[1] != 1 || t.strides[0] != t.shape[1])
             throw std::invalid_argument("invalid program tensor");
         const auto dtype = parse_dtype(t.dtype);
-        const auto& allocated =
-            registry.allocate_tensor(t.id, t.name, t.shape, t.strides, dtype,
-                                     MemoryTier::HBM, t.preloaded, t.read_only);
+        const auto tier = parse_memory_tier(t.tier);
+        auto policy = placement_policies.find(tier);
+        if (policy == placement_policies.end())
+            policy = placement_policies.emplace(
+                tier, make_tensor_placement(config.memory, tier)).first;
+        policy->second(registry, TensorMetadata{t.id, t.name, 0, t.shape,
+                                               t.strides, dtype, tier,
+                                               t.preloaded, t.read_only});
+        const auto& allocated = registry.at(t.id);
+        timing.tensor_addresses[t.tier].emplace(t.name, allocated.global_base_address);
         allocations.emplace(t.id, std::tuple{allocated.global_base_address,
                                              allocated.shape, allocated.strides,
                                              allocated.dtype});
     }
 
-    ProgramTiming timing;
     std::map<std::string, const Launch*> launches;
     for (const auto& l : p.launches) {
         if (l.id.empty() || launches.contains(l.id))
@@ -105,7 +113,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             launch.state = "RUNNING";
             timing.state_history[c.target].push_back("RUNNING");
             launch.launch_cycle = context->cycle;
-            const auto traffic_before = memory->statistics(context->cycle);
+            const auto traffic_before = memory->tier_counters();
             for (int i = 0; i < p.launch_overhead_cycles; ++i) {
                 if (context->cycle >= max_cycles)
                     throw std::runtime_error("launch overhead timeout");
@@ -123,16 +131,17 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 std::max(context->cycle, context->memory_drain_cycle);
             launch.device_cycles =
                 launch.device_complete_cycle - launch.start_cycle;
-            const auto traffic_after =
-                memory->statistics(context->memory_drain_cycle);
-            launch.hbm_read_bytes =
-                traffic_after.hbm.read_bytes - traffic_before.hbm.read_bytes;
-            launch.hbm_write_bytes =
-                traffic_after.hbm.write_bytes - traffic_before.hbm.write_bytes;
-            launch.hbf_read_bytes =
-                traffic_after.hbf.read_bytes - traffic_before.hbf.read_bytes;
-            launch.hbf_write_bytes =
-                traffic_after.hbf.write_bytes - traffic_before.hbf.write_bytes;
+            for (const auto& [tier, after] : memory->tier_counters()) {
+                const auto& before = traffic_before.at(tier);
+                auto& delta = launch.memory[memory_tier_name(tier)];
+                delta.read_bytes = after.read_bytes - before.read_bytes;
+                delta.write_bytes = after.write_bytes - before.write_bytes;
+                for (const auto& [name, value] : after.device.cumulative)
+                    delta.counters.emplace(name, value - before.device.cumulative.at(name));
+                for (std::size_t unit = 0; unit < after.device.unit_busy_ticks.size(); ++unit)
+                    if (after.device.unit_busy_ticks[unit] > before.device.unit_busy_ticks.at(unit))
+                        delta.active_units.push_back(unit);
+            }
             launch.state = "COMPLETED";
             timing.state_history[c.target].push_back("COMPLETED");
             timing.per_kernel.push_back(launch);
@@ -148,11 +157,11 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             throw std::logic_error("event completion clock is in the future");
     }
     if (context) {
-        const auto stats = memory->statistics(timing.total_cycles);
-        timing.traffic_bytes = {{"HBM_read", stats.hbm.read_bytes},
-                                {"HBM_write", stats.hbm.write_bytes},
-                                {"HBF_read", stats.hbf.read_bytes},
-                                {"HBF_write", stats.hbf.write_bytes}};
+        for (const auto& [tier, stats] : memory->tier_counters()) {
+            const std::string name = memory_tier_name(tier);
+            timing.traffic_bytes.emplace(name + "_read", stats.read_bytes);
+            timing.traffic_bytes.emplace(name + "_write", stats.write_bytes);
+        }
         for (const auto& [id, expected] : allocations) {
             const auto& actual = registry.at(id);
             if (expected != std::tuple{actual.global_base_address, actual.shape,

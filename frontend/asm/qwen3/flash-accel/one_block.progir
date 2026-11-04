@@ -1,0 +1,185 @@
+prog.program @qwen3_moe_block {
+  static.param %B : index
+  static.param %H : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %E : index
+  static.param %TK : index
+  static.param %I : index
+  static.param %S : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.param %ROUTE_IDS : index_list
+  static.param %ROUTE_PROBS : float_list
+  static.param %EPS : fp32
+  static.param %THETA : fp32
+  static.let %QWIDTH = %HQ*%D
+  static.let %KVWIDTH = %HKV*%D
+  static.let %QKVWIDTH = (%HQ+2*%HKV)*%D
+  static.let %TWO_I = 2*%I
+  static.let %ASSIGNMENTS = %B*%TK
+  static.let %QROWS = %B*%HQ
+  static.let %KROWS = %B*%HKV
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%HKV
+  static.let %PART_ROWS = %B*%HQ*%S
+  static.let %W_GATE_ROWS = %E*%H
+  static.let %W_DOWN_ROWS = %E*%I
+  static.let %EO = %E+1
+  static.let %ORDER = argsort(%ROUTE_IDS)
+  static.let %SORT_MAP = inverse_permutation(%ORDER)
+  static.let %TOKEN_MAP = vquotient(iota(%ASSIGNMENTS),%TK)
+  static.let %SLOT_MAP = iota(%ASSIGNMENTS)
+  static.require <len(%CONTEXTS) == %B, len(%ROUTE_IDS) == %ASSIGNMENTS, len(%ROUTE_PROBS) == %ASSIGNMENTS, %HQ divisible_by %HKV>
+  prog.tensor @X : tensor<BxHxbf16> storage<HBM> external readonly
+  prog.tensor @W_input_norm : tensor<1xHxbf16> storage<HBF> external readonly
+  prog.tensor @X_norm : tensor<BxHxbf16> storage<HBM>
+  prog.tensor @W_qkv : tensor<HxQKVWIDTHxbf16> storage<HBF> external readonly
+  prog.tensor @QKV : tensor<BxQKVWIDTHxbf16> storage<HBM>
+  prog.tensor @W_q_norm : tensor<1xDxbf16> storage<HBF> external readonly
+  prog.tensor @W_k_norm : tensor<1xDxbf16> storage<HBF> external readonly
+  prog.tensor @Q : tensor<QROWSxDxbf16> storage<HBM>
+  prog.tensor @K_new : tensor<KROWSxDxbf16> storage<HBM>
+  prog.tensor @V_new : tensor<KROWSxDxbf16> storage<HBM>
+  prog.tensor @K_cache : tensor<CACHE_ROWSxDxbf16> storage<HBM> external
+  prog.tensor @V_cache : tensor<CACHE_ROWSxDxbf16> storage<HBM> external
+  prog.tensor @Partial : tensor<PART_ROWSxDxfp32> storage<HBM>
+  prog.tensor @LSE : tensor<PART_ROWSx1xfp32> storage<HBM>
+  prog.tensor @Attention : tensor<BxQWIDTHxbf16> storage<HBM>
+  prog.tensor @W_o : tensor<QWIDTHxHxbf16> storage<HBF> external readonly
+  prog.tensor @A_projected : tensor<BxHxbf16> storage<HBM>
+  prog.tensor @Attention_residual : tensor<BxHxbf16> storage<HBM>
+  prog.tensor @W_post_norm : tensor<1xHxbf16> storage<HBF> external readonly
+  prog.tensor @Post_norm : tensor<BxHxbf16> storage<HBM>
+  prog.tensor @W_router : tensor<HxExbf16> storage<HBF> external readonly
+  prog.tensor @Logits : tensor<BxExbf16> storage<HBM>
+  prog.tensor @Expert_IDs : tensor<BxTKxint32> storage<HBM>
+  prog.tensor @Probabilities : tensor<BxTKxbf16> storage<HBM>
+  prog.tensor @Counts : tensor<1xExint32> storage<HBM>
+  prog.tensor @Offsets : tensor<1xEOxint32> storage<HBM>
+  prog.tensor @Sorted_X : tensor<ASSIGNMENTSxHxbf16> storage<HBM>
+  prog.tensor @Assignments : tensor<ASSIGNMENTSx3xint32> storage<HBM>
+  prog.tensor @Sorted_probabilities : tensor<ASSIGNMENTSx1xbf16> storage<HBM>
+  prog.tensor @W_gate_up : tensor<W_GATE_ROWSxTWO_Ixbf16> storage<HBF> external readonly
+  prog.tensor @Gate_up : tensor<ASSIGNMENTSxTWO_Ixbf16> storage<HBM>
+  prog.tensor @Activated : tensor<ASSIGNMENTSxIxbf16> storage<HBM>
+  prog.tensor @W_down : tensor<W_DOWN_ROWSxHxbf16> storage<HBF> external readonly
+  prog.tensor @Expert_output : tensor<ASSIGNMENTSxHxbf16> storage<HBM>
+  prog.tensor @Weighted : tensor<BxHxbf16> storage<HBM>
+  prog.tensor @Y : tensor<BxHxbf16> storage<HBM>
+  prog.stream @compute ordered {
+    %X_norm, !input_rmsnorm_done = prog.launch @input_rmsnorm
+        callee<@rmsnorm> implementation<@rmsnorm_flow>
+        inputs[@X, @W_input_norm] outputs[@X_norm]
+        attrs{ROWS=%B, WIDTH=%H, EPS=%EPS, NUM_SMS=%NUM_SMS}
+    %QKV, !qkv_projection_done = prog.launch @qkv_projection
+        callee<@small_m_gemm> implementation<@small_m_gemm_flow>
+        inputs[@X_norm, @W_qkv] outputs[@QKV]
+        attrs{M=%B, N=%QKVWIDTH, K=%H, NUM_SMS=%NUM_SMS}
+    %Q, !q_norm_rope_done = prog.launch @q_norm_rope
+        callee<@norm_rope> implementation<@norm_rope_flow>
+        inputs[@QKV, @W_q_norm] outputs[@Q]
+        attrs{B=%B, HEADS=%HQ, D=%D, INPUT_WIDTH=%QKVWIDTH, OFFSET=0, CONTEXTS=%CONTEXTS, THETA=%THETA, EPS=%EPS, NUM_SMS=%NUM_SMS}
+    %K_new, !k_norm_rope_done = prog.launch @k_norm_rope
+        callee<@norm_rope> implementation<@norm_rope_flow>
+        inputs[@QKV, @W_k_norm] outputs[@K_new]
+        attrs{B=%B, HEADS=%HKV, D=%D, INPUT_WIDTH=%QKVWIDTH, OFFSET=%QWIDTH, CONTEXTS=%CONTEXTS, THETA=%THETA, EPS=%EPS, NUM_SMS=%NUM_SMS}
+    %V_new, !v_extract_done = prog.launch @v_extract
+        callee<@extract> implementation<@extract_flow>
+        inputs[@QKV] outputs[@V_new]
+        attrs{B=%B, HEADS=%HKV, D=%D, INPUT_WIDTH=%QKVWIDTH, OFFSET=%QWIDTH+%KVWIDTH, NUM_SMS=%NUM_SMS}
+    %K_cache, %V_cache, !kv_cache_update_done = prog.launch @kv_cache_update
+        callee<@kv_append> implementation<@kv_append_flow>
+        inputs[@K_new, @V_new] outputs[@K_cache, @V_cache]
+        attrs{B=%B, KVH=%HKV, D=%D, CONTEXTS=%CONTEXTS, NUM_SMS=%NUM_SMS}
+    static.if <%S > 1> {
+    %Partial, %LSE, !fa3_decode_split_done = prog.launch @fa3_decode_split
+        callee<@fa3_decode_split> implementation<@fa3_decode_split_flow>
+        inputs[@Q, @K_cache, @V_cache] outputs[@Partial, @LSE]
+        attrs{B=%B, HQ=%HQ, HKV=%HKV, D=%D, S=%S, TILE=%TILE, CONTEXTS=%CONTEXTS, NUM_SMS=%NUM_SMS}
+    %Attention, !fa3_combine_done = prog.launch @fa3_combine
+        callee<@fa3_combine> implementation<@fa3_combine_flow>
+        inputs[@Partial, @LSE] outputs[@Attention]
+        attrs{B=%B, HQ=%HQ, D=%D, S=%S, NUM_SMS=%NUM_SMS}
+    }
+    static.else {
+    %Attention, !fa3_decode_done = prog.launch @fa3_decode
+        callee<@fa3_decode> implementation<@fa3_decode_flow>
+        inputs[@Q, @K_cache, @V_cache] outputs[@Attention]
+        attrs{B=%B, HQ=%HQ, HKV=%HKV, D=%D, S=%S, TILE=%TILE, CONTEXTS=%CONTEXTS, NUM_SMS=%NUM_SMS}
+    }
+    %A_projected, !attention_output_projection_done = prog.launch @attention_output_projection
+        callee<@small_m_gemm> implementation<@small_m_gemm_flow>
+        inputs[@Attention, @W_o] outputs[@A_projected]
+        attrs{M=%B, N=%H, K=%QWIDTH, NUM_SMS=%NUM_SMS}
+    %Attention_residual, !attention_residual_add_done = prog.launch @attention_residual_add
+        callee<@residual_add> implementation<@residual_add_flow>
+        inputs[@X, @A_projected] outputs[@Attention_residual]
+        attrs{ROWS=%B, WIDTH=%H, NUM_SMS=%NUM_SMS}
+    %Post_norm, !post_attention_rmsnorm_done = prog.launch @post_attention_rmsnorm
+        callee<@rmsnorm> implementation<@rmsnorm_flow>
+        inputs[@Attention_residual, @W_post_norm] outputs[@Post_norm]
+        attrs{ROWS=%B, WIDTH=%H, EPS=%EPS, NUM_SMS=%NUM_SMS}
+    %Logits, !router_projection_done = prog.launch @router_projection
+        callee<@small_m_gemm> implementation<@small_m_gemm_flow>
+        inputs[@Post_norm, @W_router] outputs[@Logits]
+        attrs{M=%B, N=%E, K=%H, NUM_SMS=%NUM_SMS}
+    %Expert_IDs, %Probabilities, !router_softmax_topk_done = prog.launch @router_softmax_topk
+        callee<@router_topk> implementation<@router_topk_flow>
+        inputs[@Logits] outputs[@Expert_IDs, @Probabilities]
+        attrs{B=%B, E=%E, TK=%TK, NUM_SMS=%NUM_SMS}
+    static.if <%B > 1> {
+    %Counts, %Offsets, !expert_histogram_prefix_done = prog.launch @expert_histogram_prefix
+        callee<@expert_histogram> implementation<@expert_histogram_flow>
+        inputs[@Expert_IDs] outputs[@Counts, @Offsets]
+        attrs{B=%B, E=%E, TK=%TK, NUM_SMS=%NUM_SMS}
+    %Sorted_X, %Assignments, %Sorted_probabilities, !expert_assignment_gather_done = prog.launch @expert_assignment_gather
+        callee<@expert_gather> implementation<@expert_gather_flow>
+        inputs[@Post_norm, @Expert_IDs, @Probabilities, @Offsets] outputs[@Sorted_X, @Assignments, @Sorted_probabilities]
+        attrs{B=%B, H=%H, E=%E, TK=%TK, IDS=%ROUTE_IDS, NUM_SMS=%NUM_SMS}
+    }
+    static.if <%B == 1> {
+    %Gate_up, !expert_gemm1_direct_done = prog.launch @expert_gemm1_direct
+        callee<@grouped_gemm> implementation<@grouped_gemm_flow>
+        inputs[@Post_norm, @W_gate_up] outputs[@Gate_up]
+        attrs{M=%ASSIGNMENTS, N=%TWO_I, K=%H, E=%E, IDS=%ROUTE_IDS, A_MAP=%TOKEN_MAP, C_MAP=%SLOT_MAP, A_ROWS=%B, NUM_SMS=%NUM_SMS}
+    }
+    static.else {
+    %Gate_up, !expert_gemm1_grouped_done = prog.launch @expert_gemm1_grouped
+        callee<@grouped_gemm> implementation<@grouped_gemm_flow>
+        inputs[@Sorted_X, @W_gate_up] outputs[@Gate_up]
+        attrs{M=%ASSIGNMENTS, N=%TWO_I, K=%H, E=%E, IDS=%ROUTE_IDS, A_MAP=%SORT_MAP, C_MAP=%SORT_MAP, A_ROWS=%ASSIGNMENTS, NUM_SMS=%NUM_SMS}
+    }
+    %Activated, !swiglu_done = prog.launch @swiglu
+        callee<@swiglu> implementation<@swiglu_flow>
+        inputs[@Gate_up] outputs[@Activated]
+        attrs{ROWS=%ASSIGNMENTS, WIDTH=%I, NUM_SMS=%NUM_SMS}
+    static.if <%B == 1> {
+    %Expert_output, !expert_gemm2_direct_done = prog.launch @expert_gemm2_direct
+        callee<@grouped_gemm> implementation<@grouped_gemm_flow>
+        inputs[@Activated, @W_down] outputs[@Expert_output]
+        attrs{M=%ASSIGNMENTS, N=%H, K=%I, E=%E, IDS=%ROUTE_IDS, A_ROWS=%ASSIGNMENTS, A_MAP=%SLOT_MAP, C_MAP=%SLOT_MAP, NUM_SMS=%NUM_SMS}
+    %Weighted, !weighted_moe_sum_direct_done = prog.launch @weighted_moe_sum_direct
+        callee<@weighted_direct> implementation<@weighted_direct_flow>
+        inputs[@Expert_output, @Probabilities] outputs[@Weighted]
+        attrs{B=%B, H=%H, TK=%TK, IDS=%ROUTE_IDS, NUM_SMS=%NUM_SMS}
+    }
+    static.else {
+    %Expert_output, !expert_gemm2_grouped_done = prog.launch @expert_gemm2_grouped
+        callee<@grouped_gemm> implementation<@grouped_gemm_flow>
+        inputs[@Activated, @W_down] outputs[@Expert_output]
+        attrs{M=%ASSIGNMENTS, N=%H, K=%I, E=%E, IDS=%ROUTE_IDS, A_ROWS=%ASSIGNMENTS, A_MAP=%SORT_MAP, C_MAP=%SORT_MAP, NUM_SMS=%NUM_SMS}
+    %Weighted, !weighted_moe_sum_grouped_done = prog.launch @weighted_moe_sum_grouped
+        callee<@weighted_grouped> implementation<@weighted_grouped_flow>
+        inputs[@Expert_output, @Probabilities, @Assignments] outputs[@Weighted]
+        attrs{B=%B, H=%H, TK=%TK, IDS=%ROUTE_IDS, NUM_SMS=%NUM_SMS}
+    }
+    %Y, !final_residual_add_done = prog.launch @final_residual_add
+        callee<@residual_add> implementation<@residual_add_flow>
+        inputs[@Attention_residual, @Weighted] outputs[@Y]
+        attrs{ROWS=%B, WIDTH=%H, NUM_SMS=%NUM_SMS}
+    prog.synchronize @compute after[!final_residual_add_done]
+  }
+  prog.return @Y after[!final_residual_add_done]
+}

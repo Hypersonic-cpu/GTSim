@@ -51,6 +51,7 @@ struct HBFConfig {
     std::uint64_t capacity_bytes{};
     HBFBackend backend{HBFBackend::Naive};
     HBFControllerConfig controller{};
+    bool align_tensors_to_command_group{true};
 };
 
 struct D2DLinkConfig {

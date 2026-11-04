@@ -1,4 +1,6 @@
 #include "memory_backend.h"
+#include "hbf_placement.h"
+#include <optional>
 #include <hbfine/controller.hpp>
 #include <cmath>
 #include <limits>
@@ -44,6 +46,11 @@ public:
         return responses;
     }
     std::size_t pending_requests() const override { return pending_.size(); }
+    DeviceCounters device_counters() const override {
+        const auto& stats = device_.statistics();
+        return {{{"sensed_bytes", stats.sensed_bytes}, {"sensed_pages", stats.senses}},
+                stats.bank_busy_ps};
+    }
     HBFBackendStatistics hbf_statistics() const override { return device_.statistics(); }
     void preload_region(std::uint64_t address, std::uint64_t bytes, bool /*read_only*/) override {
         device_.preload_region(address, bytes);
@@ -68,6 +75,25 @@ private:
     std::unordered_map<std::uint64_t, MemRequest> pending_;
 };
 } // namespace
+TensorPlacement make_bank_plane_tensor_placement(const MemorySystemConfig& config) {
+    std::optional<HBFMegapageAllocator> placement;
+    const auto& controller = config.hbf.controller;
+    if (config.hbf.align_tensors_to_command_group &&
+        controller.geometry == HBFGeometryProfile::GroupedPlanes)
+        placement.emplace(config.address_layout.hbf_base, controller);
+    return [placement = std::move(placement)](TensorRegistry& registry,
+                                              TensorMetadata tensor) mutable {
+        if (!tensor.preloaded || !tensor.read_only)
+            throw std::invalid_argument("HBF program tensors require preloaded read-only data");
+        if (placement) {
+            tensor.global_base_address = placement->allocate(tensor.byte_size()).base;
+            registry.register_tensor(std::move(tensor));
+        } else {
+            allocate_contiguous_tensor(registry, std::move(tensor));
+        }
+    };
+}
+
 std::unique_ptr<MemoryBackend> make_bank_plane_hbf_backend(const HBFConfig& config,
                                                          double frequency, std::uint64_t base) {
     return std::make_unique<HBFineBackend>(config, frequency, base);

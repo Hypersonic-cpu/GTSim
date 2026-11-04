@@ -1345,6 +1345,18 @@ public:
         return hbf_ ? hbf_->hbf_statistics() : HBFBackendStatistics{};
     }
 
+    std::map<MemoryTier, TierCounterSnapshot> tier_counters() const {
+        std::map<MemoryTier, TierCounterSnapshot> result;
+        const auto snapshot = [&](MemoryTier tier, const MemoryBackend* device,
+                                  const TierMemoryStatistics& traffic) {
+            result.emplace(tier, TierCounterSnapshot{traffic.read_bytes, traffic.write_bytes,
+                                                    device ? device->device_counters() : DeviceCounters{}});
+        };
+        snapshot(MemoryTier::HBM, hbm_.get(), hbm_statistics_);
+        snapshot(MemoryTier::HBF, hbf_.get(), hbf_statistics_);
+        return result;
+    }
+
     MemorySystemStatistics statistics(int current_cycle) const {
         MemorySystemStatistics result;
         result.hbm = hbm_statistics_;

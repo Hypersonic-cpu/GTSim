@@ -5,10 +5,25 @@
 #include <limits>
 #include <initializer_list>
 #include <stdexcept>
+#include <string_view>
 
 namespace GTSim {
 
 enum class MemoryTier : std::uint8_t { HBM, HBF };
+
+inline const char* memory_tier_name(MemoryTier tier) {
+    switch (tier) {
+    case MemoryTier::HBM: return "HBM";
+    case MemoryTier::HBF: return "HBF";
+    }
+    throw std::invalid_argument("unknown memory tier");
+}
+
+inline MemoryTier parse_memory_tier(std::string_view name) {
+    for (const auto tier : {MemoryTier::HBM, MemoryTier::HBF})
+        if (name == memory_tier_name(tier)) return tier;
+    throw std::invalid_argument("unknown memory tier");
+}
 
 // Optional legacy mode serves existing low-level graph/registry clients. Public
 // workloads explicitly enable segmented allocation, including all-HBM runs.

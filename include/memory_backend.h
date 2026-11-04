@@ -6,6 +6,9 @@
 #include <hbfine/types.hpp>
 #include <cstdint>
 #include <memory>
+#include <functional>
+#include <map>
+#include <string>
 #include <vector>
 
 namespace GTSim {
@@ -60,6 +63,21 @@ struct MemoryBackendStatistics {
     std::vector<std::uint64_t> channel_transactions;
 };
 
+struct DeviceCounters {
+    std::map<std::string, std::uint64_t> cumulative;
+    std::vector<std::uint64_t> unit_busy_ticks;
+};
+
+struct TierCounterSnapshot {
+    std::uint64_t read_bytes{}, write_bytes{};
+    DeviceCounters device;
+};
+
+// Placement runs before construction of the persistent memory system.
+using TensorPlacement = std::function<void(TensorRegistry&, TensorMetadata)>;
+void allocate_contiguous_tensor(TensorRegistry& registry, TensorMetadata tensor);
+TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTier tier);
+
 // A rejected request remains owned by the caller. An accepted request produces
 // exactly one response, even when the backend splits it into multiple bursts.
 // All interface times are GPU core cycles; each backend owns clock conversion.
@@ -70,6 +88,7 @@ public:
     virtual std::vector<MemResponse> step(int now) = 0;
     virtual std::size_t pending_requests() const = 0;
     virtual MemoryBackendStatistics backend_statistics() const { return {}; }
+    virtual DeviceCounters device_counters() const { return {}; }
     virtual HBFBackendStatistics hbf_statistics() const { return {}; }
     virtual void preload_region(std::uint64_t, std::uint64_t, bool) {}
 };

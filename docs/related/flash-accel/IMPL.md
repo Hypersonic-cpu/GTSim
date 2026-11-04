@@ -130,6 +130,12 @@ The inspection tool takes tensors in allocation order. The CSV reports each logi
 
 Do not introduce prefetch behavior in this step.
 
+Implemented IR-05 tier validation and preloaded read-only HBF allocations. In
+grouped geometry the Program manifest order determines Megapage placement.
+Kernel bindings preserve shape, strides, dtype and tier. The mixed two-GEMM
+check transferred 360,448 B from HBF with zero HBF writes. Its all-HBM
+counterpart retained the original 14,494-cycle timing.
+
 *Note*:
 - Experts and weight should be "flattened" as much as possible.
     - The HBF capacity is large, but you should NOT place all weights on few dies / planes. Instead, you should flatten it accross different pages/planes/dies/stacks, so that than can read in parallel.
@@ -139,8 +145,8 @@ Do not introduce prefetch behavior in this step.
 
 **Acceptance:**
 
-- [ ] IR-05 supports HBM/HBF tensors with correct physical address routing and memory traffic.
-- [ ] Existing all-HBM programs produce unchanged results.
+- [x] IR-05 supports HBM/HBF tensors with correct physical address routing and memory traffic.
+- [x] Existing all-HBM programs produce unchanged results in the two-GEMM regression.
 
 ## Step 4 — GEMM and FA3 HBF Baselines
 
@@ -163,10 +169,66 @@ Do not introduce prefetch behavior in this step.
 
 Do not introduce SRAM prefetch, new compute tiling, or runtime scheduling changes.
 
+### Implemented and measured
+
+The independent programs in `frontend/asm/flash-accel/` call the existing
+textual GEMM and FA3 library schedules twice with shared input allocations.
+GEMM uses `M=256, N=256, K=192`. FA3 uses eight Q heads, two KV heads, 128
+query rows per head and 576 K/V rows per KV head. The FA3 reference here is
+the existing full-query text schedule. IR expansion now includes a scheduled
+iteration ID in instruction names when multiple iterations share a physical
+producer warp, which fixes duplicate FA3 output-copy names.
+
+The baseline uses 132 SMs, Ramulator2 HBM3 and grouped HBFine on 2F3M. The
+packed comparison sets `hbf.align_tensors_to_command_group: false` in the same
+memory YAML, keeping the NAND geometry and link timing fixed. IR-05 timing
+reports tensor bases under `tensor_addresses[<tier>]` and per-kernel tier
+traffic under `memory[<tier>]`. HBFine supplies the `sensed_bytes` and
+`sensed_pages` counters and sense unit activity through the backend interface.
+Placement policies are created per tier before the devices start. The
+Megapage allocator lives inside the HBFine placement implementation.
+
+| Workload and placement | First launch cycles | Two-launch cycles | First host HBF read | First NAND sense | Active groups |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GEMM all HBM | 6,602 | 12,530 | 0 B | 0 B | 0 |
+| GEMM grouped or packed | 13,738 | 19,669 | 98,304 B | 131,072 B | 1 |
+| FA3 all HBM | 19,533 | 37,336 | 0 B | 0 B | 0 |
+| FA3 grouped | 30,776 | 49,091 | 589,824 B | 786,432 B | 6 |
+| FA3 packed | 30,215 | 48,394 | 589,824 B | 655,360 B | 5 |
+
+The standalone grouped launches reproduce the first-launch cycles. An
+independent audit enumerated logical read regions, checked exact coverage of
+each HBF input and matched the predicted physical groups to the simulator
+counters. GEMM uses one tensor and both allocation policies place it at the
+same address. For FA3, aligned placement starts K at group 0 and V at group 3.
+Packing starts V in the remainder of K's third group, reducing the number of
+sensed Megapages from six to five for this input. Host transfer bytes agree.
+
+With the default L2, second launches issue zero HBF reads. In a separate
+64 KiB L2 experiment, the second GEMM and FA3 launches transfer 98,304 B and
+592,256 B respectively from HBF with zero new NAND sense bytes. The repeated
+FA3 host traffic includes 2,432 B of line rereads due to L2 eviction.
+
+```sh
+PYTHONPATH=frontend/src python3 -m compile frontend/asm/flash-accel/gemm.progir \
+  --lib frontend/lib --param NUM_SMS=132 -o /tmp/flash-gemm.dag.json \
+  --runtime-dir /tmp/flash-gemm
+PYTHONPATH=frontend/src python3 -m compile frontend/asm/flash-accel/fa3.progir \
+  --lib frontend/lib --params frontend/asm/flash-accel/fa3.json \
+  -o /tmp/flash-fa3.dag.json --runtime-dir /tmp/flash-fa3
+build-backends/gtsim_program configs/v0.1.0/h100-sxm.yaml --memory-config \
+  configs/memconf/2F3M_grouped_planes.yaml /tmp/flash-fa3/program.gtsir
+```
+
+For the HBM control, compile a copy with the read-only HBF declarations set to
+HBM. For a single launch, retain the first launch and its command followed by
+the stream synchronization. Logs and manifests are under
+`validation/results/flash-accel/step4/`.
+
 **Acceptance:**
 
-- [ ] GEMM Weight-in-HBF and FA3 K/V-in-HBF run correctly with audited addresses and traffic.
-- [ ] The physical layout is verified, and no unexplained read amplification or performance regression remains.
+- [x] GEMM Weight-in-HBF and FA3 K/V-in-HBF run correctly with audited addresses and traffic.
+- [x] The physical layout is verified, and the measured read amplification is explained by Megapage boundaries.
 
 ## Step 5 — Qwen3-30B-A3B Single-Block HBF Baseline
 
@@ -174,7 +236,7 @@ Do not introduce SRAM prefetch, new compute tiling, or runtime scheduling change
 
 ### Tasks
 
-1. Copy `frontend/asm/qwen3/one_block.progir` into an independent experiment directory, e.g. `frontend/related/flash_accel/qwen3/`.
+1. Copy `frontend/asm/qwen3/one_block.progir` into an independent experiment directory, e.g. `frontend/asm/qwen3/flash-accel/one_block.progir`.
 2. Preserve existing `frontend/lib/` AlgorithmIR and FlowIR definitions.
 3. Set static model weights to HBF in the copied ProgIR:
    - Attention projection weights.
@@ -190,10 +252,71 @@ Do not introduce SRAM prefetch, new compute tiling, or runtime scheduling change
 
 **This step must finish before any SRAM prefetch or compute-tiling changes.** Treat the result as the frozen no-prefetch baseline.
 
+The independent program at `frontend/asm/qwen3/flash-accel/one_block.progir`
+changes the storage tier of the nine weight tensors. Their declaration order
+matches the order of first consumption. Expert rows retain their original
+expert-indexed layout and routing trace. The B=1 validation compares the
+compact ArchIR to the all-HBM program after normalizing tensor tiers, and
+checks the existing request, head, RoPE position and expert associations.
+
+```sh
+PYTHONPATH=frontend/src python3 frontend/tools/run_qwen_simulations.py \
+  --source frontend/asm/qwen3/flash-accel/one_block.progir \
+  --params frontend/asm/qwen3/b1.json --runner build-backends/gtsim_program \
+  --architecture configs/v0.1.0/h100-sxm.yaml \
+  --memory configs/memconf/2F3M_grouped_planes.yaml \
+  --out validation/results/flash-accel/step5/qwen-b1-hbf
+```
+
+For the all-HBM control, omit `--source` and use a separate output directory.
+Both runs stream one expanded kernel at a time through a named pipe. The
+Program manifests, provenance, simulator logs and timing JSON remain in the
+respective output directories.
+
+### Measured B=1 baseline
+
+One decode step at context length 10,000 completes all 18 kernels. Both
+runs use H100 132 SM, Ramulator2 HBM3 and 2F3M grouped HBFine.
+The HBF run takes 4,291,764 cycles versus 623,329 cycles for the
+matched all-HBM control. It reads 113,779,200 B from HBF and
+20,679,552 B from HBM, writes 192,896 B to HBM and writes zero B
+to HBF. NAND senses total 141,295,616 B across 1,078 commands.
+
+| Kernel | HBM control cycles | HBF weights cycles | HBM read B | HBM write B | HBF read B | NAND sense B | Active groups / 48 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| input_rmsnorm | 1,870 | 9,517 | 4,096 | 4,096 | 4,096 | 131,072 | 1 |
+| qkv_projection | 53,256 | 545,285 | 4,096 | 10,240 | 20,971,520 | 20,971,520 | 48 |
+| q_norm_rope | 1,312 | 9,117 | 8,192 | 8,192 | 256 | 131,072 | 1 |
+| k_norm_rope | 1,374 | 9,105 | 1,024 | 1,024 | 256 | 131,072 | 1 |
+| v_extract | 1,171 | 1,204 | 1,024 | 1,024 | 0 | 0 | 0 |
+| kv_cache_update | 1,251 | 1,191 | 2,048 | 2,048 | 0 | 0 | 0 |
+| fa3_decode_split | 57,574 | 59,478 | 20,490,240 | 67,456 | 0 | 0 | 0 |
+| fa3_combine | 1,563 | 1,477 | 66,048 | 8,192 | 0 | 0 | 0 |
+| attention_output_projection | 95,668 | 1,085,879 | 8,192 | 4,096 | 16,777,216 | 16,777,216 | 48 |
+| attention_residual_add | 1,564 | 1,552 | 8,192 | 4,096 | 0 | 0 | 0 |
+| post_attention_rmsnorm | 1,792 | 9,517 | 4,096 | 4,096 | 4,096 | 131,072 | 1 |
+| router_projection | 43,573 | 73,806 | 4,096 | 256 | 524,288 | 524,288 | 4 |
+| router_softmax_topk | 2,181 | 1,570 | 256 | 256 | 0 | 0 | 0 |
+| expert_gemm1_direct | 217,791 | 2,059,274 | 0 | 24,576 | 50,331,648 | 77,332,480 | 48 |
+| swiglu | 1,852 | 1,861 | 24,576 | 12,288 | 0 | 0 | 0 |
+| expert_gemm2_direct | 135,028 | 417,452 | 12,288 | 32,768 | 25,165,824 | 25,165,824 | 48 |
+| weighted_moe_sum_direct | 2,959 | 2,932 | 32,896 | 4,096 | 0 | 0 | 0 |
+| final_residual_add | 1,550 | 1,547 | 8,192 | 4,096 | 0 | 0 | 0 |
+
+The audit matched all nine runtime addresses to the sequential Megapage
+allocator and matched each weight kernel's active group IDs to its
+lowered read regions. Both expert GEMMs accessed only experts
+10, 66, 77, 98, 103, 107, 122 and 124. GEMM1 touches 384 unique
+Megapages but senses 590 times as its accesses revisit pages after
+buffer eviction. GEMM2 senses its 192 unique Megapages once each.
+Normalization weights use partial Megapages. FA3 and KV update issue
+zero HBF traffic. Active group counts measure coverage over a kernel,
+rather than the number of groups simultaneously sensing.
+
 **Acceptance:**
 
-- [ ] A complete Qwen3-30B-A3B Transformer Block executes with all intended static weights in HBF.
-- [ ] The baseline is validated and reported, including physical layout and memory traffic.
+- [x] A complete Qwen3-30B-A3B Transformer Block executes with all intended static weights in HBF.
+- [x] The B=1 baseline is validated and reported, including physical layout and memory traffic.
 
 ## Step 6 — Generic HBF-side SRAM and Asynchronous Memory Operations
 

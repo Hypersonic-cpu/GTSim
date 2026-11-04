@@ -1,0 +1,29 @@
+prog.program @flash_accel_fa3 {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %Q_LENGTH : index
+  static.param %Q_TILE : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.let %QROWS = %B*%HQ*%Q_LENGTH
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%HKV
+  prog.tensor @Q : tensor<QROWSxDxbf16> storage<HBM> external readonly
+  prog.tensor @K : tensor<CACHE_ROWSxDxbf16> storage<HBF> external readonly
+  prog.tensor @V : tensor<CACHE_ROWSxDxbf16> storage<HBF> external readonly
+  prog.tensor @O : tensor<QROWSxDxbf16> storage<HBM>
+  prog.stream @compute ordered {
+    %O, !done = prog.launch @first
+        callee<@fa3_reference> implementation<@fa3_reference_flow>
+        inputs[@Q, @K, @V] outputs[@O]
+        attrs{B=%B, HQ=%HQ, HKV=%HKV, D=%D, Q_LENGTH=%Q_LENGTH, Q_TILE=%Q_TILE, TILE=%TILE, NUM_SMS=%NUM_SMS, CONTEXTS=%CONTEXTS}
+    %O, !second_done = prog.launch @second
+        callee<@fa3_reference> implementation<@fa3_reference_flow>
+        inputs[@Q, @K, @V] outputs[@O]
+        attrs{B=%B, HQ=%HQ, HKV=%HKV, D=%D, Q_LENGTH=%Q_LENGTH, Q_TILE=%Q_TILE, TILE=%TILE, NUM_SMS=%NUM_SMS, CONTEXTS=%CONTEXTS}
+    prog.synchronize @compute after[!second_done]
+  }
+  prog.return @O after[!second_done]
+}

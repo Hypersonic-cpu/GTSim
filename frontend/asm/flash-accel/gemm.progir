@@ -1,0 +1,18 @@
+prog.program @flash_accel_gemm {
+  static.param %NUM_SMS : index range[1, *]
+  prog.tensor @A : tensor<256x192xfp16> storage<HBM> external readonly
+  prog.tensor @B : tensor<192x256xfp16> storage<HBF> external readonly
+  prog.tensor @C : tensor<256x256xfp16> storage<HBM>
+  prog.stream @compute ordered {
+    %C, !first_done = prog.launch @first
+        callee<@gemm_reference> implementation<@gemm_reference_flow>
+        inputs[@A, @B] outputs[@C]
+        attrs{M=256, N=256, K=192, NUM_SMS=%NUM_SMS}
+    %C, !second_done = prog.launch @second
+        callee<@gemm_reference> implementation<@gemm_reference_flow>
+        inputs[@A, @B] outputs[@C]
+        attrs{M=256, N=256, K=192, NUM_SMS=%NUM_SMS}
+    prog.synchronize @compute after[!second_done]
+  }
+  prog.return @C after[!second_done]
+}

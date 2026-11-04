@@ -170,6 +170,7 @@ class NativeExpander:
                 if not resolver.value(step.guard):
                     continue
                 executor = resolver.value(step.executor.expression)
+                scheduled_executor = point.get("executor", executor)
                 point = {**point, "executor": executor}
                 issue, complete = self.dependencies(
                     step.dependencies, point, cta, pattern
@@ -215,6 +216,8 @@ class NativeExpander:
                 suffix = "_".join(
                     f"{k}{v}" for k, v in point.items() if k != "executor"
                 )
+                if scheduled_executor != executor:
+                    suffix += f"_iter{scheduled_executor}"
                 suffix += "_w" + str(self.warp_bases[cta] + executor)
                 self.nodes.append(
                     A.ArchInstruction(

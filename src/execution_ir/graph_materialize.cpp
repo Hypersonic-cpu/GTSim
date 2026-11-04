@@ -33,9 +33,9 @@ materialize(const Kernel& k, const SimulatorConfig& config,
             throw std::invalid_argument("unbound kernel tensor");
         const auto& global = registry.at(ids.at(t.id));
         if (t.shape != global.shape || t.strides != global.strides ||
-            (t.dtype != "fp16" && t.dtype != "bf16" && t.dtype != "fp32" &&
-             t.dtype != "int32") ||
-            t.tier != "HBM")
+            parse_dtype(t.dtype) != global.dtype ||
+            parse_memory_tier(t.tier) != global.initial_memory_tier ||
+            t.preloaded != global.preloaded || t.read_only != global.read_only)
             throw std::invalid_argument("incompatible tensor binding");
     }
     for (const auto& c : k.ctas) {
