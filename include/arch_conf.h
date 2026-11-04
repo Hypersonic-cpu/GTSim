@@ -56,7 +56,8 @@ template <> struct meta<GTSim::HBFBackend> {
 };
 template <> struct meta<GTSim::HBFGeometryProfile> {
     using enum GTSim::HBFGeometryProfile;
-    static constexpr auto value = enumerate("ocp_reference", OCPReference, "hbflex_research", HBFlexResearch);
+    static constexpr auto value = enumerate("ocp_reference", OCPReference, "hbflex_research", HBFlexResearch,
+                                            "grouped_planes", GroupedPlanes);
 };
 template <> struct meta<GTSim::TensorPlacementProfile> {
     using enum GTSim::TensorPlacementProfile;

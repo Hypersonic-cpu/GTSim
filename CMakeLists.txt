@@ -36,6 +36,9 @@ if(GTSIM_ENABLE_RAMULATOR2)
   include(cmake/Ramulator2.cmake)
 endif()
 
+add_executable(gtsim_hbf_layout tools/hbf_layout.cpp)
+target_link_libraries(gtsim_hbf_layout PRIVATE gtsim_core)
+
 add_executable(gtsim_gemm workloads/gemm/gemm_h100.cpp)
 target_link_libraries(gtsim_gemm PRIVATE gtsim_core)
 
@@ -65,6 +68,8 @@ include(CTest)
 option(GTSIM_ENABLE_LEGACY_TVM_TESTS "Enable legacy TVM compatibility tests" OFF)
 set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
+  add_executable(hbf_grouped_geometry_check tests/hbf_grouped_geometry.cpp)
+  target_link_libraries(hbf_grouped_geometry_check PRIVATE gtsim_core)
   if(GTSIM_BUILD_IR_FRAMEWORK)
     add_executable(reference_graph_dump tests/reference_parity/reference_graph_dump.cpp)
     target_link_libraries(reference_graph_dump PRIVATE gtsim_core)

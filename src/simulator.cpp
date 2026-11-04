@@ -153,15 +153,19 @@ void Simulator::print_configuration(bool verbose) {
                    << config.memory.hbf.write_latency_cycles << " cycles\n";
     if (config.memory.hbf.backend == HBFBackend::BankPlane) {
         const auto& c = config.memory.hbf.controller;
+        const bool grouped = c.geometry == HBFGeometryProfile::GroupedPlanes;
         *output_stream << "HBF backend: bank_plane; profile "
                        << (c.geometry == HBFGeometryProfile::OCPReference
                                ? "ocp_reference"
-                               : "hbflex_research")
+                               : grouped ? "grouped_planes" : "hbflex_research")
                        << "; stacks " << c.stacks << "; Host Channels "
-                       << c.stacks * 16 << "; Banks "
-                       << c.stacks * 16 * c.banks_per_channel << "; Planes "
+                       << c.stacks * 16 << "; command units "
+                       << (grouped ? c.stacks * hbfine::command_groups_per_stack(c)
+                                   : c.stacks * 16 * c.banks_per_channel)
+                       << "; Planes "
                        << c.stacks * c.dies_per_stack * c.planes_per_die
-                       << "; buffers/Bank 2; sense engines/Bank 1\n";
+                       << "; buffers per command unit 2; planes per sense "
+                       << c.planes_per_command_group << "\n";
         *output_stream << "HBF per-stack target read/write GB/s: "
                        << c.read_target_GBps_per_stack << "/"
                        << c.write_target_GBps_per_stack
@@ -290,6 +294,23 @@ void Simulator::print_statistics(bool verbose) {
         scalar("accepted_requests", hbf.accepted_requests);
         scalar("completed_requests", hbf.completed_requests);
         scalar("failed_requests", hbf.failed_requests);
+        if (config.memory.hbf.controller.geometry == HBFGeometryProfile::GroupedPlanes) {
+            std::uint64_t logical_bytes = 0;
+            for (const auto* node : dag->nodes) {
+                if (!node->finished ||
+                    (node->op_type != OpType::CP_DRAM2SRAM_TMA &&
+                     node->op_type != OpType::CP_DRAM2SRAM &&
+                     node->op_type != OpType::LD_DRAM2REG))
+                    continue;
+                const auto& tensor = dag->tensor_registry.at(node->matrix_id);
+                if (tensor.initial_memory_tier == MemoryTier::HBF)
+                    logical_bytes += static_cast<std::uint64_t>(tile_total_elements(node->tile)) *
+                                     bytes_per_element(tensor.dtype);
+            }
+            scalar("kernel_logical_hbf_read_bytes", logical_bytes);
+            scalar("sense_commands", hbf.senses /
+                        config.memory.hbf.controller.planes_per_command_group);
+        }
         scalar("host_read_bytes", hbf.host_read_bytes);
         scalar("host_write_bytes", hbf.host_write_bytes);
         scalar("sensed_bytes", hbf.sensed_bytes);
