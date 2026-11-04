@@ -1,1 +1,0 @@
-"""Fixed schedule compiler components."""

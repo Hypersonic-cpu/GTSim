@@ -345,6 +345,10 @@ def serialize(ir):
         return algo(ir)
     if isinstance(ir, A.FlowIR):
         return flow(ir)
+    if isinstance(ir, A.ArchIR):
+        from .native import write as write_arch
+
+        return write_arch(ir)
     from .json_codec import dumps
 
     return dumps(ir)

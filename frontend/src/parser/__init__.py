@@ -39,6 +39,10 @@ def from_module(module):
             return semantic.prog(root, static)
         if root.name == "flow.program" and len(roots) == 1:
             return semantic.flow_program(root, static)
+        if root.name == "arch.program" and len(roots) == 1:
+            from .native import parse as parse_arch
+
+            return parse_arch(root, static)
         if root.name == "algo.kernel" and len(roots) == 1:
             return semantic.algo(root, static)
         if root.name == "flow.kernel" and len(roots) <= 2:

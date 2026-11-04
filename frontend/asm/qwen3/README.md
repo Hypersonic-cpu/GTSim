@@ -23,28 +23,7 @@ and grouped Small-M execution. `S` independently selects split attention and an
 explicit LSE-combination kernel. The sample split counts are configuration values,
 not a measured optimal dispatch policy.
 
-## In-memory comparison
-
-```sh
-PYTHONPATH=frontend/src python3 frontend/tools/compare_qwen_in_memory.py \
-  --source frontend/asm/qwen3/one_block.progir --lib frontend/lib \
-  --params frontend/asm/qwen3/b1.json \
-  --report validation/results/text-qwen/memory-b1.json
-
-PYTHONPATH=frontend/src python3 frontend/tools/compare_qwen_in_memory.py \
-  --source frontend/asm/qwen3/one_block.progir --lib frontend/lib \
-  --params frontend/asm/qwen3/b16.json \
-  --report validation/results/text-qwen/memory-b16.json
-```
-
-The tool expands and checks one new DAG, retains compact comparison data, releases
-the DAG, and independently expands the old generator's DAG. No large IR/DAG files
-are serialized. Exact rectangle-coverage counters compare memory regions despite
-packed versus separate allocations and different copy packetization. Native and
-dependency fingerprints are reported separately; equal memory does not establish
-whole-graph equivalence. Legacy imports exist only in this comparison tool.
-
-Normal in-memory compilation without the legacy oracle:
+## Compilation
 
 ```sh
 PYTHONPATH=frontend/src python3 -m compile.run_text \
@@ -65,9 +44,9 @@ The current corrected schedules and completed reruns are documented in
 [`issue-aligned-results.md`](issue-aligned-results.md). `results.md` retains the
 initial comparison before the IR-only synchronization/precision correction.
 
-## Four simulator runs
+## Run the simulator
 
-Both DAG versions can execute through the same C++ runner without saving giant
+The textual program can execute through the C++ runner without saving giant
 kernel DAG files. A named pipe transfers each materialized kernel directly to
 the existing ProgramExecutor JSON reader. The small Program manifest, source
 hashes, simulator log and result JSON are retained. Each case runs a full block
@@ -80,29 +59,20 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target gtsim_program --parallel
 ```
 
-Run each version and batch combination (the example loops run sequentially):
+Run the two batch configurations sequentially:
 
 ```sh
 for batch in 1 16; do
-  for version in legacy new; do
-    PYTHONPATH=frontend/src python3 frontend/tools/run_qwen_simulations.py \
-      --version "$version" --params "frontend/asm/qwen3/b${batch}.json" \
-      --runner build/gtsim_program \
-      --architecture configs/v0.1.0/h100-sxm.yaml \
-      --memory configs/v0.1.0/memory_full_hbm-0F5M.yaml \
-      --out "validation/results/text-qwen/four-runs/${version}-b${batch}"
-  done
+  PYTHONPATH=frontend/src python3 frontend/tools/run_qwen_simulations.py \
+    --params "frontend/asm/qwen3/b${batch}.json" \
+    --runner build/gtsim_program \
+    --architecture configs/v0.1.0/h100-sxm.yaml \
+    --memory configs/v0.1.0/memory_full_hbm-0F5M.yaml \
+    --out "validation/results/text-qwen/new-b${batch}"
 done
-
-python3 frontend/tools/summarize_qwen_simulations.py \
-  validation/results/text-qwen/four-runs
 ```
 
-Use fresh output directories when rerunning. The evidence run used the already
-built `/tmp/gtsim-qwen-correction-build/gtsim_program`; each `provenance.json`
-records its exact binary hash and all compiler/source/configuration hashes.
-`result.json` contains global kernel cycle intervals, device completion versus
-memory-drain completion, traffic counters and graph counts. The generated
-`comparison.md` includes ordered intervals and per-kernel differences.
-See `dag-differences.md` for the structural explanation. Python expansion and
-pipe transport wall time are distinct from simulated GPU cycles.
+Use fresh output directories for reruns. `result.json` contains global kernel
+cycle intervals, memory traffic and graph counts. `provenance.json` records
+binary, configuration and source hashes. The historical four-run comparison
+scripts are available at the `legacy-frontend` tag.

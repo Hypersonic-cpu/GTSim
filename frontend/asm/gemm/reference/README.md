@@ -8,10 +8,7 @@ The reusable assembly sources describe a symbolic GEMM program:
 
 The dimensions and `NUM_SMS` remain symbolic. Tile geometry is explicit through
 `tile(128x256x64)` and `matrix_tile(64x64x16)`, with two pipeline stages.
-`algo.traits` uses enum-backed structural traits. The historical
-`export_textual.py` exports the previous syntax from the legacy implementation;
-it is not part of the independent AST/parser path and does not regenerate this
-revised syntax.
+`algo.traits` uses enum-backed structural traits.
 
 These files use the design document's proposed inspection syntax.
 `frontend/src/parser/` reads them into independent typed AST definitions in
@@ -33,12 +30,9 @@ for path in sorted(Path("frontend/asm/gemm/reference").glob("*ir")):
 PYTHON
 ```
 
-`parser` and the copied AST do not import `gtsim_frontend`. The `ast/` source
-directory is loaded under the private Python namespace `gtsim_text_ast` to avoid
-shadowing Python's standard-library `ast` module. The original IR definitions
-are retained in `gtsim_frontend/ir/`. `ArchIR` and `ExecIR` definitions are copied
-as well; their structural JSON read/write path is supported, while their
-MLIR-like assembly syntax is not implemented in this step.
+The `ast/` source directory is loaded under the private Python namespace
+`gtsim_text_ast` to avoid shadowing Python's standard-library `ast` module.
+New `.nvir` exports use MLIR-like text; ExecIR DAGs use JSON.
 
 `two_gemms.progir` invokes the same algorithm and schedule twice, with K=192 and
 K=256. `two_gemms.flowir` is the generated unified FlowIR: two symbolic scheduled

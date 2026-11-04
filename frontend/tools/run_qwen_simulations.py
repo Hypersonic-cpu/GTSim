@@ -1,4 +1,4 @@
-"""Run a new or legacy Qwen DAG through ProgramExecutor, streaming via FIFOs.
+"""Run a textual Qwen program through ProgramExecutor, streaming via FIFOs.
 
 Only manifests, provenance and timing logs are stored. Each kernel is expanded
 once in RAM; the existing C++ reader consumes its JSON from a named pipe.
@@ -22,20 +22,13 @@ from compile.arch_to_exec import lower_region, strides
 from compile.static import EMPTY, Resolver, bound_resolver
 from compile.export_runtime import PIPELINES, tensor_record
 from parser import ast as A
-from gtsim_frontend.programs.qwen3_decode import build as old_program
-from gtsim_frontend.passes.instantiate import instantiate
-from gtsim_frontend.passes.hopper.lower import lower as old_native
-from gtsim_frontend.passes.lower_execution import lower as old_expand
-from gtsim_frontend.passes.compose import compose, KernelInterface
-from gtsim_frontend.ir.graph import KernelTensor as OldTensor
-from gtsim_frontend.serialization.json_codec import encode
 
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def new_plan(source, lib, params):
+def plan_program(source, lib, params):
     flow = compile_program(
         source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
     )
@@ -99,55 +92,7 @@ def new_plan(source, lib, params):
     return manifest, regions, lambda r: lower_region(arch, r)
 
 
-def legacy_plan(params):
-    trace = [
-        [
-            dict(
-                expert_ids=params["ROUTE_IDS"][
-                    t * params["TK"] : (t + 1) * params["TK"]
-                ],
-                probabilities=params["ROUTE_PROBS"][
-                    t * params["TK"] : (t + 1) * params["TK"]
-                ],
-            )
-            for t in range(params["B"])
-        ]
-    ]
-    program, _ = old_program(
-        params["B"], 1, params["CONTEXTS"], params["S"], routing_trace=trace
-    )
-    interfaces = {}
-    for invocation in program.launches:
-        flow = instantiate(invocation.algorithm, params["NUM_SMS"])
-        tensors = tuple(
-            OldTensor(
-                i,
-                t.id,
-                t.shape,
-                strides(t.shape),
-                t.dtype,
-                t.tier,
-                t.read_only or t.id in flow.domain.partial_outputs,
-                t.read_only,
-            )
-            for i, t in enumerate(flow.tensors)
-        )
-        outputs = tuple(i for i, t in enumerate(flow.tensors) if not t.read_only)
-        interfaces[invocation.id] = KernelInterface(tensors, outputs, "fifo")
-    files = {inv.id: inv.id + ".fifo" for inv in program.launches}
-    manifest = dict(
-        format="gtsim.exec.program/1", **encode(compose(program, interfaces, files, 0))
-    )
-    return (
-        manifest,
-        program.launches,
-        lambda inv: old_expand(
-            old_native(instantiate(inv.algorithm, params["NUM_SMS"]))
-        ),
-    )
-
-
-def write_kernel(kernel, output, new):
+def write_kernel(kernel, output):
     """Stream instructions without building another giant list of dictionaries."""
     digest = hashlib.sha256()
     counts = Counter()
@@ -169,17 +114,17 @@ def write_kernel(kernel, output, new):
 
     write('{"ops":[')
     for node in kernel.ops:
-        opcode = node.opcode if new else node.op
+        opcode = node.opcode
         fields = dict(
             record="ArchInstruction",
             id=node.id,
             name=node.name,
             op=opcode,
-            pipeline=PIPELINES[node.resource] if new else node.pipeline,
+            pipeline=PIPELINES[node.resource],
             cta=node.cta,
             warp=node.warp,
             tensor=node.tensor if node.tensor is not None else 0,
-            dtype=node.dtype.value if new else node.dtype,
+            dtype=node.dtype.value,
             leading_dim=node.leading_dim or 0,
             tile=node.tile,
             after_issue=node.after_issue,
@@ -196,38 +141,17 @@ def write_kernel(kernel, output, new):
             areas[node.tensor] += node.tile[2] * node.tile[3]
     flush()
     write("]")
-    tensors = (
-        [tensor_record(t) for t in kernel.tensors]
-        if new
-        else [
-            dict(
-                record="KernelTensor",
-                id=t.id,
-                name=t.name,
-                shape=t.shape,
-                strides=t.strides,
-                dtype=t.dtype,
-                tier=t.tier,
-                preloaded=t.preloaded,
-                read_only=t.read_only,
-            )
-            for t in kernel.tensors
-        ]
-    )
-    outputs = kernel.regions[0].outputs if new else kernel.outputs
-    partial = (
-        [
-            t.id
-            for t in kernel.tensors
-            if t.id in outputs and areas[t.id] < t.shape[0] * t.shape[1]
-        ]
-        if new
-        else kernel.partial_outputs
-    )
+    tensors = [tensor_record(t) for t in kernel.tensors]
+    outputs = kernel.regions[0].outputs
+    partial = [
+        t.id
+        for t in kernel.tensors
+        if t.id in outputs and areas[t.id] < t.shape[0] * t.shape[1]
+    ]
     header = dict(
         record="ExecKernel",
-        format="gtsim.exec.kernel/1" if new else "gtsim.exec.kernel/2",
-        schema_version=1 if new else 2,
+        format="gtsim.exec.kernel/1",
+        schema_version=1,
         symbol=kernel.symbol,
         source_hash="",
         target="sm90",
@@ -260,7 +184,6 @@ def write_kernel(kernel, output, new):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", choices=("new", "legacy"), required=True)
     parser.add_argument("--params", type=Path, required=True)
     parser.add_argument(
         "--source", type=Path, default=Path("frontend/asm/qwen3/one_block.progir")
@@ -274,11 +197,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     params = json.loads(args.params.read_text())
     start = perf_counter()
-    manifest, plans, expand = (
-        new_plan(args.source, args.lib, params)
-        if args.version == "new"
-        else legacy_plan(params)
-    )
+    manifest, plans, expand = plan_program(args.source, args.lib, params)
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]
         if path.exists():
@@ -294,7 +213,7 @@ def main():
         ]
     )
     provenance = dict(
-        version=args.version,
+        version="new",
         params=params,
         launch_overhead_cycles=0,
         runner_sha256=sha(args.runner),
@@ -333,7 +252,7 @@ def main():
                     at = perf_counter()
                     kernel = expand(plan)
                     expanded = perf_counter()
-                    record = write_kernel(kernel, output, args.version == "new")
+                    record = write_kernel(kernel, output)
                     record.update(
                         id=launch["id"],
                         expand_seconds=expanded - at,
@@ -382,7 +301,7 @@ def main():
     print(
         json.dumps(
             dict(
-                version=args.version,
+                version="new",
                 batch=params["B"],
                 returncode=returncode,
                 cycles=outcome.get("timing", {}).get("total_cycles"),

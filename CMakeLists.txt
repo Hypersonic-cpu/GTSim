@@ -150,22 +150,6 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/audit_gemm_sync.py
                 $<TARGET_FILE:reference_graph_dump> --require-safe
                 --output ${CMAKE_CURRENT_BINARY_DIR}/gemm-sync-audit.json)
-      add_test(NAME execution_program
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_frontend/test_execution_program.py
-                --runner $<TARGET_FILE:gtsim_program> --architecture ${H100_ARCH_CONFIG}
-                --memory-config ${MEMORY_FULL_HBM_CONFIG})
-      add_test(NAME ir_native_reference_parity
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/test_native_parity.py
-                --oracle $<TARGET_FILE:reference_graph_dump>)
-      add_test(NAME ir_old_new_frontend_parity
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_parity/test_two_gemm_frontend_parity.py)
-      set_tests_properties(execution_program ir_native_reference_parity ir_old_new_frontend_parity
-                           PROPERTIES TIMEOUT 300)
-      add_test(NAME ir_frontend_contracts
-        COMMAND ${CMAKE_COMMAND} -E env
-                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/frontend/src"
-                ${Python3_EXECUTABLE} -m unittest discover
-                -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_frontend -v)
     endif()
     add_test(NAME mixed_hbfine_smoke
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/hbf/check_smoke.py

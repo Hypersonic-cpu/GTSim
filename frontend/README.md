@@ -23,7 +23,8 @@ frontend/
 ```
 
 Each lowering stage has its own Python file and may share common abstractions.
-The new implementation is independent of `src/gtsim_frontend/`. Program/Algorithm
+The previous Python frontend and its comparison tools are archived at the
+`legacy-frontend` tag. Program/Algorithm
 compilation composes explicitly supplied `.flowir` schedules into one symbolic
 FlowIR. Flow → Arch selects structured Hopper instructions. Arch → Exec resolves
 static scopes and expands loops into a concrete DAG. Automatic schedule synthesis remains outside the implemented path. Shared
@@ -165,11 +166,11 @@ PYTHONPATH=frontend/src python3 -m compile \
   -o frontend/asm/gemm/reference/two_gemms.dag.json
 ```
 
-ArchIR `.nvir` and ExecIR DAG files currently use the parser's structural JSON
-serialization, including enum/record types; Native IR remains structured rather
-than containing expanded instruction instances. Both files deserialize to the
-corresponding typed AST. The example expands to 1,062 + 2,656 instruction nodes
-across two ordered regions.
+New ArchIR `.nvir` exports use MLIR-like text: `arch.program` contains ordered
+`arch.kernel` regions with native operations, loops, layouts, and dependencies.
+The parser reads this text back into the typed ArchIR; existing JSON `.nvir`
+inputs remain readable. ExecIR DAG files still use structural JSON. The example
+expands to 1,062 + 2,656 instruction nodes across two ordered regions.
 
 Optional `--runtime-dir /tmp/gtsim-text-runtime` on the final command emits the
 existing C++ ProgramExecutor wire format. Version discriminators live only in

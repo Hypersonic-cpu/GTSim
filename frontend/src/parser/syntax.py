@@ -9,11 +9,13 @@ def _operation_name(header: str) -> str:
 
 
 def _is_operation(line: str) -> bool:
-    return line.lstrip().startswith(("prog.", "algo.", "flow.", "mapping.", "static."))
+    return line.lstrip().startswith(
+        ("prog.", "algo.", "flow.", "arch.", "mapping.", "static.")
+    )
 
 
 def _statement_opcode(line: str) -> str:
-    match = re.search(r"\b(?:prog|algo|flow|mapping|map|static)\.[\w.]+", line)
+    match = re.search(r"\b(?:prog|algo|flow|arch|mapping|map|static)\.[\w.]+", line)
     return match.group(0) if match else ""
 
 

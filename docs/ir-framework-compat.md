@@ -1,5 +1,9 @@
 # Layered IR support and reproduction
 
+> Historical guide: the previous Python frontend and these commands are available
+> at the `legacy-frontend` tag. See [frontend/README.md](../frontend/README.md)
+> for the current frontend.
+
 Supported reference profile: Hopper H100, FP16 inputs/output, FP32 accumulation,
 HBM placement, one ordered stream, one or more sequential launches.
 

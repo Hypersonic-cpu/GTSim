@@ -72,11 +72,10 @@ The two-GEMM frontend parity regression also passes; Ruff checks and formatting
 checks pass. No full CTest or original 8+6 timing-validation sweep was performed
 for this focused IR-only change.
 
-Use the four-run commands in `README.md`, replacing the output root
-`validation/results/text-qwen/four-runs` with a fresh directory such as
-`validation/results/text-qwen/issue-aligned-runs`, then invoke
-`summarize_qwen_simulations.py` on that directory. Kernel DAGs are materialized
-one at a time in RAM and streamed through FIFOs, not saved as large files.
+To reproduce the historical four-run comparison, use the commands and tools at
+the `legacy-frontend` tag. The current `README.md` shows how to run the textual
+workload alone. Kernel DAGs are materialized one at a time in RAM and streamed
+through FIFOs.
 
 These are simulator-derived estimates, not newly calibrated H100 measurements.
 No numerical Transformer execution or BF16 accuracy result is claimed.
