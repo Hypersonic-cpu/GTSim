@@ -3,6 +3,7 @@
 Legacy schema discriminators exist only at this boundary, never in compiler ASTs.
 """
 
+from dataclasses import asdict
 from pathlib import Path
 import json
 from parser import ast as A
@@ -18,7 +19,7 @@ PIPELINES = {
 
 
 def tensor_record(tensor):
-    return dict(
+    record = dict(
         record="KernelTensor",
         id=tensor.id,
         name=tensor.name,
@@ -29,6 +30,9 @@ def tensor_record(tensor):
         preloaded=tensor.preloaded,
         read_only=tensor.read_only,
     )
+    if tensor.tile_major is not None:
+        record["tile_major"] = asdict(tensor.tile_major)
+    return record
 
 
 def export_runtime(execution, directory, launch_overhead_cycles=0, prefetch=None):

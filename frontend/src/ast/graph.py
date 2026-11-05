@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from .layout import TileMajorLayout
 from .common import Header, DataType, MemorySpace, ImmediateValue
 
 
@@ -24,6 +25,7 @@ class KernelTensor:
     tier: MemorySpace
     preloaded: bool
     read_only: bool
+    tile_major: TileMajorLayout | None
 
 
 @dataclass(frozen=True)

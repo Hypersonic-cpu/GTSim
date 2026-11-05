@@ -20,6 +20,7 @@ for _name in (
     "profiles",
     "schedule",
     "flow",
+    "layout",
     "graph",
     "arch",
     "execution",

@@ -10,6 +10,7 @@ struct Tensor {
     int id{};
     std::vector<std::uint64_t> shape, strides;
     bool preloaded{}, read_only{};
+    std::optional<TileMajorLayout> tile_major{};
 };
 struct CTA {
     std::string record;

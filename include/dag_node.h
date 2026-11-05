@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -165,6 +166,21 @@ inline int bytes_per_element(DataType type) {
     }
 }
 
+// Both the tile grid and elements within a tile are column-major.
+struct TileMajorLayout {
+    std::uint64_t tile_k{}, tile_n{}, matrix_k{};
+    bool operator==(const TileMajorLayout&) const = default;
+
+    std::uint64_t offset(std::uint64_t k, std::uint64_t n,
+                         std::uint64_t width) const {
+        const auto matrix = k / matrix_k;
+        k %= matrix_k;
+        const auto tile = (n / tile_n) * (matrix_k / tile_k) + k / tile_k;
+        return matrix * matrix_k * width + tile * tile_k * tile_n +
+               (n % tile_n) * tile_k + k % tile_k;
+    }
+};
+
 struct TensorMetadata {
     int id{};
     std::string name;
@@ -175,6 +191,7 @@ struct TensorMetadata {
     MemoryTier initial_memory_tier{MemoryTier::HBM};
     bool preloaded{false};
     bool read_only{false};
+    std::optional<TileMajorLayout> tile_major{};
 
     std::uint64_t byte_size() const {
         if (shape.size() != strides.size()) {
@@ -256,7 +273,8 @@ public:
     allocate_tensor(int id, std::string name, std::vector<std::uint64_t> shape,
                     std::vector<std::uint64_t> strides, DataType dtype,
                     MemoryTier tier = MemoryTier::HBM, bool preloaded = false,
-                    bool read_only = false) {
+                    bool read_only = false,
+                    std::optional<TileMajorLayout> tile_major = std::nullopt) {
         const std::uint64_t cursor = !layout_.enabled ? next_global_address_
                                      : tier == MemoryTier::HBM ? next_hbm_
                                                                : next_hbf_;
@@ -269,7 +287,8 @@ public:
                               dtype,
                               tier,
                               preloaded,
-                              read_only};
+                              read_only,
+                              tile_major};
         return register_tensor(std::move(tensor));
     }
 
@@ -308,6 +327,16 @@ public:
         if (existing != tensors_.end()) {
             throw std::invalid_argument("duplicate tensor id " +
                                         std::to_string(tensor.id));
+        }
+        if (const auto& layout = tensor.tile_major) {
+            const auto [tk, tn, mk] = *layout;
+            if (!tensor.read_only || !tensor.preloaded ||
+                tensor.shape.size() != 2 || !tk || !tn || !mk || mk % tk ||
+                tensor.shape[0] % mk || tensor.shape[1] % tn ||
+                tensor.strides !=
+                    std::vector<std::uint64_t>{tensor.shape[1], 1})
+                throw std::invalid_argument("invalid tile-major tensor: " +
+                                            tensor.name);
         }
         const std::uint64_t size = tensor.byte_size();
         const std::uint64_t reserved_size = std::max<std::uint64_t>(size, 1);

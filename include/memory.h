@@ -450,6 +450,20 @@ inline std::uint64_t compute_global_element_addr(const DAGNode& node,
                                 node.name + "'");
     }
 
+    if (const auto& layout = tensor.tile_major) {
+        const auto height = node.tile.dim(0);
+        const auto k = node.tile.off(0) + linear_index % height;
+        const auto n = node.tile.off(1) + linear_index / height;
+        if (k < 0 || n < 0 ||
+            static_cast<std::uint64_t>(k) >= tensor.shape[0] ||
+            static_cast<std::uint64_t>(n) >= tensor.shape[1])
+            throw std::out_of_range("tile-major load exceeds tensor bounds: " +
+                                    node.name);
+        return tensor.global_base_address +
+               layout->offset(k, n, tensor.shape[1]) *
+                   bytes_per_element(tensor.dtype);
+    }
+
     int order[Tile::kMaxDims];
     for (int i = 0; i < ndims; ++i) {
         order[i] = i;
@@ -505,6 +519,29 @@ inline std::vector<CacheLineKey> compute_dram_subop_lines(const DAGNode& node,
     int total_elements = tile_total_elements(node.tile);
     int base_idx = subop_index * elems_per_subop;
     if (base_idx >= total_elements) {
+        return lines;
+    }
+
+    // Full-height strips keep each physical cache line in one packet.
+    if (const auto& layout = tensor.tile_major) {
+        const auto line = static_cast<std::uint64_t>(line_size_bytes);
+        const auto column_bytes = layout->tile_k * elem_bytes;
+        if (static_cast<std::uint64_t>(node.tile.dim(0)) != layout->tile_k ||
+            node.tile.off(0) % layout->tile_k ||
+            tensor.global_base_address % line ||
+            layout->tile_n * column_bytes % line ||
+            node.tile.off(1) * column_bytes % line ||
+            node.tile.dim(1) * column_bytes % line ||
+            elems_per_subop * elem_bytes % line)
+            throw std::invalid_argument(
+                "unsupported tile-major cache-line packet: " + node.name);
+        for (int i = base_idx;
+             i < std::min(base_idx + elems_per_subop, total_elements);
+             i += line_size_bytes / elem_bytes) {
+            const auto addr = compute_global_element_addr(node, tensor, i);
+            lines.push_back(
+                {node.matrix_id, addr - tensor.global_base_address, addr});
+        }
         return lines;
     }
 

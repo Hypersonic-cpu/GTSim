@@ -247,7 +247,7 @@ def trace_dependent(region, loads, root):
     return False
 
 
-def split_region(region, resolver, shapes, widths, loads, bases, config):
+def split_region(region, resolver, shapes, widths, loads, bases, config, layouts):
     if not loads:
         return [(region, frozenset())]
     footprint = defaultdict(set)
@@ -256,6 +256,13 @@ def split_region(region, resolver, shapes, widths, loads, bases, config):
         if not (0 <= r < r + h <= rows and 0 <= c < c + w <= cols):
             raise ValueError(f"out-of-bounds prefetch input in {region.symbol}")
         size = widths[tensor]
+        if layout := layouts.get(tensor):
+            if layout.tile_k * layout.tile_n * size != config.page_bytes:
+                raise ValueError(f"memory tile must occupy exactly one page: {tensor}")
+            footprint[cta].update(
+                (tensor, page) for page in layout.pages(cols, r, c, h, w)
+            )
+            continue
         for row in range(r, r + h):
             begin = (row * cols + c) * size
             end = begin + w * size
@@ -352,7 +359,8 @@ def spans(pages, sizes, config):
     return tuple(result)
 
 
-def optimize(flow, config):
+def optimize(flow, config, layouts=None):
+    layouts = layouts or {}
     root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
     shapes = {t.id: tuple(root.value(d) for d in t.shape) for t in flow.tensors}
     widths = {
@@ -369,7 +377,11 @@ def optimize(flow, config):
             continue
         bases[tensor.id] = cursor
         size = sizes[tensor.id]
-        alignment = config.group_bytes if config.align_tensors_to_command_group else config.page_bytes
+        alignment = (
+            config.group_bytes
+            if config.align_tensors_to_command_group
+            else config.page_bytes
+        )
         cursor += ((size + alignment - 1) // alignment) * alignment
         if (
             tensor.external
@@ -393,7 +405,7 @@ def optimize(flow, config):
         loads = eligible_loads(region, eligible)
         gate = len(regions) if trace_dependent(region, loads, flow.static) else 0
         for part, pages in split_region(
-            region, resolver, shapes, widths, loads, bases, config
+            region, resolver, shapes, widths, loads, bases, config, layouts
         ):
             regions.append(replace(part, after=after))
             uses.append(spans(pages, sizes, config))

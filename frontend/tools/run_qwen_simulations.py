@@ -28,15 +28,58 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def plan_program(source, lib, params, residency=None):
+def isolate_launch(flow, root, name, expert, params):
+    """Select a cold launch or one expert's original CTA range for measurement."""
+    from compile.opt.prefetch import scope
+
+    (region,) = (region for region in flow.regions if region.symbol == name)
+    if expert is not None:
+        if params["B"] != 1:
+            raise ValueError("isolated expert measurement requires one row per expert")
+        resolver = scope(region, root)
+        active = resolver.value("%ACTIVE")
+        if len(active) != len(params["ROUTE_IDS"]):
+            raise ValueError("expected exactly one assignment per expert")
+        lo = active.index(expert) * resolver.value("%NTILES")
+        loop, *outer = region.domain.loops
+        region = replace(
+            region,
+            domain=replace(
+                region.domain,
+                loops=(
+                    replace(loop, start=lo, stop=lo + resolver.value("%NTILES")),
+                    *outer,
+                ),
+            ),
+        )
+    # Retain every allocation so the selected weights keep their full-block
+    # base addresses and HBF group placement.
+    return replace(flow, regions=(replace(region, after=()),), outputs=())
+
+
+def plan_program(
+    source, lib, params, residency=None, layouts=None, focus=None, expert=None
+):
+    layouts = layouts or {}
     flow = compile_program(
         source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
     )
+    root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
+    if focus:
+        flow = isolate_launch(flow, root, focus, expert, params)
+    specs = {spec.id: spec for spec in flow.tensors}
+    for name, layout in layouts.items():
+        spec = specs[name]
+        if not (spec.read_only and spec.external and spec.tier == A.MemorySpace.HBF):
+            raise ValueError(
+                f"tile-major experiment requires read-only HBF weights: {name}"
+            )
+        layout.validate(tuple(root.value(d) for d in spec.shape))
     prefetch = None
     if residency is not None:
         from compile.opt.prefetch import Residency, optimize
 
-        prefetch = optimize(flow, Residency(**residency))
+        prefetch = optimize(flow, Residency(**residency), layouts)
         flow = prefetch.flow
     arch = lower_flow(flow)
     root = bound_resolver(arch.static, Resolver(EMPTY, {})).materialize_constants()
@@ -53,6 +96,7 @@ def plan_program(source, lib, params, residency=None):
                 spec.tier or A.MemorySpace.HBM,
                 spec.external,
                 spec.read_only,
+                layouts.get(spec.id),
             )
         )
     regions = []
@@ -97,7 +141,19 @@ def plan_program(source, lib, params, residency=None):
     )
     if prefetch is not None:
         prefetch.decorate(manifest)
-    return manifest, regions, lambda r: lower_region(arch, r)
+
+    def expand(region):
+        kernel = lower_region(arch, region)
+        if not layouts:
+            return kernel
+        return replace(
+            kernel,
+            tensors=tuple(
+                replace(t, tile_major=layouts.get(t.name)) for t in kernel.tensors
+            ),
+        )
+
+    return manifest, regions, expand
 
 
 def write_kernel(kernel, output):
@@ -185,6 +241,9 @@ def write_kernel(kernel, output):
     return dict(
         nodes=nodes,
         ctas=len(kernel.ctas),
+        sms=len({c.sm for c in kernel.ctas}),
+        shared_bytes_per_cta=sorted({c.shared_bytes for c in kernel.ctas}),
+        register_bytes_per_cta=sorted({c.register_bytes for c in kernel.ctas}),
         opcodes=dict(counts),
         dag_sha256=digest.hexdigest(),
     )
@@ -201,6 +260,9 @@ def main():
     parser.add_argument("--architecture", type=Path, required=True)
     parser.add_argument("--memory", type=Path, required=True)
     parser.add_argument("--prefetch-config", type=Path)
+    parser.add_argument("--tensor-layouts", type=Path)
+    parser.add_argument("--focus-launch")
+    parser.add_argument("--focus-expert", type=int)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -209,7 +271,16 @@ def main():
     residency = (
         json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
     )
-    manifest, plans, expand = plan_program(args.source, args.lib, params, residency)
+    layouts = json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
+    manifest, plans, expand = plan_program(
+        args.source,
+        args.lib,
+        params,
+        residency,
+        {name: A.TileMajorLayout(**layout) for name, layout in layouts.items()},
+        args.focus_launch,
+        args.focus_expert,
+    )
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]
         if path.exists():
@@ -228,6 +299,9 @@ def main():
         version="new",
         params=params,
         residency=residency,
+        tensor_layouts=layouts,
+        focus_launch=args.focus_launch,
+        focus_expert=args.focus_expert,
         launch_overhead_cycles=0,
         runner_sha256=sha(args.runner),
         architecture_sha256=sha(args.architecture),

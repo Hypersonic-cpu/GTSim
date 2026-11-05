@@ -30,6 +30,7 @@ struct TierTiming {
     std::uint64_t read_bytes{}, write_bytes{};
     std::map<std::string, std::uint64_t> counters;
     std::vector<std::size_t> active_units;
+    std::map<std::size_t, std::uint64_t> unit_busy_ticks;
     std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
     std::map<std::string, std::uint64_t> gauges;
 };

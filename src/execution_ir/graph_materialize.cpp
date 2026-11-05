@@ -35,7 +35,9 @@ materialize(const Kernel& k, const SimulatorConfig& config,
         if (t.shape != global.shape || t.strides != global.strides ||
             parse_dtype(t.dtype) != global.dtype ||
             parse_memory_tier(t.tier) != global.initial_memory_tier ||
-            t.preloaded != global.preloaded || t.read_only != global.read_only)
+            t.preloaded != global.preloaded ||
+            t.read_only != global.read_only ||
+            t.tile_major != global.tile_major)
             throw std::invalid_argument("incompatible tensor binding");
     }
     for (const auto& c : k.ctas) {

@@ -161,7 +161,17 @@ public:
     DeviceCounters device_counters() const override {
         const auto& stats = device_.statistics();
         DeviceCounters counters{{{"sensed_bytes", stats.sensed_bytes},
-                                 {"sensed_pages", stats.senses}}, stats.bank_busy_ps, {}};
+                                 {"sensed_pages", stats.senses},
+                                 {"sense_commands", stats.sense_commands}},
+                                stats.bank_busy_ps,
+                                {}};
+        if (config_.geometry == hbfine::GeometryProfile::GroupedPlanes) {
+            counters.cumulative.emplace("unique_sense_addresses",
+                                        stats.unique_sense_addresses);
+            counters.cumulative.emplace("repeated_sense_commands",
+                                        stats.sense_commands -
+                                            stats.unique_sense_addresses);
+        }
         if (config_.enable_read_sram) {
             counters.cumulative.emplace("prefetch_bytes", prefetch_bytes_);
             counters.cumulative.emplace("prefetch_started", started_fills_);

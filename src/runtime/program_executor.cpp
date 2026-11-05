@@ -35,9 +35,10 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         if (policy == placement_policies.end())
             policy = placement_policies.emplace(
                 tier, make_tensor_placement(config.memory, tier)).first;
-        policy->second(registry, TensorMetadata{t.id, t.name, 0, t.shape,
-                                               t.strides, dtype, tier,
-                                               t.preloaded, t.read_only});
+        policy->second(registry,
+                       TensorMetadata{t.id, t.name, 0, t.shape, t.strides,
+                                      dtype, tier, t.preloaded, t.read_only,
+                                      t.tile_major});
         const auto& allocated = registry.at(t.id);
         timing.tensor_addresses[t.tier].emplace(t.name, allocated.global_base_address);
         allocations.emplace(t.id, std::tuple{allocated.global_base_address,
@@ -200,8 +201,12 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 for (const auto& [name, value] : after.device.cumulative)
                     delta.counters.emplace(name, value - before.device.cumulative.at(name));
                 for (std::size_t unit = 0; unit < after.device.unit_busy_ticks.size(); ++unit)
-                    if (after.device.unit_busy_ticks[unit] > before.device.unit_busy_ticks.at(unit))
+                    if (const auto ticks =
+                            after.device.unit_busy_ticks[unit] -
+                            before.device.unit_busy_ticks.at(unit)) {
                         delta.active_units.push_back(unit);
+                        delta.unit_busy_ticks.emplace(unit, ticks);
+                    }
             }
             launch.background_at_completion = memory->pending_background_requests();
             launch.state = "COMPLETED";

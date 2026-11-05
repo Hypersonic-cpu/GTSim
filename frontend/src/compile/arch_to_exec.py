@@ -30,6 +30,7 @@ def lower_arch(arch, parameters=None):
                 value.tier or A.MemorySpace.HBM,
                 value.external,
                 value.read_only,
+                None,
             )
         )
     by_name = {t.name: t for t in tensors}

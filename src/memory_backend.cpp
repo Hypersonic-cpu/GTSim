@@ -9,10 +9,10 @@ std::unique_ptr<MemoryBackend> make_bank_plane_hbf_backend(
 TensorPlacement make_bank_plane_tensor_placement(const MemorySystemConfig&);
 
 void allocate_contiguous_tensor(TensorRegistry& registry, TensorMetadata tensor) {
-    registry.allocate_tensor(tensor.id, std::move(tensor.name),
-                             std::move(tensor.shape), std::move(tensor.strides),
-                             tensor.dtype, tensor.initial_memory_tier,
-                             tensor.preloaded, tensor.read_only);
+    registry.allocate_tensor(
+        tensor.id, std::move(tensor.name), std::move(tensor.shape),
+        std::move(tensor.strides), tensor.dtype, tensor.initial_memory_tier,
+        tensor.preloaded, tensor.read_only, tensor.tile_major);
 }
 
 TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTier tier) {
