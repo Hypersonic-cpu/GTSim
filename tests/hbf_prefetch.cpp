@@ -108,6 +108,39 @@ int main() {
             "foreground and background bypassed shared NAND sense engine");
     shared->release_prefetch(background);
 
+    // Separate slots retain equal per-plane/base-die quotas and tile leases.
+    for (const int count : {2, 4}) {
+        auto banked_config = config;
+        banked_config.controller.sram_bytes_per_plane = 16384;
+        auto banked = make_hbf_backend(banked_config, 1980, 0);
+        banked->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
+        const PrefetchBuffer current{0, count, 0}, other{1, count, 1};
+        const PrefetchBuffer next{0, count, static_cast<std::uint64_t>(count)};
+        const auto first_slot = banked->reserve_prefetch(0, 4096, current);
+        const auto second_slot = banked->reserve_prefetch(0, 4096, other);
+        require(first_slot && second_slot, "independent buffer reservation");
+        require(!banked->reserve_prefetch(0, 4096, next),
+                "overwrote a live buffer");
+        banked->start_prefetch(first_slot);
+        banked->step(0);
+        banked->release_prefetch(first_slot);
+        require(!banked->reserve_prefetch(0, 4096, next),
+                "overwrote an in-flight fill");
+        int cycle = 1;
+        while (banked->pending_background_requests() && cycle < 20000)
+            banked->step(cycle++);
+        std::vector<std::uint64_t> leases;
+        for (int page = 0; page < (16384 + 65536) / count / 4096; ++page) {
+            const auto lease = banked->reserve_prefetch(0, 4096, next);
+            require(lease != 0, "fixed buffer quota unexpectedly unavailable");
+            leases.push_back(lease);
+        }
+        require(!banked->reserve_prefetch(0, 4096, next),
+                "buffer quota overcommit");
+        for (const auto lease : leases) banked->release_prefetch(lease);
+        banked->release_prefetch(second_slot);
+    }
+
     std::cout << "HBF SRAM capacity, fallback, shared sense, alias isolation "
                  "and deferred release passed\n";
 }

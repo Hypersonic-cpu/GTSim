@@ -19,6 +19,11 @@ References:
 - FlashAccel v2: https://arxiv.org/pdf/2607.10186v2 — Figure 7 (Megaplane placement) and Figure 12 (Prefetch).
 - Current implementation: `docs/related/flash-accel/IMPL.md`.
 
+The primary layout comparison uses independent 4 KiB NAND commands for both
+Row-major and Tile-major. The earlier 128 KiB Megaplane experiment is retained
+as a separate FlashAccel configuration. Its results do not establish TileLens
+performance at 4 KiB granularity.
+
 ## 1. Implementation Constraints
 
 - Keep existing Row-major FlashAccel results reproducible.
@@ -27,7 +32,7 @@ References:
 - Introduce generic Tensor Layout metadata and address-generation support where necessary. Avoid FlashAccel-specific conditions in shared GTSim/HBFine components.
 - Do not modify GPU or HBF timing parameters as part of this experiment.
 - Preserve the existing HBF physical geometry, SRAM capacities, and prefetch policy.
-- Use H100, 132 SMs, Ramulator2 HBM3, and grouped HBFine for the hybrid experiments. The hybrid topology remains 2F3M. Use five Ramulator2 HBM stacks for all FullHBM experiments.
+- Use H100, 132 SMs, Ramulator2 HBM3, and HBFine for the hybrid experiments. The matched layout comparison uses one physical plane per 4 KiB Sense command; archived Megaplane runs use 32 planes per 128 KiB command. The hybrid topology remains 2F3M. Use five Ramulator2 HBM stacks for all FullHBM experiments.
 - Use the same model parameters, BF16 dtype, context length, routing trace, and input tensors across comparisons.
 - No fabricated performance estimates. Report simulator measurements only.
 - Do not create a separate progress log. Report progress and results directly to the user after each stage.
@@ -128,7 +133,13 @@ Do not substitute Row-major ordering inside or between tiles without explicitly 
 
 ### 3.2 Physical placement in HBF
 
-Keep FlashAccel's existing placement mechanism:
+The matched 4 KiB experiment stripes pages independently across physical
+planes. Each command senses one 4 KiB page, and each plane has its own
+scheduling unit and two page buffers. The implementation reuses the existing
+physical mapping with command width one. Tensor allocation alignment becomes
+4 KiB for both layouts.
+
+The following mechanism applies to the archived FlashAccel Megaplane runs:
 
 ```text
 Logical Weight Matrix [K,N]
@@ -148,7 +159,7 @@ FlashAccel round-robin placement
 across HBF Megaplanes
 ```
 
-Tile-major changes the correspondence between logical `(k,n)` and physical byte offset. It must **not** change the meaning of a Megaplane or make one 4 KiB page independently senseable when the hardware requires a 128 KiB grouped Sense.
+In the archived Megaplane configuration, Tile-major changes the correspondence between logical `(k,n)` and physical byte offset. It must **not** change the meaning of a Megaplane or make one 4 KiB page independently senseable when the hardware requires a 128 KiB grouped Sense.
 
 Preserve the existing execution-order placement of different weight tensors.
 
@@ -202,8 +213,10 @@ Because GTSim is primarily a timing simulator, structural/read-address equivalen
 
 Use two physical layouts:
 
-- **R:** Current Row-major, with FlashAccel 128 KiB Megapage placement.
-- **T:** New 16×128 Tile-major, with the same FlashAccel Megapage placement.
+- **R:** Row-major, independent 4 KiB plane commands.
+- **T:** New 16×128 Tile-major, with the same independent 4 KiB plane commands.
+
+The original 72 runs with 128 KiB Megaplane commands remain archived separately.
 
 Use all 18 compute-tiling combinations for each layout.
 
@@ -371,7 +384,7 @@ against independent coordinate enumeration. The C++ runner validates each
 CTA's SMEM and register requirements. CTest is skipped per the project
 instruction.
 
-### Measured results
+### Measured 128 KiB results (archived)
 
 All 72 hybrid cases, the five-stack FullHBM control, and 38 isolated GEMMs
 completed. All full-block streams were ordered and drained. Every hybrid
@@ -458,3 +471,111 @@ Artifacts are under `validation/results/tile-lens/sweep/`. The unaggregated
 files include each program, simulator log, runner provenance, and timing
 JSON. Timings are simulator results for this B=1 trace and the stated
 TMA abstraction.
+
+### Matched 4 KiB configuration
+
+Both layouts use command width one with 4 KiB tensor alignment. This gives
+1,536 independently scheduled physical planes across the same two HBF stacks.
+The per-plane geometry, 4 µs Sense latency, NAND capacity, 768 GB/s per-stack
+host read target, SRAM capacity, H100 configuration and FIFO prefetch policy
+are reused. GPU/L2 requests retain their existing cache-line transfers; the
+NAND Sense and internal page movement cover 4 KiB. This is a matched GTSim
+layout experiment rather than a reproduction of every TileLens hardware and
+prefetch detail.
+
+```sh
+PYTHONPATH=frontend/src python3 frontend/tools/run_tile_lens_sweep.py \
+  --out validation/results/tile-lens/single-plane-4k \
+  --planes-per-command 1 --jobs 4
+PYTHONPATH=frontend/src python3 frontend/tools/run_tile_lens_sweep.py \
+  --out validation/results/tile-lens/single-plane-4k --summarize
+```
+
+The shared HBFine verifier accepts a command width of one for this physical
+geometry. A direct controller check verifies one 4 KiB page per command,
+address round trips, parallel reads on distinct planes and serialized reads
+on the same plane. The sweep derives Sense bytes and the unit-count denominator
+from the actual input configuration, including in its amplification and
+load-imbalance statistics.
+
+### Measured 4 KiB results
+
+All 72 matched hybrid cases and the five-stack FullHBM control completed.
+Each hybrid case executed 18 kernels on one persistent GPU and an ordered
+stream, issued 113,779,200 HBF demand bytes and zero HBF writes, and ended
+with no outstanding fills. All 36 Row-major/Tile-major pairs retained
+identical physical tensor base addresses. The prior 128 KiB results remain
+in the archived section above.
+
+Sense granularity 4,096 bytes; 1,536 independently scheduled units.
+
+Each cell reports cycles / NAND MiB / repeated Sense commands.
+
+| BN A/B/C    |                 Row demand |             Row prefetch |                Tile demand |               Tile prefetch |
+| ----------- | -------------------------: | -----------------------: | -------------------------: | --------------------------: |
+| 64-64-64    |   4,129,287 / 108.95 / 112 |   568,612 / 110.64 / 543 | 4,849,356 / 116.25 / 1,980 |      771,466 / 108.95 / 112 |
+| 64-64-128   |   4,137,967 / 108.95 / 112 |   583,610 / 110.64 / 543 | 5,169,919 / 116.25 / 1,980 |      778,878 / 108.95 / 112 |
+| 64-128-64   |   3,963,515 / 109.45 / 240 |   591,908 / 111.00 / 636 | 5,973,874 / 131.75 / 5,948 |  1,523,066 / 120.99 / 3,194 |
+| 64-128-128  |   3,971,491 / 109.45 / 240 |   608,596 / 110.84 / 596 | 5,981,890 / 131.75 / 5,948 |  1,529,430 / 120.99 / 3,194 |
+| 64-256-64   | 4,043,119 / 117.89 / 2,400 |   684,245 / 111.69 / 813 | 6,004,391 / 131.75 / 5,948 |  1,560,678 / 120.99 / 3,194 |
+| 64-256-128  | 4,050,885 / 117.89 / 2,400 |   671,681 / 111.69 / 813 | 6,012,158 / 131.75 / 5,948 |  1,568,257 / 120.99 / 3,194 |
+| 128-64-64   | 3,743,525 / 122.11 / 3,480 | 667,560 / 112.62 / 1,050 | 6,012,759 / 131.77 / 5,952 |      849,281 / 108.95 / 112 |
+| 128-64-128  | 3,751,495 / 122.11 / 3,480 | 672,201 / 112.62 / 1,050 | 6,020,524 / 131.77 / 5,952 |      856,532 / 108.95 / 112 |
+| 128-128-64  | 3,578,858 / 122.61 / 3,608 | 694,948 / 112.98 / 1,143 | 6,824,796 / 147.27 / 9,920 |  1,601,409 / 120.99 / 3,194 |
+| 128-128-128 | 3,586,623 / 122.61 / 3,608 | 704,745 / 112.98 / 1,143 | 6,833,199 / 147.27 / 9,920 |  1,608,267 / 120.99 / 3,194 |
+| 128-256-64  | 3,658,788 / 131.05 / 5,768 | 768,818 / 113.67 / 1,320 | 6,855,396 / 147.27 / 9,920 |  1,639,106 / 120.99 / 3,194 |
+| 128-256-128 | 3,666,552 / 131.05 / 5,768 | 775,087 / 113.67 / 1,320 | 6,863,161 / 147.27 / 9,920 |  1,646,946 / 120.99 / 3,194 |
+| 256-64-64   | 3,960,818 / 113.11 / 1,176 | 856,532 / 113.45 / 1,264 | 5,870,661 / 131.77 / 5,952 |  2,429,117 / 136.21 / 7,090 |
+| 256-64-128  | 3,968,795 / 113.11 / 1,176 | 864,487 / 113.45 / 1,264 | 5,878,660 / 131.77 / 5,952 |  2,436,429 / 136.21 / 7,090 |
+| 256-128-64  | 3,796,289 / 113.61 / 1,304 | 889,085 / 113.82 / 1,357 | 6,682,889 / 147.27 / 9,920 | 3,181,970 / 148.25 / 10,172 |
+| 256-128-128 | 3,804,054 / 113.61 / 1,304 | 895,397 / 113.82 / 1,357 | 6,690,879 / 147.27 / 9,920 | 3,187,195 / 148.25 / 10,172 |
+| 256-256-64  | 3,874,859 / 122.05 / 3,464 | 957,425 / 114.51 / 1,534 | 6,713,649 / 147.27 / 9,920 | 3,220,735 / 148.25 / 10,172 |
+| 256-256-128 | 3,882,829 / 122.05 / 3,464 | 965,842 / 114.51 / 1,534 | 6,721,411 / 147.27 / 9,920 | 3,226,909 / 148.25 / 10,172 |
+
+| Condition     | Best A/B/C |    Cycles | Original BN64 / best |
+| ------------- | ---------- | --------: | -------------------: |
+| row-demand    | 128-128-64 | 3,578,858 |               1.154× |
+| row-prefetch  | 64-64-64   |   568,612 |               1.000× |
+| tile-demand   | 64-64-64   | 4,849,356 |               1.000× |
+| tile-prefetch | 64-64-64   |   771,466 |               1.000× |
+
+| Best prefetched configuration | Row-major | Tile-major |
+| ----------------------------- | --------: | ---------: |
+| A/B/C BN                      |  64/64/64 |   64/64/64 |
+| Block cycles                  |   568,612 |    771,466 |
+| Sense commands                |    28,323 |     27,892 |
+| Unique 4 KiB pages            |    27,780 |     27,780 |
+| Repeated page Senses          |       543 |        112 |
+| NAND MiB                      |    110.64 |     108.95 |
+| SRAM-resident MiB             |    103.42 |     104.93 |
+| Fallback MiB                  |      5.09 |       3.58 |
+
+Tile-major reduces NAND bytes by 1.52% at the same tiling,
+but takes 35.68% more cycles. Five-stack FullHBM remains
+430,112 cycles; the best Row-major and Tile-major prefetched blocks take
+1.322× and 1.794× as long, respectively.
+
+The remaining latency difference is visible even without NAND work in
+the Attention Output Projection interval. Both layouts serve its complete
+16 MiB from prefetched SRAM with zero additional Senses. Row-major takes
+86,001 cycles and Tile-major 173,104; their mean HBF request-response
+latencies are 93.66 and 534.52 cycles. This rules out attributing the entire
+latency gap to NAND read amplification.
+
+An independent coordinate/address diagnostic identifies short-term channel
+concentration under the retained stack/die/plane mapping. For the first
+16 K stages of this projection, Row-major requests cover 32 stack/channel
+pairs with a 3.125% maximum byte share; Tile-major covers four pairs with
+a 43.75% maximum share. This supports channel contention as an explanation;
+the diagnostic counts generated requests and does not measure channel
+service events. The mapping was retained for both layouts.
+
+Results, generated inputs, per-kernel timing/traffic, provenance and the
+independent diagnostic are in
+`validation/results/tile-lens/single-plane-4k/`. See `summary.csv`,
+`kernels.csv`, `comparisons.md` and `channel-diagnostic.json`.
+The supplemental matrix re-executes the full block; isolated cold GEMMs
+in the earlier section belong to the archived 128 KiB experiment.
+
+Validation used the direct `tests/hbf_single_plane_geometry.cpp` controller
+check and 21 frontend tests. CTest was skipped.

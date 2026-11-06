@@ -581,3 +581,170 @@ The reproduction is complete when:
 **Scope limitation:** This project reproduces FlashAccel's mechanism using a Co-located H100 configuration. It does not attempt to match the paper's H200 throughput numbers, OS-level persistent storage management, KV writeback policy, or full multi-GPU serving evaluation.
 
 For every step, the agent must directly report: **changes made, tests performed, measured results, remaining limitations, and whether the acceptance criteria passed.** Do not proceed past an unresolved correctness failure.
+
+## Seeded B=4/8 Row-major comparison
+
+The six successful runs use H100 132 SMs, one Qwen3-30B-A3B block,
+BF16, BN64/BM16/BK16, Non-Split decode attention and Grouped MoE.
+Hybrid runs use the original FlashAccel 2F3M configuration with 128 KiB
+Sense commands and the existing FIFO prefetch/SRAM policy. FullHBM uses
+five Ramulator2 HBM stacks.
+
+- B=4 contexts are `[10000, 16384, 24576, 32000]`.
+- B=8 contexts are `[10000, 16384, 24576, 32000, 12000, 20000, 28000, 30000]`.
+- Seed `20261106` resolves SHA-256 counter-based synthetic logits before IR
+  expansion. Top-8 selection and selected-softmax normalization generate a
+  saved routing trace. The first four requests share routing across batches.
+  B=4 has 32 assignments across 29 experts; B=8 has 64 across 52 experts.
+  Router, Top-K and assignment kernels retain their normal timed execution.
+
+|   B | Mode        |     Cycles | HBM read MiB | HBF demand MiB | NAND MiB | Prefetch MiB | Not SRAM MiB (%) |
+| --: | ----------- | ---------: | -----------: | -------------: | -------: | -----------: | ---------------: |
+|   4 | no-prefetch |  7,298,532 |       162.67 |         297.51 |   418.88 |         0.00 | 297.51 (100.00%) |
+|   4 | prefetch    |  4,737,434 |       162.67 |         297.51 |   368.00 |       297.51 |    19.45 (6.54%) |
+|   4 | full-hbm    |  1,685,980 |       460.17 |           0.00 |     0.00 |         0.00 |                — |
+|   8 | no-prefetch | 10,597,123 |       366.79 |         504.51 |   703.38 |         0.00 | 504.51 (100.00%) |
+|   8 | prefetch    |  7,697,977 |       374.38 |         504.51 |   624.50 |       504.51 |   52.92 (10.49%) |
+|   8 | full-hbm    |  3,085,732 |       863.85 |           0.00 |     0.00 |         0.00 |                — |
+
+|   B | No-prefetch / prefetch cycles | Prefetch / FullHBM cycles | Late-admitted MiB | Not-admitted MiB | Uncovered MiB |
+| --: | ----------------------------: | ------------------------: | ----------------: | ---------------: | ------------: |
+|   4 |                        1.541× |                    2.810× |             19.45 |             0.00 |          0.00 |
+|   8 |                        1.377× |                    2.495× |             52.92 |             0.00 |          0.00 |
+
+Timeliness is measured over actual HBF demand bytes after L2. The non-SRAM
+reads in both prefetched runs belong to admitted regions that were not yet
+fully ready. The baseline requires a complete prefetch region before serving
+its demand reads from SRAM. The remaining misses concentrate in Gate/Up and
+Down; `kernels.csv` records every interval. SRAM-capacity slicing gives
+22 launches for B=4 and 26 for B=8, versus 19 without prefetch.
+
+### Flash bandwidth over time
+
+|   B | Mode        | Mean NAND completion GB/s | Peak 10 µs NAND completion GB/s | Mean HBF demand GB/s |
+| --: | ----------- | ------------------------: | ------------------------------: | -------------------: |
+|   4 | no-prefetch |                    119.16 |                          367.00 |                84.63 |
+|   4 | prefetch    |                    161.28 |                         1638.40 |               130.38 |
+|   8 | no-prefetch |                    137.80 |                          353.89 |                98.84 |
+|   8 | prefetch    |                    168.43 |                         1874.33 |               136.07 |
+
+The curves show bursty prefetch fills followed by SRAM-served demand. NAND
+Sense completions, HBF-controller demand completions and prefetch SRAM fills
+are sampled separately in 1 µs bins; the plot aggregates 10 µs windows.
+NAND output is attributed at command completion, so clustered 128 KiB events
+can produce finite-window peaks above the steady array rate. These peaks
+represent completion throughput. FullHBM has zero Flash traffic.
+
+The optional sampler is isolated in HBFine `statistics.hpp`, defaults to
+disabled and adds no scheduled events. Direct tests compare sampling on/off
+for ordinary and grouped reads, preserve completion times and reconcile all
+four byte streams. GTSim changes only export generic backend samples; routing
+and batch/context generation live in the frontend experiment driver.
+
+Artifacts are under `validation/results/flash-accel/b4-b8-seeded/`, including
+`summary.csv`, `kernels.csv`, `bandwidth-1us.csv`, `bandwidth-10us.csv`,
+`flash-bandwidth.png`, `flash-bandwidth.svg`, parameter/routing JSON, commands,
+simulator logs and runner provenance. All bandwidth byte sums reconcile with
+the six completed Program timelines and their traffic counters.
+
+```sh
+cmake --build build-backends --target gtsim_program
+PYTHONPATH=frontend/src python3 frontend/tools/run_flash_accel_batches.py \
+  --out validation/results/flash-accel/b4-b8-seeded \
+  --seed 20261106 --planes-per-command 32 --jobs 2
+uv run --no-project --python 3.14 --with matplotlib==3.11.2 \
+  python frontend/tools/report_flash_accel_batches.py \
+  --out validation/results/flash-accel/b4-b8-seeded
+```
+
+## Rotating SRAM buffers for B=4/8
+
+The compiler prefetch pass now accepts `buffer_count=2` or `4`. It divides
+the configured 64 MiB prefetch SRAM into equal fixed slots, including both
+per-plane and per-stack quotas. Two buffers use 16 KiB/plane plus
+4 MiB/stack each (32 MiB/slot); four use 8 KiB/plane plus 2 MiB/stack
+(16 MiB/slot). The shared SRAM/NAND ports retain their configured rates.
+
+The FlowIR pass slices complete-K CTAs using the per-buffer budget and
+assigns tile epochs round-robin to slots. The next tile for a slot is
+queued after that slot's previous consumers retire. The backend allocator
+retains the old lease until its reads and outstanding fill drain, preventing
+overwriting live data even if prefetch is late. Routing availability gates
+and the existing readiness/fallback rule apply. Qwen selects the buffering
+parameter; slicing and ownership are workload-independent.
+
+All ten cases were re-executed with the same contexts, seeded routes,
+Row-major layout, 128 KiB Sense geometry and five-stack FullHBM control.
+The six original controls reproduced their cycles and per-kernel DAG hashes
+exactly. Native opcode counts match across every profile within each batch.
+
+|   B | Mode             |     Cycles | HBM read MiB | HBF demand MiB | NAND MiB | Prefetch MiB | Not SRAM MiB (%) |
+| --: | ---------------- | ---------: | -----------: | -------------: | -------: | -----------: | ---------------: |
+|   4 | no-prefetch      |  7,298,532 |       162.67 |         297.51 |   418.88 |         0.00 | 297.51 (100.00%) |
+|   4 | prefetch         |  4,737,434 |       162.67 |         297.51 |   368.00 |       297.51 |    19.45 (6.54%) |
+|   4 | prefetch-2buffer |  2,190,072 |       162.67 |         297.51 |   310.12 |       297.51 |     6.26 (2.10%) |
+|   4 | prefetch-4buffer |  2,058,061 |       162.67 |         297.51 |   317.88 |       305.51 |     3.66 (1.23%) |
+|   4 | full-hbm         |  1,685,980 |       460.17 |           0.00 |     0.00 |         0.00 |                — |
+|   8 | no-prefetch      | 10,597,123 |       366.79 |         504.51 |   703.38 |         0.00 | 504.51 (100.00%) |
+|   8 | prefetch         |  7,697,977 |       374.38 |         504.51 |   624.50 |       504.51 |   52.92 (10.49%) |
+|   8 | prefetch-2buffer |  3,025,905 |       355.56 |         504.51 |   512.25 |       504.51 |     4.79 (0.95%) |
+|   8 | prefetch-4buffer |  3,560,284 |       350.38 |         504.51 |   527.00 |       512.51 |     3.29 (0.65%) |
+|   8 | full-hbm         |  3,085,732 |       863.85 |           0.00 |     0.00 |         0.00 |                — |
+
+|   B | Buffers | Original prefetch / buffered cycles | Buffered / FullHBM cycles | Peak total SRAM MiB | Maximum slot occupancy MiB |
+| --: | ------: | ----------------------------------: | ------------------------: | ------------------: | -------------------------: |
+|   4 |       2 |                              2.163× |                    1.299× |               60.00 |                      30.00 |
+|   4 |       4 |                              2.302× |                    1.221× |               57.00 |                      16.00 |
+|   8 |       2 |                              2.544× |                    0.981× |               60.00 |                      30.00 |
+|   8 |       4 |                              2.162× |                    1.154× |               60.00 |                      16.00 |
+
+All buffered non-SRAM demand bytes are admitted-but-not-ready reads; both
+not-admitted and uncovered demand remain zero. The rates use HBF demand bytes
+after L2. Full-K slicing with four buffers duplicates 8 MiB of QKV prefetch
+page coverage, which appears in the actual prefetch and NAND traffic.
+
+Four buffers reduce misses further but are slower for B=8. Gate/Up slices
+have at most 48 CTAs versus 120 with two buffers; Gate/Up time rises from
+1,141,740 to 1,490,895 cycles. Total launch counts rise from 34 to 55.
+The smaller slices expose less CTA parallelism. Thus the lowest miss rate
+does not select the lowest measured stream latency. These are GTSim results
+for this routing trace, without hardware calibration of the new buffering policy.
+
+### Buffered bandwidth and occupancy
+
+|   B | Mode             | Mean NAND completion GB/s | Peak 10 µs NAND completion GB/s | Mean HBF demand GB/s |
+| --: | ---------------- | ------------------------: | ------------------------------: | -------------------: |
+|   4 | no-prefetch      |                    119.16 |                          367.00 |                84.63 |
+|   4 | prefetch         |                    161.28 |                         1638.40 |               130.38 |
+|   4 | prefetch-2buffer |                    294.00 |                         1756.36 |               282.04 |
+|   4 | prefetch-4buffer |                    320.67 |                         1572.86 |               300.13 |
+|   8 | no-prefetch      |                    137.80 |                          353.89 |                98.84 |
+|   8 | prefetch         |                    168.43 |                         1874.33 |               136.07 |
+|   8 | prefetch-2buffer |                    351.47 |                         1743.26 |               346.16 |
+|   8 | prefetch-4buffer |                    307.32 |                         1664.61 |               294.20 |
+
+The bandwidth plot overlays no-prefetch, the original shared-pool prefetch,
+two buffers and four buffers. It uses the same 1 µs completion samples and
+10 µs plot windows as the previous experiment. The occupancy plot and CSV
+record actual kernel-completion snapshots, including per-slot epoch IDs and
+reserved bytes. Runtime quota and compiler release/requeue checks passed.
+Twenty-two frontend tests and the direct SRAM capacity/alias/lease test passed;
+CTest was skipped.
+
+Artifacts are under `validation/results/flash-accel/b4-b8-buffered/`:
+`summary.csv`, `kernels.csv`, `bandwidth-1us.csv`, `bandwidth-10us.csv`,
+`flash-bandwidth.png/.svg`, `sram-buffers.csv/.png/.svg`, `validation.json`,
+generated inputs/programs, simulation logs and provenance. Earlier results
+remain in their original directories.
+
+```sh
+cmake --build build-backends --target gtsim_program hbf_prefetch_check
+build-backends/hbf_prefetch_check
+PYTHONPATH=frontend/src python3 frontend/tools/run_flash_accel_batches.py \
+  --out validation/results/flash-accel/b4-b8-buffered \
+  --seed 20261106 --planes-per-command 32 --buffers 1 2 4 --jobs 2
+uv run --no-project --python 3.14 --with matplotlib==3.11.2 \
+  python frontend/tools/report_flash_accel_batches.py \
+  --out validation/results/flash-accel/b4-b8-buffered \
+  --baseline validation/results/flash-accel/b4-b8-seeded
+```

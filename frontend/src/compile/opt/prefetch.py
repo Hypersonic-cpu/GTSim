@@ -2,7 +2,7 @@
 
 import ast
 from collections import Counter, defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from itertools import groupby
 
 from parser import ast as A
@@ -21,6 +21,7 @@ class Residency:
     line_bytes: int = 128
     align_tensors_to_command_group: bool = True
     eligible_tensors: tuple[str, ...] | None = None
+    buffer_count: int = 1
 
     def __post_init__(self):
         if (
@@ -31,6 +32,7 @@ class Residency:
                 self.planes_per_group,
                 self.page_bytes,
                 self.line_bytes,
+                self.buffer_count,
             )
             <= 0
             or self.planes_per_die % self.planes_per_group
@@ -99,11 +101,19 @@ class Span:
 
 
 @dataclass(frozen=True)
+class BufferSlot:
+    slot: int
+    count: int
+    epoch: int
+
+
+@dataclass(frozen=True)
 class Reservation:
     id: str
     span: Span
     enqueue_at: int
     consumers: tuple[str, ...]
+    buffer: BufferSlot | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +144,7 @@ class PrefetchPlan:
                 tensor=ids[p.span.tensor],
                 offset=p.span.offset,
                 bytes=p.span.bytes,
+                **({"buffer": asdict(p.buffer)} if p.buffer else {}),
             )
             for p in self.queue
         ]
@@ -393,6 +404,15 @@ def optimize(flow, config, layouts=None):
             eligible.add(tensor.id)
     if selected is not None and selected - eligible:
         raise ValueError(f"invalid prefetch eligibility: {sorted(selected - eligible)}")
+    # Partition both per-plane and per-stack SRAM. No extra storage is added.
+    budget = replace(
+        config,
+        plane_bytes=(config.plane_bytes // config.buffer_count // config.page_bytes)
+        * config.page_bytes,
+        stack_bytes=(config.stack_bytes // config.buffer_count // config.page_bytes)
+        * config.page_bytes,
+        buffer_count=1,
+    )
     regions, uses, gates, tails = [], [], [], {}
     for region in flow.regions:
         if any(name not in tails for name in region.after):
@@ -405,7 +425,7 @@ def optimize(flow, config, layouts=None):
         loads = eligible_loads(region, eligible)
         gate = len(regions) if trace_dependent(region, loads, flow.static) else 0
         for part, pages in split_region(
-            region, resolver, shapes, widths, loads, bases, config, layouts
+            region, resolver, shapes, widths, loads, bases, budget, layouts
         ):
             regions.append(replace(part, after=after))
             uses.append(spans(pages, sizes, config))
@@ -415,6 +435,8 @@ def optimize(flow, config, layouts=None):
     if len({r.symbol for r in regions}) != len(regions):
         raise ValueError("duplicate transformed launch ID")
     queue, boundary, i = [], 0, 0
+    reuse_after = [0] * config.buffer_count
+    epoch = 0
     while i < len(regions):
         end = i + 1
         while end < len(regions) and uses[end] == uses[i] and gates[end] == gates[i]:
@@ -422,8 +444,18 @@ def optimize(flow, config, layouts=None):
         if uses[i]:
             boundary = max(boundary, gates[i])
             consumers = tuple(r.symbol for r in regions[i:end])
+            buffer = None
+            enqueue_at = boundary
+            if config.buffer_count > 1:
+                slot = epoch % config.buffer_count
+                buffer = BufferSlot(slot, config.buffer_count, epoch)
+                enqueue_at = max(boundary, reuse_after[slot])
+                reuse_after[slot] = end
+                epoch += 1
             queue.extend(
-                Reservation(f"prefetch_{len(queue)}", span, boundary, consumers)
+                Reservation(
+                    f"prefetch_{len(queue)}", span, enqueue_at, consumers, buffer
+                )
                 for span in uses[i]
             )
         i = end

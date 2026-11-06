@@ -1379,6 +1379,7 @@ public:
         MemoryTier tier;
         std::uint64_t token, address, bytes;
         std::uint64_t queue_id{};
+        std::optional<PrefetchBuffer> buffer;
     };
 
     ReadAlias prefetch_range(int tensor_id, std::uint64_t offset, std::uint64_t bytes) const {
@@ -1391,17 +1392,25 @@ public:
             throw std::invalid_argument("prefetch range must cover aligned lines of a preloaded read-only tensor");
         const auto tier = tensor.initial_memory_tier;
         const auto address = tensor.global_base_address + offset;
-        return {tier, 0, address, bytes};
+        return {tier, 0, address, bytes, 0, std::nullopt};
     }
 
-    ReadAlias reserve_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes) {
+    ReadAlias
+    reserve_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes,
+                     std::optional<PrefetchBuffer> buffer = std::nullopt) {
         auto alias = prefetch_range(tensor_id, offset, bytes);
-        alias.token = device(alias.tier).reserve_prefetch(alias.address, alias.bytes);
+        alias.buffer = buffer;
+        alias.token =
+            device(alias.tier)
+                .reserve_prefetch(alias.address, alias.bytes, alias.buffer);
         return alias;
     }
 
-    ReadAlias enqueue_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes) {
+    ReadAlias
+    enqueue_prefetch(int tensor_id, std::uint64_t offset, std::uint64_t bytes,
+                     std::optional<PrefetchBuffer> buffer = std::nullopt) {
         auto alias = prefetch_range(tensor_id, offset, bytes);
+        alias.buffer = buffer;
         alias.queue_id = next_queue_id_++;
         queued_prefetches_.emplace(alias.queue_id, alias);
         prefetch_queue_.push_back(alias.queue_id);
@@ -1462,6 +1471,21 @@ public:
 
     HBFBackendStatistics hbf_backend_statistics() const {
         return hbf_ ? hbf_->hbf_statistics() : HBFBackendStatistics{};
+    }
+
+    std::map<std::string, std::vector<MemoryBandwidthSample>>
+    bandwidth_samples() const {
+        std::map<std::string, std::vector<MemoryBandwidthSample>> result;
+        for (const auto& [tier, device] :
+             std::array{std::pair{MemoryTier::HBM, hbm_.get()},
+                        std::pair{MemoryTier::HBF, hbf_.get()}}) {
+            if (device) {
+                auto samples = device->bandwidth_samples();
+                if (!samples.empty())
+                    result.emplace(memory_tier_name(tier), std::move(samples));
+            }
+        }
+        return result;
     }
 
     std::map<MemoryTier, TierCounterSnapshot> tier_counters() const {
@@ -1542,7 +1566,8 @@ private:
             auto& backend = device(alias.tier);
             const auto epoch = backend.residency_epoch();
             if (blocked_head_ == id && blocked_epoch_ == epoch) return;
-            alias.token = backend.reserve_prefetch(alias.address, alias.bytes);
+            alias.token = backend.reserve_prefetch(alias.address, alias.bytes,
+                                                   alias.buffer);
             if (!alias.token) {
                 ++prefetch_capacity_stalls_;
                 blocked_head_ = id;

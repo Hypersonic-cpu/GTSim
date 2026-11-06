@@ -61,7 +61,17 @@ def write_csv(path, records):
             writer.writerows(records)
 
 
+def geometry(out):
+    config = json.loads((out / "inputs/prefetch.json").read_text())
+    width = config["planes_per_group"]
+    return (
+        width * config["page_bytes"],
+        config["stacks"] * config["dies_per_stack"] * config["planes_per_die"] // width,
+    )
+
+
 def summarize(out):
+    sense_bytes, units = geometry(out)
     records, kernels = [], []
     paths = sorted((*out.glob("*/result.json"), *out.glob("focused/*/*/result.json")))
     for path in paths:
@@ -95,7 +105,7 @@ def summarize(out):
                     hbm_read_bytes=kernel["memory"]["HBM"]["read_bytes"],
                     nand_bytes=counts.get("sensed_bytes", 0),
                     amplification=counts.get("sensed_bytes", 0) / read if read else "",
-                    grouped_senses=counts.get("sense_commands", 0),
+                    sense_commands=counts.get("sense_commands", 0),
                     first_senses=counts.get("unique_sense_addresses", 0),
                     repeated_senses=counts.get("repeated_sense_commands", 0),
                     resident_bytes=counts.get("resident_read_bytes", 0),
@@ -108,7 +118,7 @@ def summarize(out):
                     prefetch_peak_outstanding=gauges.get(
                         "prefetch_peak_outstanding", 0
                     ),
-                    active_megaplanes=len(hbf.get("active_units", [])),
+                    active_scheduling_units=len(hbf.get("active_units", [])),
                     unit_busy_ps=json.dumps(
                         hbf.get("unit_busy_ticks", {}), separators=(",", ":")
                     ),
@@ -118,16 +128,18 @@ def summarize(out):
             dict(
                 case=case,
                 cycles=timing["total_cycles"],
+                sense_bytes=sense_bytes,
+                scheduling_units=units,
                 demand_bytes=demand,
                 nand_bytes=counters.get("sensed_bytes", 0),
-                grouped_senses=counters.get("sense_commands", 0),
-                unique_megapages=counters.get("unique_sense_addresses", 0),
+                sense_commands=counters.get("sense_commands", 0),
+                unique_sense_regions=counters.get("unique_sense_addresses", 0),
                 repeated_senses=counters.get("repeated_sense_commands", 0),
                 resident_bytes=counters.get("resident_read_bytes", 0),
                 fallback_bytes=counters.get("fallback_read_bytes", 0),
-                active_megaplanes=len(banks),
-                max_to_mean_megaplane_busy=(
-                    max(banks.values()) * 48 / sum(banks.values()) if banks else ""
+                active_scheduling_units=len(banks),
+                max_to_mean_unit_busy=(
+                    max(banks.values()) * units / sum(banks.values()) if banks else ""
                 ),
                 trailing_stream_drain_cycles=timing["total_cycles"]
                 - timing["per_kernel"][-1]["complete_cycle"],
@@ -139,6 +151,7 @@ def summarize(out):
 
 
 def report(out, records):
+    sense_bytes, units = geometry(out)
     by_case = {row["case"]: row for row in records}
     labels = ["-".join(map(str, tiling)) for tiling in TILINGS]
     cells = {}
@@ -154,12 +167,15 @@ def report(out, records):
         row = by_case[f"{mode}-{label}"]
         if (
             row["demand_bytes"] != by_case["row-demand-64-64-64"]["demand_bytes"]
-            or row["nand_bytes"] != row["grouped_senses"] * 131072
-            or row["grouped_senses"] != row["unique_megapages"] + row["repeated_senses"]
+            or row["nand_bytes"] != row["sense_commands"] * sense_bytes
+            or row["sense_commands"]
+            != row["unique_sense_regions"] + row["repeated_senses"]
             or row["trailing_stream_drain_cycles"]
         ):
             raise ValueError(f"inconsistent hybrid traffic accounting: {row['case']}")
     lines = [
+        f"Sense granularity {sense_bytes:,} bytes; {units:,} independently scheduled units.",
+        "",
         "Each cell reports cycles / NAND MiB / repeated Sense commands.",
         "",
         "| BN A/B/C | Row demand | Row prefetch | Tile demand | Tile prefetch |",
@@ -213,7 +229,9 @@ def report(out, records):
                 f"{layout}-prefetch-{label}",
             )
     compare(
-        "Original FlashAccel / overall winner", "row-prefetch-64-64-64", winner["case"]
+        "Row-major BN64 + prefetch / overall winner",
+        "row-prefetch-64-64-64",
+        winner["case"],
     )
     compare(
         "Overall winner / five-stack FullHBM", winner["case"], "full-hbm-5-original"
@@ -226,6 +244,13 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--runner", default="build-backends/gtsim_program")
     parser.add_argument("--jobs", default=2, type=int)
+    parser.add_argument(
+        "--planes-per-command",
+        type=int,
+        choices=(1, 32),
+        default=32,
+        help="1 disables multi-plane Sense; 32 retains the archived Megaplane experiment",
+    )
     parser.add_argument(
         "--focused",
         action="store_true",
@@ -247,6 +272,12 @@ def main():
         print(f"Summarized {len(rows)} completed cases")
         return
     inputs = out / "inputs"
+    if (inputs / "prefetch.json").exists():
+        saved = json.loads((inputs / "prefetch.json").read_text())
+        if saved["planes_per_group"] != args.planes_per_command:
+            parser.error(
+                "use a separate output directory for a different Sense granularity"
+            )
     lib = inputs / "lib"
     schedule_variants(lib)
 
@@ -278,7 +309,7 @@ def main():
                 stacks=2,
                 dies_per_stack=8,
                 planes_per_die=96,
-                planes_per_group=32,
+                planes_per_group=args.planes_per_command,
                 page_bytes=4096,
                 plane_bytes=32768,
                 stack_bytes=8388608,
@@ -297,6 +328,10 @@ def main():
         r"(config_file:\s*)(\S+)",
         lambda m: m[1] + str((hybrid_base.parent / m[2]).resolve()),
         hybrid_text,
+    )
+    hybrid_text = hybrid_text.replace(
+        "    planes_per_command_group: 32\n",
+        f"    planes_per_command_group: {args.planes_per_command}\n",
     )
     no_prefetch = inputs / "2F3M.yaml"
     no_prefetch.write_text(hybrid_text)

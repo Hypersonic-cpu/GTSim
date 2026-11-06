@@ -1,5 +1,6 @@
 #include "memory_backend.h"
 #include "hbf_placement.h"
+#include "hbfine_sram.h"
 #include <optional>
 #include <hbfine/controller.hpp>
 #include <algorithm>
@@ -13,13 +14,13 @@ namespace {
 // This adapter preserves the simulator's response metadata and clock boundary.
 class HBFineBackend final : public MemoryBackend {
 public:
-    HBFineBackend(const HBFConfig& config, double frequency_mhz, std::uint64_t base)
-        : frequency_khz_(clock_khz(frequency_mhz)), config_(config.controller),
-          base_(base), device_(config_, base, request_capacity(config)),
-          plane_sram_used_(config_.enable_read_sram
-                               ? config_.stacks * config_.dies_per_stack * config_.planes_per_die
-                               : 0),
-          stack_sram_used_(config_.enable_read_sram ? config_.stacks : 0) {}
+    HBFineBackend(const HBFConfig& config, double frequency_mhz,
+                  std::uint64_t base)
+        : frequency_khz_(clock_khz(frequency_mhz)),
+          config_(config.controller),
+          base_(base),
+          device_(config_, base, request_capacity(config)),
+          sram_(config_, base) {}
 
     bool try_submit(const MemRequest& request, int now) override {
         if (request.tier != MemoryTier::HBF) throw std::invalid_argument("HBFineBackend received a non-HBF request");
@@ -93,7 +94,9 @@ public:
         return responses;
     }
     std::size_t pending_requests() const override { return pending_.size(); }
-    std::uint64_t reserve_prefetch(std::uint64_t address, std::uint64_t bytes) override {
+    std::uint64_t
+    reserve_prefetch(std::uint64_t address, std::uint64_t bytes,
+                     std::optional<PrefetchBuffer> buffer) override {
         if (!config_.enable_read_sram || !bytes || address % 64 || bytes % 64 ||
             address > std::numeric_limits<std::uint64_t>::max() - bytes)
             throw std::invalid_argument("prefetch requires enabled SRAM and a nonempty aligned range");
@@ -101,33 +104,13 @@ public:
         Region region;
         region.address = address;
         region.bytes = bytes;
-        // Check each reservation against a temporary occupancy snapshot, so
-        // failure cannot leave partially occupied SRAM.
-        auto planes = plane_sram_used_;
-        auto stacks = stack_sram_used_;
-        for (auto page = address / config_.page_bytes * config_.page_bytes;
-             page < address + bytes;) {
-            const auto a = hbfine::decode_address(page, base_, config_);
-            const auto plane = hbfine::physical_plane_id(a, config_);
-            const auto size = static_cast<std::uint64_t>(config_.page_bytes);
-            if (size <= config_.sram_bytes_per_plane - planes[plane]) {
-                planes[plane] += size;
-                region.pages.push_back({plane, true});
-            } else if (size <= config_.base_die_sram_bytes_per_stack - stacks[a.stack]) {
-                stacks[a.stack] += size;
-                region.pages.push_back({a.stack, false});
-            } else {
-                return 0;
-            }
-            if (address + bytes - page <= size) break;
-            page += size;
-        }
+        auto reservation = sram_.reserve(address, bytes, buffer);
+        if (!reservation) return 0;
+        region.reservation = std::move(*reservation);
         const auto token = next_token_++;
-        reserved_bytes_ += region.pages.size() * config_.page_bytes;
+        reserved_bytes_ += region.reservation.pages.size() * config_.page_bytes;
         peak_reserved_bytes_ = std::max(peak_reserved_bytes_, reserved_bytes_);
         regions_.emplace(token, std::move(region));
-        plane_sram_used_ = std::move(planes);
-        stack_sram_used_ = std::move(stacks);
         return token;
     }
 
@@ -179,23 +162,35 @@ public:
             counters.gauges = {{"sram_reserved_bytes", reserved_bytes_},
                                {"sram_peak_reserved_bytes", peak_reserved_bytes_},
                                {"prefetch_peak_outstanding", peak_active_fills_}};
+            counters.gauges.merge(sram_.gauges());
             counters.cumulative.emplace("resident_read_bytes", resident_read_bytes_);
             counters.cumulative.emplace("fallback_read_bytes", fallback_read_bytes_);
         }
         return counters;
     }
     HBFBackendStatistics hbf_statistics() const override { return device_.statistics(); }
+    std::vector<MemoryBandwidthSample> bandwidth_samples() const override {
+        std::vector<MemoryBandwidthSample> result;
+        for (const auto& bin : device_.statistics().bandwidth_bins)
+            result.push_back({bin.start_ps,
+                              bin.end_ps,
+                              {{"media_read", bin.media_read_bytes},
+                               {"demand_read", bin.host_read_bytes},
+                               {"prefetch_fill", bin.prefetch_fill_bytes},
+                               {"resident_read", bin.resident_read_bytes}},
+                              {{"sense_commands", bin.sense_commands}}});
+        return result;
+    }
     void preload_region(std::uint64_t address, std::uint64_t bytes, bool /*read_only*/) override {
         device_.preload_region(address, bytes);
     }
 
 private:
     static constexpr std::uint64_t background_id_base = std::uint64_t{1} << 63;
-    struct PageReservation { int unit; bool plane; };
     struct Region {
         std::uint64_t address{}, bytes{}, submitted{}, outstanding{}, consumers{};
         bool started{}, released{};
-        std::vector<PageReservation> pages;
+        ReadSramAllocator::Reservation reservation;
         bool ready() const { return started && submitted == bytes && !outstanding; }
     };
 
@@ -227,11 +222,8 @@ private:
         const auto& region = regions_.at(token);
         if (!region.released || region.consumers || (region.started && !region.ready()))
             return;
-        for (const auto page : region.pages) {
-            auto& used = page.plane ? plane_sram_used_ : stack_sram_used_;
-            used[page.unit] -= config_.page_bytes;
-        }
-        reserved_bytes_ -= region.pages.size() * config_.page_bytes;
+        sram_.release(region.reservation);
+        reserved_bytes_ -= region.reservation.pages.size() * config_.page_bytes;
         regions_.erase(token);
         ++residency_epoch_;
     }
@@ -253,7 +245,7 @@ private:
     hbfine::Config config_;
     std::uint64_t base_;
     hbfine::Controller device_;
-    std::vector<std::uint64_t> plane_sram_used_, stack_sram_used_;
+    ReadSramAllocator sram_;
     std::map<std::uint64_t, Region> regions_;
     std::unordered_map<std::uint64_t, std::uint64_t> background_;
     std::uint64_t next_token_{1}, next_background_id_{background_id_base};

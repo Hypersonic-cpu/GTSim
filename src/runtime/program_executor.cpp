@@ -110,10 +110,12 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         const auto& region = regions.at(command.target);
         if (command.kind == "QueuePrefetch") {
             aliases.emplace(command.target, memory->enqueue_prefetch(
-                region.tensor, region.offset, region.bytes));
+                                                region.tensor, region.offset,
+                                                region.bytes, region.buffer));
             return;
         }
-        const auto alias = memory->reserve_prefetch(region.tensor, region.offset, region.bytes);
+        const auto alias = memory->reserve_prefetch(
+            region.tensor, region.offset, region.bytes, region.buffer);
         if (!alias.token) throw std::runtime_error("prefetch residency capacity exhausted");
         memory->start_prefetch(alias);
         aliases.emplace(command.target, alias);
@@ -236,6 +238,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
         throw std::invalid_argument("prefetch program requires a kernel launch");
     if (context) {
         synchronize();
+        timing.memory_bandwidth = memory->bandwidth_samples();
         timing.background_cycles = memory->background_cycles();
         timing.prefetch_capacity_stalls = memory->prefetch_capacity_stalls();
         timing.prefetch_canceled = memory->prefetch_canceled();

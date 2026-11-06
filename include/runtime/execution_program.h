@@ -15,6 +15,7 @@ struct PrefetchRegion {
     std::string id;
     int tensor{};
     std::uint64_t offset{}, bytes{};
+    std::optional<PrefetchBuffer> buffer;
 };
 struct Program {
     std::string record, format, symbol, source_hash;
@@ -49,6 +50,7 @@ struct ProgramTiming {
     std::map<std::string, int> events;
     std::map<std::string, std::vector<std::string>> state_history;
     std::map<std::string, std::uint64_t> traffic_bytes;
+    std::map<std::string, std::vector<MemoryBandwidthSample>> memory_bandwidth;
     std::map<std::string, std::map<std::string, std::uint64_t>> tensor_addresses;
     std::uint64_t prefetch_capacity_stalls{}, prefetch_canceled{}, background_cycles{};
     std::map<std::string, int> prefetch_release_cycles;

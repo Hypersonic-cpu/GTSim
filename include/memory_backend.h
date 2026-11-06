@@ -64,6 +64,17 @@ struct MemoryBackendStatistics {
     std::vector<std::uint64_t> channel_transactions;
 };
 
+struct PrefetchBuffer {
+    int slot{}, count{};
+    std::uint64_t epoch{};
+};
+
+struct MemoryBandwidthSample {
+    std::uint64_t start_ps{}, end_ps{};
+    std::map<std::string, std::uint64_t> bytes;
+    std::map<std::string, std::uint64_t> counts;
+};
+
 struct DeviceCounters {
     std::map<std::string, std::uint64_t> cumulative;
     std::vector<std::uint64_t> unit_busy_ticks;
@@ -90,7 +101,9 @@ public:
     virtual bool try_submit(const MemRequest& request, int now) = 0;
     virtual std::vector<MemResponse> step(int now) = 0;
     virtual std::size_t pending_requests() const = 0;
-    virtual std::uint64_t reserve_prefetch(std::uint64_t, std::uint64_t) {
+    virtual std::uint64_t
+    reserve_prefetch(std::uint64_t, std::uint64_t,
+                     std::optional<PrefetchBuffer> = std::nullopt) {
         throw std::invalid_argument("device does not support prefetch");
     }
     virtual void start_prefetch(std::uint64_t) {
@@ -105,6 +118,9 @@ public:
     virtual MemoryBackendStatistics backend_statistics() const { return {}; }
     virtual DeviceCounters device_counters() const { return {}; }
     virtual HBFBackendStatistics hbf_statistics() const { return {}; }
+    virtual std::vector<MemoryBandwidthSample> bandwidth_samples() const {
+        return {};
+    }
     virtual void preload_region(std::uint64_t, std::uint64_t, bool) {}
 };
 
