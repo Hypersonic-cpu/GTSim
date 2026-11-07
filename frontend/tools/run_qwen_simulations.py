@@ -6,7 +6,7 @@ once in RAM; the existing C++ reader consumes its JSON from a named pipe.
 
 import argparse
 from collections import Counter
-from dataclasses import replace
+from dataclasses import asdict, replace
 import gc
 import hashlib
 import json
@@ -144,14 +144,18 @@ def plan_program(
 
     def expand(region):
         kernel = lower_region(arch, region)
-        if not layouts:
-            return kernel
-        return replace(
-            kernel,
-            tensors=tuple(
-                replace(t, tile_major=layouts.get(t.name)) for t in kernel.tensors
-            ),
-        )
+        if layouts:
+            kernel = replace(
+                kernel,
+                tensors=tuple(
+                    replace(t, tile_major=layouts.get(t.name)) for t in kernel.tensors
+                ),
+            )
+        if prefetch is not None and prefetch.streaming is not None:
+            from compile.opt.panels import lower_panels
+
+            kernel = lower_panels(kernel, prefetch.streaming, prefetch.bases)
+        return kernel
 
     return manifest, regions, expand
 
@@ -235,6 +239,8 @@ def write_kernel(kernel, output):
             for c in kernel.ctas
         ],
     )
+    if kernel.prefetch_windows:
+        header["prefetch_windows"] = [asdict(w) for w in kernel.prefetch_windows]
     for key, value in header.items():
         write("," + json.dumps(key) + ":" + json.dumps(value, separators=(",", ":")))
     write("}\n")
@@ -263,6 +269,7 @@ def main():
     parser.add_argument("--tensor-layouts", type=Path)
     parser.add_argument("--focus-launch")
     parser.add_argument("--focus-expert", type=int)
+    parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -304,6 +311,7 @@ def main():
         focus_expert=args.focus_expert,
         launch_overhead_cycles=0,
         runner_sha256=sha(args.runner),
+        max_cycles=args.max_cycles,
         architecture_sha256=sha(args.architecture),
         memory_sha256=sha(args.memory),
         git_commit=subprocess.check_output(
@@ -321,6 +329,7 @@ def main():
             "--memory-config",
             str(args.memory),
             str(args.out / "program.gtsir"),
+            *(["--max-cycles", str(args.max_cycles)] if args.max_cycles else []),
         ],
         stdout=log,
         stderr=subprocess.STDOUT,

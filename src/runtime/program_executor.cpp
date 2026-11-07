@@ -1,5 +1,6 @@
 #include "runtime/execution_program.h"
 #include <set>
+#include "kernel_prefetch_session.h"
 
 namespace GTSim::ExecutionIR {
 static DataType parse_dtype(const std::string& value) {
@@ -19,6 +20,7 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
     TensorRegistry registry(config.memory.address_layout);
     std::map<MemoryTier, TensorPlacement> placement_policies;
     ProgramTiming timing;
+    std::uint64_t next_prefetch_epoch{};
     std::set<std::string> names;
     std::map<int, std::tuple<std::uint64_t, std::vector<std::uint64_t>,
                              std::vector<std::uint64_t>, DataType>>
@@ -161,6 +163,12 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
                 for (const auto& alias : *specification.read_aliases)
                     bindings_for_launch.push_back(aliases.at(alias));
             memory->bind_read_aliases(std::move(bindings_for_launch));
+            std::unique_ptr<KernelPrefetchSession> panel;
+            if (kernel.prefetch_windows && !kernel.prefetch_windows->empty()) {
+                panel = std::make_unique<KernelPrefetchSession>(*memory, kernel, bindings,
+                                                               next_prefetch_epoch, context->cycle);
+                context->node_completion_observer = [&](int node, int now) { panel->complete(node, now); };
+            }
             KernelTiming launch;
             launch.background_at_launch = memory->pending_background_requests();
             launch.id = c.target;
@@ -181,6 +189,8 @@ ProgramTiming execute(const Program& p, const std::filesystem::path& directory,
             const auto background_before = memory->background_cycles();
             if (!context->run(max_cycles, false))
                 throw std::runtime_error("kernel execution timeout");
+            context->node_completion_observer = {};
+            if (panel) launch.prefetch_windows = panel->finish();
             launch.l2_lines_after = l2->resident_line_count();
             launch.device_complete_cycle = context->cycle;
             KernelExecutionSession::retire(*context);

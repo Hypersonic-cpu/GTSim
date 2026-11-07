@@ -94,6 +94,7 @@ void KernelExecutionSession::initialize(Simulator& simulator, DAG& dag,
                                               &simulator.global_scoreboard);
             sp->set_node_to_sp_map(&simulator.node_id_to_sp);
             sp->set_completed_node_counter(&simulator.completed_node_count);
+            sp->set_completion_observer(&simulator.node_completion_observer);
         }
         sm->cta_resources = dag.cta_resources;
         sm->shared_capacity = config.shared_memory_per_sm_bytes;

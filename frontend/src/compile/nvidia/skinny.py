@@ -5,6 +5,23 @@ from parser import ast as A
 from .hopper import index, dimension, loop, region
 
 
+def tma_box(source):
+    """Keep each native tensor-map box within the 256-element width limit."""
+    width = source.shape[1]
+    if isinstance(width, int) and width > 256:
+        r, c = (v.expression for v in source.offsets)
+        return (
+            region(
+                source,
+                r,
+                f"({c}) + %tma_chunk*256",
+                (source.shape[0], f"min(256,{width}-%tma_chunk*256)"),
+            ),
+            (loop("tma_chunk", f"ceildiv({width},256)"),),
+        )
+    return source, ()
+
+
 def select_skinny(op, flow, positions):
     p = flow.config
     mm, mn, mk = p.matrix_shape
@@ -14,14 +31,15 @@ def select_skinny(op, flow, positions):
     source = op.region
     r, c = (v.expression for v in source.offsets)
     if op.kind == A.OpKind.COPY:
-        dtype, loops, shape = op.results[0].dtype, op.iterations, source.shape
+        box, chunks = tma_box(source)
+        dtype, loops = op.results[0].dtype, op.iterations + chunks
         steps = (
             A.NativeStep(
                 A.NativeOpcode.TMA_LOAD,
                 A.ExecutionResource.LOAD,
                 index(p.producer_warp),
                 loops,
-                source,
+                box,
                 dtype,
                 dimension(
                     next(t for t in flow.tensors if t.id == source.tensor).shape[1]
@@ -85,12 +103,13 @@ def select_skinny(op, flow, positions):
             op.guard,
             op.static_args,
         )
+        box, chunks = tma_box(source)
         final = A.NativeStep(
             A.NativeOpcode.TMA_STORE,
             A.ExecutionResource.STORE,
             index(p.producer_warp),
-            op.iterations,
-            source,
+            op.iterations + chunks,
+            box,
             op.cast,
             dimension(next(t for t in flow.tensors if t.id == source.tensor).shape[1]),
             (),

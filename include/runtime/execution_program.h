@@ -35,11 +35,18 @@ struct TierTiming {
     std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
     std::map<std::string, std::uint64_t> gauges;
 };
+struct PrefetchWindowTiming {
+    int slot{};
+    std::uint64_t epoch{}, bytes{};
+    int enqueue_cycle{-1}, consume_cycle{-1}, release_request_cycle{-1};
+    bool skipped{};
+};
 struct KernelTiming {
     std::string id, state;
     int launch_cycle{}, start_cycle{}, device_complete_cycle{},
         complete_cycle{}, device_cycles{};
     std::size_t l2_lines_before{}, l2_lines_after{};
+    std::vector<PrefetchWindowTiming> prefetch_windows;
     std::map<std::string, TierTiming> memory;
     std::size_t background_at_launch{}, background_at_completion{};
     std::uint64_t background_compute_cycles{};

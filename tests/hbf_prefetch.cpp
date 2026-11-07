@@ -141,6 +141,22 @@ int main() {
         banked->release_prefetch(second_slot);
     }
 
+    // A one-page plane belongs to one bank as a whole, not two half-pages.
+    auto small_config = config;
+    small_config.controller.sram_bytes_per_plane = 4096;
+    small_config.controller.base_die_sram_bytes_per_stack = 65536;
+    auto small = make_hbf_backend(small_config, 1980, 0);
+    small->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
+    std::vector<std::uint64_t> small_leases;
+    for (int page = 0; page < 9; ++page) {
+        auto token = small->reserve_prefetch(0, 4096, PrefetchBuffer{0, 2, 0});
+        require(token != 0, "one-page plane quota lost in partition");
+        small_leases.push_back(token);
+    }
+    require(!small->reserve_prefetch(0, 4096, PrefetchBuffer{0, 2, 0}),
+            "one-page plane bank exceeded quota");
+    for (const auto token : small_leases) small->release_prefetch(token);
+
     std::cout << "HBF SRAM capacity, fallback, shared sense, alias isolation "
                  "and deferred release passed\n";
 }

@@ -22,6 +22,7 @@ class Residency:
     align_tensors_to_command_group: bool = True
     eligible_tensors: tuple[str, ...] | None = None
     buffer_count: int = 1
+    streaming: bool = False
 
     def __post_init__(self):
         if (
@@ -63,8 +64,8 @@ class Residency:
 
 
 class PageBudget:
-    def __init__(self, config, bases):
-        self.config, self.bases = config, bases
+    def __init__(self, config, bases, slot=None):
+        self.config, self.bases, self.slot = config, bases, slot
         self.pages = set()
         self.planes, self.spill = Counter(), Counter()
 
@@ -75,10 +76,17 @@ class PageBudget:
             c.location(self.bases[tensor] // c.page_bytes + page)
             for tensor, page in added
         )
-        plane_limit = c.plane_bytes // c.page_bytes
+        plane_pages = c.plane_bytes // c.page_bytes
         stack_limit = c.stack_bytes // c.page_bytes
+        if self.slot is not None:
+            stack_limit //= c.buffer_count
         spill = Counter()
         for key, count in counts.items():
+            plane_limit = plane_pages
+            if self.slot is not None:
+                whole, extra = divmod(plane_pages, c.buffer_count)
+                # Whole physical pages are distributed evenly between slots.
+                plane_limit = whole + ((self.slot - key[1]) % c.buffer_count < extra)
             old = self.planes[key]
             spill[key[0]] += max(0, old + count - plane_limit) - max(
                 0, old - plane_limit
@@ -120,6 +128,8 @@ class Reservation:
 class PrefetchPlan:
     flow: A.FlowIR
     queue: tuple[Reservation, ...]
+    streaming: Residency | None = None
+    bases: dict[str, int] | None = None
 
     def decorate(self, manifest):
         """Lower the side schedule at the normal Program export boundary."""
@@ -424,9 +434,14 @@ def optimize(flow, config, layouts=None):
             continue
         loads = eligible_loads(region, eligible)
         gate = len(regions) if trace_dependent(region, loads, flow.static) else 0
-        for part, pages in split_region(
-            region, resolver, shapes, widths, loads, bases, budget, layouts
-        ):
+        parts = (
+            [(region, frozenset())]
+            if config.streaming
+            else split_region(
+                region, resolver, shapes, widths, loads, bases, budget, layouts
+            )
+        )
+        for part, pages in parts:
             regions.append(replace(part, after=after))
             uses.append(spans(pages, sizes, config))
             gates.append(gate)
@@ -459,4 +474,9 @@ def optimize(flow, config, layouts=None):
                 for span in uses[i]
             )
         i = end
-    return PrefetchPlan(replace(flow, regions=tuple(regions)), tuple(queue))
+    return PrefetchPlan(
+        replace(flow, regions=tuple(regions)),
+        tuple(queue),
+        config if config.streaming else None,
+        bases if config.streaming else None,
+    )

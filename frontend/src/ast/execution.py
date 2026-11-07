@@ -16,9 +16,31 @@ class ExecRegion:
 
 
 @dataclass(frozen=True)
+class PrefetchBuffer:
+    slot: int
+    count: int
+    epoch: int
+
+
+@dataclass(frozen=True)
+class PrefetchRange:
+    tensor: int
+    offset: int
+    bytes: int
+
+
+@dataclass(frozen=True)
+class PrefetchWindow:
+    buffer: PrefetchBuffer
+    consumers: tuple[int, ...]
+    ranges: tuple[PrefetchRange, ...]
+
+
+@dataclass(frozen=True)
 class ExecIR(FlatKernel):
     regions: tuple[ExecRegion, ...]
     stream: str | None
+    prefetch_windows: tuple[PrefetchWindow, ...]
 
 
 @dataclass(frozen=True)

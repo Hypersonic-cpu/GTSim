@@ -22,6 +22,7 @@ struct MemoryRoutingHint {
     int logical_mc_group{-1};
     int physical_channel{-1};
     std::int64_t axi_id{-1};
+    int consumer_node{-1};
 };
 
 struct MemRequest {

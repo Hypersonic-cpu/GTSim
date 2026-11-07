@@ -748,3 +748,58 @@ uv run --no-project --python 3.14 --with matplotlib==3.11.2 \
   --out validation/results/flash-accel/b4-b8-buffered \
   --baseline validation/results/flash-accel/b4-b8-seeded
 ```
+
+### B=4 reduced SRAM and K-panel double buffering
+
+The Row-major, 128 KiB FlashAccel sweep completed 30 new cases: 15 each at
+8 and 4 MiB per HBF stack. All 15 matching five-stack FullHBM controls were
+reused. Batch contexts are `[10000, 16384, 24576, 32000]`, routing seed is
+`20261106`, and the two HBF stacks retain their original timing parameters.
+Groups A/B share `BM=16`, `BN=32/64/128/256`, and `BK=32/64/128/256`, excluding
+`BN256/BK256` for the SMEM limit. Group C stays at `16/64/16`.
+
+| Case             | Fastest BN/BK | Best cycles | Worst cycles | HBM read MiB | HBF demand MiB | NAND sense MiB | SRAM miss |
+| ---------------- | ------------- | ----------: | -----------: | -----------: | -------------: | -------------: | --------: |
+| FullHBM (reused) | 256/128       |   1,240,994 |    2,212,681 |       460.17 |              0 |              0 |         — |
+| 8 MiB/stack      | 32/256        |   1,561,200 |   87,396,475 |       162.67 |         297.51 |         407.00 |    95.47% |
+| 4 MiB/stack      | 32/256        |   1,568,953 |  109,060,555 |       162.67 |         297.51 |         351.50 |    98.64% |
+
+Traffic columns describe each row's fastest case. FullHBM at the same
+`BN32/BK256` takes 2,104,208 cycles. Against the independently tuned FullHBM
+minimum, the two DoubleBuffer minima take 25.8% and 26.4% more cycles.
+The slowest candidates issue 74,764 and 79,176 Flash sense commands, versus
+3,256 and 2,812 in the fastest cases, despite the same HBF demand bytes.
+Most of this extra traffic is repeated sensing during grouped expert GEMMs.
+
+The compiler groups actual native TMA reads into K panels within one-CTA-per-SM
+waves. The simulator retires a slot after its last TMA consumer and admits the
+next panel into that slot once outstanding fills release it. Requests that
+arrive early use the normal demand path. Expert windows are enqueued after
+TopK; the full-K compute DAG and 19 launches per block are retained. The
+8 MiB configuration uses 8 KiB per plane plus 2 MiB per stack; 4 MiB uses
+4 KiB plus 1 MiB. In the latter, whole plane pages alternate slot ownership
+rather than splitting a 4 KiB page. Capacity is local to planes and stacks,
+so the observed peak can fall below nominal capacity. The inactive write
+quota is set to the minimum accepted value in these read-only profiles.
+
+The previous 32 MiB run used whole-K prefetch groups, so its timings cannot
+isolate the effect of capacity alone. The 4 MiB `BN256/BK128` case was retried
+with a 250-million-cycle execution guard after reaching the default 100
+million; its original timeout log is retained. No hardware timing changed.
+
+```sh
+cmake --build build-backends --target gtsim_program hbf_prefetch_check
+PYTHONPATH=frontend/src python3 frontend/tools/run_sram_tiling_search.py \
+  --out validation/results/flash-accel/b4-sram-panel-sweep \
+  --max-cycles 250000000
+PYTHONPATH=frontend/src uv run --no-project --python 3.14 --with matplotlib==3.11.2 \
+  python frontend/tools/report_sram_tiling_search.py \
+  --out validation/results/flash-accel/b4-sram-panel-sweep
+```
+
+The runner uses at most two jobs and links the existing controls from
+`validation/results/flash-accel/b4-shared-ab-tiling`. The output contains
+`tiling-cycles-{8,4}mib.png/.svg`, `flash-bandwidth.png/.svg`, summary and
+per-kernel CSVs, slot lifetimes, and 10 µs bandwidth series. Raw 1 µs bins
+are in each run's `result.json`; whole-stream Flash totals include the
+final memory drain. These are GTSim timing estimates.

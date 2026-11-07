@@ -227,6 +227,7 @@ class NativeExpander:
                             (v.id, resolver.value(v.expression))
                             for v in step.static_args
                         ),
+                        point.get(self.region.domain.pipeline.loop.variable),
                     )
                 )
                 self.register(

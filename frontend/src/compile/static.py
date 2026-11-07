@@ -29,7 +29,26 @@ _COMPARE = {
     ast.Gt: operator.gt,
     ast.GtE: operator.ge,
 }
+
+
+def contiguous_run_lengths(order, keys, *row_maps):
+    """Lengths of runs with a constant key and consecutive rows in every map."""
+    lengths = []
+    previous = None
+    for current in order:
+        if (
+            previous is None
+            or keys[current] != keys[previous]
+            or any(rows[current] != rows[previous] + 1 for rows in row_maps)
+        ):
+            lengths.append(0)
+        lengths[-1] += 1
+        previous = current
+    return tuple(lengths)
+
+
 _FUNCTIONS = {
+    "contiguous_run_lengths": contiguous_run_lengths,
     "ceildiv": lambda a, b: (a + b - 1) // b,
     "floordiv": operator.floordiv,
     "min": min,

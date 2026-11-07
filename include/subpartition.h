@@ -95,6 +95,10 @@ public:
     // Step function for subpartition
     std::vector<int> step(int current_cycle, Memory* sram, Memory* tmem_mem, L2Cache* l2);
 
+    void set_completion_observer(std::function<void(int, int)>* observer) {
+        completion_observer = observer;
+    }
+
     // Complete a node
     void complete_node(DAGNode* node, int current_cycle);
 
@@ -113,6 +117,7 @@ public:
     }
 
 private:
+    std::function<void(int, int)>* completion_observer{};
     // Helper: Try to enqueue memory operation based on node's OpType
     bool try_enqueue_memory(DAGNode* node, int bytes_val, int current_cycle,
                            int bank_conflict_factor, int subop_index,

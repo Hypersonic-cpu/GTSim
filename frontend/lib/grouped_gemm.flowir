@@ -11,19 +11,20 @@ flow.kernel @grouped_gemm_flow schedule<explicit> target<sm90> {
   static.let %NTILES = ceildiv(%N,64)
   static.let %ACTIVE = unique(%IDS)
   static.let %ORDER = argsort(%IDS)
-  static.let %COUNTS = counts(%IDS,%ACTIVE)
-  static.let %OFFSETS = prefix(%COUNTS)
-  static.let %TILE_OFFSETS = prefix(scale(vceildiv(%COUNTS,16),%NTILES))
+  static.let %RUN_LENGTHS = contiguous_run_lengths(%ORDER,%IDS,%A_MAP,%C_MAP)
+  static.let %RUN_OFFSETS = prefix(%RUN_LENGTHS)
+  static.let %TILE_OFFSETS = prefix(scale(vceildiv(%RUN_LENGTHS,16),%NTILES))
   static.let %CTAS = %TILE_OFFSETS[len(%TILE_OFFSETS)-1]
-  static.let %GROUP = bisect_right(%TILE_OFFSETS,%cta)-1
-  static.let %LOCAL = %cta-%TILE_OFFSETS[%GROUP]
+  static.let %RUN = bisect_right(%TILE_OFFSETS,%cta)-1
+  static.let %LOCAL = %cta-%TILE_OFFSETS[%RUN]
   static.let %BLOCK = floordiv(%LOCAL,%NTILES)
   static.let %COL = %LOCAL mod %NTILES
-  static.let %BASE = %OFFSETS[%GROUP]+%BLOCK*16
-  static.let %VALID = min(16,%COUNTS[%GROUP]-%BLOCK*16)
-  static.let %AROW = %A_MAP[%ORDER[%BASE]]
-  static.let %CROW = %C_MAP[%ORDER[%BASE]]
-  static.let %WEIGHT_ROW = %ACTIVE[%GROUP]*%K
+  static.let %BASE = %RUN_OFFSETS[%RUN]+%BLOCK*16
+  static.let %VALID = min(16,%RUN_LENGTHS[%RUN]-%BLOCK*16)
+  static.let %ASSIGNMENT = %ORDER[%BASE]
+  static.let %AROW = %A_MAP[%ASSIGNMENT]
+  static.let %CROW = %C_MAP[%ASSIGNMENT]
+  static.let %WEIGHT_ROW = %IDS[%ASSIGNMENT]*%K
   static.let %WEIGHT_ROWS = %E*%K
   static.require <%N divisible_by 64, %K divisible_by 16>
   flow.tensor @A : tensor<A_ROWSxKxbf16, row_major>
@@ -42,13 +43,16 @@ flow.kernel @grouped_gemm_flow schedule<explicit> target<sm90> {
     flow.dependency_rule @prior_copy from[@load_A.issue, @load_B.issue] at[%wave = %wave, %k = %k-1] select<all>
   }
   flow.dependency_rule @last from[@matmul.complete] at[%wave = %wave, %k = ceildiv(%K,16)-1] select<all>
-  static.if <has_previous_fragment(%executor)> {
-    flow.dependency_rule @fragment from[@matmul.complete] at[%wave = %wave] select<last_per_executor>
+  static.if <%k_fragment>0> {
+    flow.dependency_rule @prior_k_fragment from[@matmul.complete] at[%wave = %wave, %k = %k, %executor = %executor, %n_fragment = %n_fragment, %k_fragment = %k_fragment-1] select<all>
+  }
+  static.if <%k>0 and %k_fragment==0> {
+    flow.dependency_rule @prior_k_tile from[@matmul.complete] at[%wave = %wave, %k = %k-1, %n_fragment = %n_fragment] select<last_per_executor>
   }
   flow.pipeline @loop %k = 0 to ceildiv(%K,16) step 1 depth(2) generation_counts_per_wave[1] {
     %load_A, !load_A_ready = flow.load_async @load_A @A[%AROW, %k*16]<VALIDx16> by %producer after[@matmul.complete:prior_acc, @load_A.issue:prior_copy, @load_B.issue:prior_copy] : tensor<VALIDx16xbf16> scope<pipeline>
     %load_B, !load_B_ready = flow.load_async @load_B @B[%WEIGHT_ROW+%k*16, %COL*64]<16x64> by %producer after[@matmul.complete:prior_acc, @load_A.issue:prior_copy, @load_B.issue:prior_copy] : tensor<16x64xbf16> scope<pipeline>
-    %matmul, !matmul_done = flow.matmul @matmul implements<@matmul> reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@C[%CROW, %COL*64]<VALIDx64>> by %matrix after[@load_A.complete:data, @load_B.complete:data, @matmul.complete:fragment] : tensor<16x64xfp32> scope<pipeline>
+    %matmul, !matmul_done = flow.matmul @matmul implements<@matmul> reads[%load_A, %load_B, %matmul.prev<zero>] on_tile<@C[%CROW, %COL*64]<VALIDx64>> by %matrix after[@load_A.complete:data, @load_B.complete:data, @matmul.complete:prior_k_fragment, @matmul.complete:prior_k_tile] : tensor<16x64xfp32> scope<pipeline>
   }
   !store_done = flow.store_async @store implements<@cast_output> reads[%matmul] cast<bf16> to @C[%CROW, %COL*64]<VALIDx64> by %producer after[@matmul.complete:last] scope<epilogue>
 }

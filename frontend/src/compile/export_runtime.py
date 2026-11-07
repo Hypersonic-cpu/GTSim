@@ -107,6 +107,18 @@ def export_runtime(execution, directory, launch_overhead_cycles=0, prefetch=None
             ],
             outputs=region.outputs,
         )
+        selected = [
+            w for w in execution.prefetch_windows if all(n in ids for n in w.consumers)
+        ]
+        if selected:
+            kernel["prefetch_windows"] = [
+                dict(
+                    buffer=asdict(w.buffer),
+                    ranges=[asdict(r) for r in w.ranges],
+                    consumers=[ids[n] for n in w.consumers],
+                )
+                for w in selected
+            ]
         filename = region.id + ".gtsir"
         with (directory / filename).open("w") as output:
             json.dump(kernel, output, separators=(",", ":"))

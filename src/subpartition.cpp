@@ -81,6 +81,9 @@ void Subpartition::complete_node(DAGNode* node, int current_cycle) {
         sp_scheduler->tmem_unit->on_complete(node);
     }
 
+    if (completion_observer && *completion_observer)
+        (*completion_observer)(node->id, current_cycle);
+
     // Count register usage
     sp_register->register_totally_used += node->register_change;
 

@@ -101,6 +101,7 @@ def lower_arch(arch, parameters=None):
         tuple(by_name[name].id for name in arch.outputs),
         tuple(regions),
         arch.stream,
+        (),
     )
     for node in result.ops:
         if any(

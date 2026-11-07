@@ -52,6 +52,7 @@ class ArchInstruction:
     after_issue: tuple[int, ...]
     after_complete: tuple[int, ...]
     static_args: tuple[tuple[str, ImmediateValue], ...]
+    pipeline_iteration: int | None
 
 
 @dataclass(frozen=True)

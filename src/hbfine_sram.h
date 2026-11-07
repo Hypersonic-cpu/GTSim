@@ -39,7 +39,8 @@ public:
         }
         auto planes = slot.planes;
         auto stacks = slot.stacks;
-        const auto plane_limit = config_.sram_bytes_per_plane / count;
+        const auto plane_pages =
+            config_.sram_bytes_per_plane / config_.page_bytes;
         const auto stack_limit = config_.base_die_sram_bytes_per_stack / count;
         Reservation reservation{{}, buffer};
         for (auto page = address / config_.page_bytes * config_.page_bytes;
@@ -47,6 +48,12 @@ public:
             const auto a = hbfine::decode_address(page, base_, config_);
             const auto plane = hbfine::physical_plane_id(a, config_);
             const auto size = static_cast<std::uint64_t>(config_.page_bytes);
+            // Allocate whole pages; rotate remainder pages across plane IDs
+            // so a one-page plane is not split into unusable half-pages.
+            const auto extra =
+                static_cast<std::uint64_t>((index + count - plane % count) %
+                                           count) < plane_pages % count;
+            const auto plane_limit = (plane_pages / count + extra) * size;
             if (size <= plane_limit - planes[plane]) {
                 planes[plane] += size;
                 reservation.pages.push_back({plane, true});

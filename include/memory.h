@@ -824,8 +824,10 @@ private:
                         access.tier};
         mshr.emplace(access.line, std::move(entry));
         backend_request_to_line.emplace(request_id, access.line);
+        MemoryRoutingHint routing;
+        routing.consumer_node = access.node_id;
         backend_requests.push_back({request_id, access.line.global_line_addr,
-                                    access.size_bytes, access.operation, access.tier});
+                                    access.size_bytes, access.operation, access.tier, routing});
     }
 
     void touch_lru(const CacheLineKey& key) {
@@ -1426,8 +1428,8 @@ public:
         return current.token && device(current.tier).prefetch_ready(current.token);
     }
 
-    void release_prefetch(const ReadAlias& alias) {
-        if (!foreground_idle())
+    void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
+        if (require_idle && !foreground_idle())
             throw std::logic_error("release requires foreground retirement");
         if (alias.queue_id) {
             const auto queued = queued_prefetches_.at(alias.queue_id);
@@ -1448,6 +1450,14 @@ public:
             if (aliases[i - 1].address + aliases[i - 1].bytes > aliases[i].address)
                 throw std::invalid_argument("overlapping read aliases");
         read_aliases_ = std::move(aliases);
+    }
+
+    void bind_node_read_aliases(const std::vector<int>& nodes,
+                               std::shared_ptr<std::vector<ReadAlias>> aliases) {
+        for (const auto node : nodes) node_read_aliases_[node] = aliases;
+    }
+    void unbind_node_read_aliases(const std::vector<int>& nodes) {
+        for (const auto node : nodes) node_read_aliases_.erase(node);
     }
 
     std::size_t pending_background_requests() const {
@@ -1548,6 +1558,7 @@ private:
     std::deque<MemResponse> pending_hbm_to_hbf_response_;
     std::unordered_map<std::uint64_t, RequestRoute> request_routes_;
     std::vector<ReadAlias> read_aliases_;
+    std::unordered_map<int, std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
     std::deque<std::uint64_t> prefetch_queue_;
     std::map<std::uint64_t, ReadAlias> queued_prefetches_;
     std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{}, prefetch_canceled_{};
@@ -1654,7 +1665,12 @@ private:
                                  request.operation != MemoryOperation::Read);
         const MemoryTier tier = effective_tier(request.tier);
         if (request.operation == MemoryOperation::Read) {
-            for (const auto& alias : read_aliases_)
+            const auto bound = node_read_aliases_.find(request.routing.consumer_node);
+            const auto& aliases = bound == node_read_aliases_.end() ? read_aliases_ : *bound->second;
+            auto found = std::upper_bound(aliases.begin(), aliases.end(), request.global_addr,
+                [](std::uint64_t address, const ReadAlias& alias) { return address < alias.address; });
+            if (found != aliases.begin()) {
+                const auto& alias = *std::prev(found);
                 if (alias.tier == tier && request.global_addr >= alias.address &&
                     request.global_addr - alias.address < alias.bytes &&
                     static_cast<std::uint64_t>(request.size_bytes) <=
@@ -1663,8 +1679,8 @@ private:
                         ? queued_prefetches_.at(alias.queue_id).token : alias.token;
                     if (!request.read_alias)
                         statistics_for(tier).unadmitted_alias_read_bytes += request.size_bytes;
-                    break;
                 }
+            }
         }
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id, RequestRoute{tier, current_cycle});

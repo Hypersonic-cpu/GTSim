@@ -234,6 +234,7 @@ class ASTParserTests(unittest.TestCase):
             (),
             (),
             None,
+            (),
         )
         for obj in (prog, algo, flow, arch, execution):
             parsed = parser.parse(dumps(obj))
