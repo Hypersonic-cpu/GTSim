@@ -10,3 +10,9 @@
 [submodule "3rdparty/hbfine"]
 	path = 3rdparty/hbfine
 	url = git@github.com:Hypersonic-cpu/HBFine.git
+[submodule "3rdparty/hbf-eventlab"]
+	path = 3rdparty/hbf-eventlab
+	url = https://github.com/sjtu-epcc/HBF-EventLab.git
+[submodule "3rdparty/flashlab-sim"]
+	path = 3rdparty/flashlab-sim
+	url = https://github.com/FlashLabAE/HBFSim.git
