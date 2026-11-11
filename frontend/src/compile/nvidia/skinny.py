@@ -30,6 +30,8 @@ def select_skinny(op, flow, positions):
         return A.NativePattern(op.id, op.scope, (), op.dependencies)
     source = op.region
     r, c = (v.expression for v in source.offsets)
+    m_fragments = (loop("m_fragment", bm // mm),) if bm > mm else ()
+    fragment_row = f"({r}) + %m_fragment*{mm}" if m_fragments else r
     if op.kind == A.OpKind.COPY:
         box, chunks = tma_box(source)
         dtype, loops = op.results[0].dtype, op.iterations + chunks
@@ -55,6 +57,7 @@ def select_skinny(op, flow, positions):
         loops = op.iterations + (
             loop("executor", p.consumer_warps),
             loop("n_fragment", bn // (p.consumer_warps * mn)),
+            *m_fragments,
             loop("k_fragment", bk // mk),
         )
         steps = (
@@ -65,7 +68,7 @@ def select_skinny(op, flow, positions):
                 loops,
                 region(
                     source,
-                    r,
+                    fragment_row,
                     f"({c}) + (%executor*{bn // (p.consumer_warps * mn)}+%n_fragment)*{mn}",
                     (mm, mn),
                 ),
@@ -83,6 +86,7 @@ def select_skinny(op, flow, positions):
         loops = (
             loop("executor", p.consumer_warps),
             loop("n_fragment", bn // (p.consumer_warps * mn)),
+            *m_fragments,
         )
         staging = A.NativeStep(
             A.NativeOpcode.SHARED_STORE,
@@ -91,7 +95,7 @@ def select_skinny(op, flow, positions):
             loops,
             region(
                 source,
-                r,
+                fragment_row,
                 f"({c}) + (%executor*{bn // (p.consumer_warps * mn)}+%n_fragment)*{mn}",
                 (mm, mn),
             ),

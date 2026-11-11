@@ -40,6 +40,8 @@ struct HBMConfig {
     int stacks{5};
     int channels_per_stack{16};
     std::uint64_t capacity_bytes_per_stack{16ULL << 30};
+    // Zero disables read-completion time bins in the simple HBM backend.
+    std::uint64_t statistics_interval_ps{};
 };
 
 struct HBFConfig {

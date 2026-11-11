@@ -937,7 +937,10 @@ public:
               config.write_max_bw_GBps, core_frequency_mhz)),
           read_latency_cycles_(config.read_latency_cycles),
           write_latency_cycles_(config.write_latency_cycles),
-          queue_capacity_(static_cast<std::size_t>(config.queue_capacity)) {}
+          queue_capacity_(static_cast<std::size_t>(config.queue_capacity)),
+          statistics_interval_ps_(config.statistics_interval_ps),
+          frequency_khz_(static_cast<std::uint64_t>(
+              std::llround(core_frequency_mhz * 1000))) {}
 
     std::size_t pending_requests() const override { return queued_requests(); }
 
@@ -1030,6 +1033,13 @@ public:
                 if (use_write) {
                     write_requests_.pop_front();
                 } else {
+                    if (statistics_interval_ps_) {
+                        const auto time_ps = static_cast<std::uint64_t>(now) *
+                                             1000000000ULL / frequency_khz_;
+                        read_bandwidth_bins_[time_ps /
+                                             statistics_interval_ps_] +=
+                            completed.back().size_bytes;
+                    }
                     read_requests_.pop_front();
                 }
             }
@@ -1040,6 +1050,19 @@ public:
         write_fractional_credit_ =
             write_requests_.empty() ? 0.0 : fractional_part(write_budget);
         return completed;
+    }
+
+    std::vector<MemoryBandwidthSample> bandwidth_samples() const override {
+        std::vector<MemoryBandwidthSample> samples;
+        samples.reserve(read_bandwidth_bins_.size());
+        for (const auto& [index, bytes] : read_bandwidth_bins_) {
+            const auto start = index * statistics_interval_ps_;
+            samples.push_back({start,
+                               start + statistics_interval_ps_,
+                               {{"demand_read", bytes}},
+                               {}});
+        }
+        return samples;
     }
 
 private:
@@ -1061,6 +1084,9 @@ private:
     double total_fractional_credit_{};
     double write_fractional_credit_{};
     bool prefer_write_{};
+    std::uint64_t statistics_interval_ps_{};
+    std::uint64_t frequency_khz_{};
+    std::map<std::uint64_t, std::uint64_t> read_bandwidth_bins_;
 
     std::size_t queued_requests() const {
         return read_requests_.size() + write_requests_.size();

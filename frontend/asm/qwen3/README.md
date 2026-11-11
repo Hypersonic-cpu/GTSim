@@ -23,6 +23,20 @@ and grouped Small-M execution. `S` independently selects split attention and an
 explicit LSE-combination kernel. The sample split counts are configuration values,
 not a measured optimal dispatch policy.
 
+## Qwen3-235B-A22B
+
+Use the same one-block Program with `qwen3-235b-a22b-b1.json`. The
+[official configuration](https://huggingface.co/Qwen/Qwen3-235B-A22B/blob/main/config.json)
+specifies hidden size 4096, 64 query heads, four KV heads, head dimension 128,
+and 128 experts with Top-8 routing and intermediate size 1536. The combined
+expert Gate/Up projection has shape 4096 × 3072 per expert. The model has 94
+layers, and this Program describes one block. The sample uses a synthetic
+routing trace, a 10,000-token history and four attention splits.
+
+Use `one_block.progir` for all-HBM placement or
+`flash-accel/one_block.progir` for read-only weights in HBF. Q, K/V cache,
+attention results and intermediate activations are in HBM in both programs.
+
 ## Compilation
 
 ```sh
