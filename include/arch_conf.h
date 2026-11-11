@@ -52,7 +52,7 @@ template <> struct meta<GTSim::HBMBackend> {
 
 template <> struct meta<GTSim::HBFBackend> {
     using enum GTSim::HBFBackend;
-    static constexpr auto value = enumerate("naive", Naive, "bank_plane", BankPlane);
+    static constexpr auto value = enumerate("naive", Naive, "hbfine", HBFine, "bank_plane", BankPlane, "eventlab", EventLab, "flashlab", FlashLab);
 };
 template <> struct meta<GTSim::HBFGeometryProfile> {
     using enum GTSim::HBFGeometryProfile;

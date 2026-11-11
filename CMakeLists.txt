@@ -21,8 +21,10 @@ add_library(gtsim_core STATIC
   src/subpartition.cpp
   src/sm.cpp
   src/gpu.cpp
-  src/hbfine_backend.cpp
-  src/memory_backend.cpp
+  src/memory/hbfine.cpp
+  src/memory/base.cpp
+  src/memory/naive.cpp
+  src/memory/system.cpp
   src/simulator.cpp
   src/runtime/kernel_execution_session.cpp)
 target_include_directories(gtsim_core PUBLIC
@@ -30,6 +32,8 @@ target_include_directories(gtsim_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/glaze/include)
 
 target_link_libraries(gtsim_core PUBLIC HBFine::hbfine)
+
+include(cmake/HBFBackends.cmake)
 
 option(GTSIM_ENABLE_RAMULATOR2 "Build the optional Ramulator2 HBM3 backend" OFF)
 if(GTSIM_ENABLE_RAMULATOR2)
@@ -197,4 +201,9 @@ install(DIRECTORY 3rdparty/glaze/include/glaze DESTINATION include)
 
 if(GTSIM_BUILD_IR_FRAMEWORK)
   install(TARGETS gtsim_program RUNTIME DESTINATION bin)
+endif()
+if(BUILD_TESTING)
+  add_executable(hbf_online_contract_tests tests/hbf_online_contract_tests.cpp)
+  target_link_libraries(hbf_online_contract_tests PRIVATE gtsim_core flashlab_core)
+  add_test(NAME hbf_online_contract COMMAND hbf_online_contract_tests)
 endif()

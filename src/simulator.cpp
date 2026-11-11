@@ -239,6 +239,10 @@ void Simulator::print_statistics(bool verbose) {
     *output_stream << "Off-chip memory statistics:\n";
     print_tier_stats("  HBM", memory_stats.hbm);
     print_tier_stats("  HBF", memory_stats.hbf);
+    for (const auto& [tier, snapshot] : simulated_gpu->memory_system->tier_counters()) {
+        for (const auto& [name, value] : snapshot.device.cumulative)
+            *output_stream << "Backend counter " << (tier == MemoryTier::HBF ? "HBF " : "HBM ") << name << "=" << value << "\n";
+    }
     const auto backend = simulated_gpu->memory_system->hbm_backend_statistics();
     if (config.memory.hbm.backend == HBMBackend::Ramulator2) {
         const auto channels_used =
