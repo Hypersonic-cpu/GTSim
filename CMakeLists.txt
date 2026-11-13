@@ -23,8 +23,10 @@ add_library(gtsim_core STATIC
   src/gpu.cpp
   src/memory/hbfine.cpp
   src/memory/base.cpp
+  src/memory/address.cpp
   src/memory/naive.cpp
   src/memory/system.cpp
+  src/memory/sram.cpp
   src/simulator.cpp
   src/runtime/kernel_execution_session.cpp)
 target_include_directories(gtsim_core PUBLIC
@@ -35,7 +37,7 @@ target_link_libraries(gtsim_core PUBLIC HBFine::hbfine)
 
 include(cmake/HBFBackends.cmake)
 
-option(GTSIM_ENABLE_RAMULATOR2 "Build the optional Ramulator2 HBM3 backend" OFF)
+option(GTSIM_ENABLE_RAMULATOR2 "Include the runtime-selectable Ramulator2 HBM3 backend" ON)
 if(GTSIM_ENABLE_RAMULATOR2)
   include(cmake/Ramulator2.cmake)
 endif()
@@ -204,6 +206,6 @@ if(GTSIM_BUILD_IR_FRAMEWORK)
 endif()
 if(BUILD_TESTING)
   add_executable(hbf_online_contract_tests tests/hbf_online_contract_tests.cpp)
-  target_link_libraries(hbf_online_contract_tests PRIVATE gtsim_core flashlab_core)
+  target_link_libraries(hbf_online_contract_tests PRIVATE gtsim_core flashlab_core HBFEventLab::core)
   add_test(NAME hbf_online_contract COMMAND hbf_online_contract_tests)
 endif()

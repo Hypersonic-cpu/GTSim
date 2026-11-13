@@ -1,8 +1,11 @@
-# Optional Ramulator2 HBM3 backend
+# Ramulator2 HBM3 backend
 
 The H100 GEMM and FA3 reference builders can select a timing-only Ramulator2
 HBM backend. The default remains `naive`; the shared L2/MSHR model is
 unchanged. The separate [HBFine adapter](hbf-controller.md) supplies optional HBF timing. There are no modeled L2 slices, partitions, or slice contention.
+
+Ramulator2 is compiled by default and selected at runtime through `hbm.backend`.
+`GTSIM_ENABLE_RAMULATOR2=OFF` explicitly excludes it from a reduced build.
 
 ## Build and run
 

@@ -1,0 +1,437 @@
+--- a/src/physical/hbf/hbf_config.hpp
++++ b/src/physical/hbf/hbf_config.hpp
+@@ -12,6 +12,10 @@
+     std::uint32_t channels_per_stack = 16;
+     std::uint32_t dies_per_channel = 1;
+     std::uint32_t planes_per_die = 16;
++    // Optional research geometry. One sense command reserves every member
++    // plane at the same page offset; two raw megapage registers per group.
++    bool grouped_geometry = false;
++    std::uint32_t planes_per_command_group = 1;
+     std::uint32_t blocks_per_plane = 2048;
+     std::uint32_t pages_per_block = 256;
+     std::uint64_t page_size_bytes = 4096;
+--- a/src/physical/hbf/hbf_device.hpp
++++ b/src/physical/hbf/hbf_device.hpp
+@@ -84,7 +84,13 @@
+     [[nodiscard]] bool cache_resident(std::uint64_t ppn, double at_ns) const;
+     [[nodiscard]] bool cache_hit(std::uint64_t ppn, double at_ns);
+     [[nodiscard]] std::optional<double> pending_cache_fill(std::uint64_t ppn, double at_ns) const;
+-    void cache_fill(std::uint64_t ppn, double ready_ns);
++    void cache_fill(std::uint64_t ppn, double ready_ns, std::uint64_t generation = 0);
++    struct RawPage { double ready_ns; std::uint64_t generation; };
++    [[nodiscard]] std::optional<RawPage> raw_page(std::uint64_t ppn, double at_ns) const;
++    [[nodiscard]] bool raw_reserve(std::uint64_t ppn, double start_ns, double ready_ns,
++                                   std::uint64_t& generation);
++    [[nodiscard]] bool raw_touch(std::uint64_t ppn, double at_ns, std::uint64_t generation);
++    [[nodiscard]] double raw_retry_after(std::uint64_t ppn, double at_ns) const;
+     void advance_cache(double causal_watermark_ns);
+     void cache_purge_page(std::uint64_t ppn);
+     void cache_purge_block(std::uint64_t block);
+@@ -95,9 +101,15 @@
+     void validate_page(std::uint64_t ppn) const;
+     void validate_block(std::uint64_t block) const;
+     struct Block { std::uint32_t next_page = 0; };
+-    struct CacheEvent { std::uint64_t page; int action; /* -1 invalidate, 0 touch, 1 fill */ };
++    struct CacheEvent {
++        std::uint64_t page; int action; // -1 invalidate, 0 touch, 1 fill
++        double ready_ns = 0;
++        std::uint64_t generation = 0;
++    };
+     struct CachePages {
+         std::array<std::uint64_t, kCachedPagesPerBank> pages{};
++        std::array<double, kCachedPagesPerBank> ready_ns{};
++        std::array<std::uint64_t, kCachedPagesPerBank> generation{};
+         std::size_t count = 0;
+         auto begin() { return pages.begin(); }
+         auto end() { return pages.begin() + count; }
+@@ -142,7 +154,10 @@
+     static bool apply_cache_event(CachePages& resident, CacheEvent event);
+     [[nodiscard]] static CachePages project_cache(const BankCache& bank, double at_ns);
+     // Validate without mutation, then update only the changed suffix.
+-    static std::optional<std::size_t> record_event(BankCache& bank, TimedEvent event);
++    static std::optional<std::size_t> record_event(BankCache& bank, TimedEvent event, bool dry_run = false);
++    [[nodiscard]] std::uint64_t raw_key(std::uint64_t ppn) const;
++    [[nodiscard]] std::size_t raw_bank(std::uint64_t ppn) const;
++    [[nodiscard]] bool decoded_valid(std::uint64_t ppn, double at_ns, std::uint64_t generation) const;
+     HbfDeviceConfig config_;
+     bool track_pending_fills_ = false;
+     std::uint64_t total_pages_ = 0;
+--- a/src/physical/hbf/hbf_device.cpp
++++ b/src/physical/hbf/hbf_device.cpp
+@@ -12,7 +12,10 @@
+         config.channels_per_stack > grade.maximum_channels ||
+         !config.dies_per_channel || config.dies_per_channel > 4 ||
+         config.channels_per_stack * config.dies_per_channel > grade.maximum_dies ||
+-        !config.planes_per_die || config.planes_per_die > 16 ||
++        !config.planes_per_die || (!config.grouped_geometry && config.planes_per_die > 16) ||
++        !config.planes_per_command_group ||
++        config.planes_per_die % config.planes_per_command_group ||
++        (!config.grouped_geometry && config.planes_per_command_group != 1) ||
+         config.page_size_bytes != kPageBytes || !config.pages_per_block || !config.blocks_per_plane)
+         throw std::invalid_argument("invalid OCP HBF channel/die/bank/page geometry");
+     auto capacity = std::uint64_t{config.page_size_bytes};
+@@ -281,22 +284,35 @@
+ void HbfDevice::CachePages::remove(std::uint64_t page) {
+     const auto at = std::find(begin(), end(), page);
+     if (at == end()) return;
+-    std::move(at + 1, end(), at);
++    const auto index = static_cast<std::size_t>(at - begin());
++    for (auto i = index + 1; i < count; ++i) {
++        pages[i-1] = pages[i]; ready_ns[i-1] = ready_ns[i]; generation[i-1] = generation[i];
++    }
+     --count;
+ }
+ bool HbfDevice::CachePages::operator==(const CachePages& other) const {
+-    return count == other.count && std::equal(begin(), end(), other.begin());
++    return count == other.count && std::equal(begin(), end(), other.begin()) &&
++        std::equal(ready_ns.begin(), ready_ns.begin()+count, other.ready_ns.begin()) &&
++        std::equal(generation.begin(), generation.begin()+count, other.generation.begin());
+ }
+ bool HbfDevice::apply_cache_event(CachePages& resident, CacheEvent event) {
+-    const bool present = std::find(resident.begin(), resident.end(), event.page) != resident.end();
++    const auto found = std::find(resident.begin(), resident.end(), event.page);
++    const bool present = found != resident.end();
+     if (event.action < 0) { resident.remove(event.page); return true; }
+-    if (event.action == 0 && !present) return false;
++    if (event.action == 0) {
++        if (!present) return false;
++        const auto index = static_cast<std::size_t>(found-resident.begin());
++        if (event.generation && (resident.generation[index] != event.generation ||
++                                event.ready_ns < resident.ready_ns[index])) return false;
++        event.ready_ns = resident.ready_ns[index];
++        event.generation = resident.generation[index];
++    }
+     resident.remove(event.page);
+-    if (resident.count == kCachedPagesPerBank) {
+-        std::move(resident.begin() + 1, resident.end(), resident.begin());
+-        --resident.count;
+-    }
+-    resident.pages[resident.count++] = event.page;
++    if (resident.count == kCachedPagesPerBank) resident.remove(resident.pages[0]);
++    const auto index = resident.count++;
++    resident.pages[index] = event.page;
++    resident.ready_ns[index] = event.ready_ns;
++    resident.generation[index] = event.generation;
+     return true;
+ }
+ std::size_t HbfDevice::PageSet::slot_of(std::uint64_t page) const {
+@@ -321,7 +337,7 @@
+     auto& slot = slots_[slot_of(page)];
+     if (slot == kEmpty) { slot = page; ++count_; }
+ }
+-std::optional<std::size_t> HbfDevice::record_event(BankCache& bank, TimedEvent event) {
++std::optional<std::size_t> HbfDevice::record_event(BankCache& bank, TimedEvent event, bool dry_run) {
+     auto& events = bank.events;
+     auto at = events.end();
+     if (!events.empty() && std::tie(events.back().at_ns, events.back().sequence) >
+@@ -343,6 +359,7 @@
+             if (state == events[stop].after) break;
+         }
+     }
++    if (dry_run) return index;
+     events.insert(at, event);
+     auto state = event.after;
+     for (auto i = index + 1; i < stop + 1; ++i) {
+@@ -360,7 +377,8 @@
+     const auto found = cache_.find(bank_for_page(ppn));
+     if (found == cache_.end() || !found->second.candidates.contains(ppn)) return false;
+     const auto resident = project_cache(found->second, at);
+-    return std::find(resident.begin(), resident.end(), ppn) != resident.end();
++    const auto page = std::find(resident.begin(), resident.end(), ppn);
++    return page != resident.end() && decoded_valid(ppn,at,resident.generation[page-resident.begin()]);
+ }
+ bool HbfDevice::cache_hit(std::uint64_t ppn, double at) {
+     auto found = cache_.find(bank_for_page(ppn));
+@@ -369,7 +387,13 @@
+     if (!bank.candidates.contains(ppn)) return false;
+     const auto resident = project_cache(bank, at);
+     if (std::find(resident.begin(), resident.end(), ppn) == resident.end()) return false;
+-    if (!record_event(bank, TimedEvent{at, touch_sequence_++, CacheEvent{ppn, 0}})) return false;
++    const auto index = std::find(resident.begin(),resident.end(),ppn)-resident.begin();
++    const auto gen = resident.generation[index];
++    if (!decoded_valid(ppn,at,gen)) return false;
++    const TimedEvent touch{at,touch_sequence_++,CacheEvent{ppn,0}};
++    if (!record_event(bank,touch,true)) return false;
++    if (config_.grouped_geometry && !raw_touch(ppn,at,gen)) return false;
++    if (!record_event(bank,touch)) throw std::logic_error("decoded cache changed during raw lease");
+     ++bank.future_consumers;
+     track_cache_events(found->first, bank);
+     return true;
+@@ -380,7 +404,9 @@
+     const auto page = bank->second.pending_fills.find(ppn);
+     if (page == bank->second.pending_fills.end()) return std::nullopt;
+     const auto fill = page->second.upper_bound({at, std::numeric_limits<std::uint64_t>::max()});
+-    return fill == page->second.end() ? std::nullopt : std::optional<double>(fill->first);
++    if (fill == page->second.end()) return std::nullopt;
++    if (config_.grouped_geometry && !cache_resident(ppn,fill->first)) return std::nullopt;
++    return fill->first;
+ }
+ void HbfDevice::track_cache_events(std::size_t index, BankCache& bank) {
+     if (bank.indexed_event_ns && !bank.events.empty() &&
+@@ -392,16 +418,77 @@
+         pending_cache_banks_.insert({*bank.indexed_event_ns, index});
+     }
+ }
+-void HbfDevice::cache_fill(std::uint64_t ppn, double ready) {
++void HbfDevice::cache_fill(std::uint64_t ppn, double ready, std::uint64_t generation) {
+     const auto index = bank_for_page(ppn);
+     auto& bank = cache_[index];
+-    const TimedEvent fill{ready, touch_sequence_++, CacheEvent{ppn, true}};
++    const TimedEvent fill{ready, touch_sequence_++, CacheEvent{ppn, true, ready, generation}};
+     // Bypass a backfilled fill if it would evict a reserved future consumer.
+     if (!record_event(bank, fill)) return;
+     if (track_pending_fills_) bank.pending_fills[ppn].insert({fill.at_ns, fill.sequence});
+     bank.candidates.insert(ppn);
+     track_cache_events(index, bank);
+ }
++// Raw registers use the same temporal two-slot replay/retirement as decoded
++// caches, under a disjoint bank namespace. Reservations claim a slot at sense
++// start, publish at sense finish, and protect every already promised consumer.
++std::uint64_t HbfDevice::raw_key(std::uint64_t ppn) const {
++    const auto per_plane = std::uint64_t{config_.blocks_per_plane}*config_.pages_per_block;
++    const auto plane = bank_for_page(ppn);
++    return (plane-plane%config_.planes_per_command_group)*per_plane+ppn%per_plane;
++}
++std::size_t HbfDevice::raw_bank(std::uint64_t ppn) const {
++    const auto planes = total_pages_/(std::uint64_t{config_.blocks_per_plane}*config_.pages_per_block);
++    return planes+bank_for_page(ppn)/config_.planes_per_command_group;
++}
++std::optional<HbfDevice::RawPage> HbfDevice::raw_page(std::uint64_t ppn,double at) const {
++    const auto found = cache_.find(raw_bank(ppn));
++    if (found == cache_.end()) return std::nullopt;
++    const auto key = raw_key(ppn);
++    const auto state = project_cache(found->second,at);
++    const auto page = std::find(state.begin(),state.end(),key);
++    if (page != state.end()) {
++        const auto i = page-state.begin();
++        return RawPage{state.ready_ns[i],state.generation[i]};
++    }
++    for (const auto& event : found->second.events)
++        if (event.at_ns > at && event.event.action > 0 && event.event.page == key)
++            return RawPage{event.event.ready_ns,event.event.generation};
++    return std::nullopt;
++}
++bool HbfDevice::raw_reserve(std::uint64_t ppn,double start,double ready,std::uint64_t& gen) {
++    auto& bank = cache_[raw_bank(ppn)];
++    gen = ++touch_sequence_;
++    const auto key = raw_key(ppn);
++    if (!record_event(bank,TimedEvent{start,gen,CacheEvent{key,1,ready,gen}})) return false;
++    bank.candidates.insert(key);
++    track_cache_events(raw_bank(ppn),bank);
++    return true;
++}
++bool HbfDevice::raw_touch(std::uint64_t ppn,double at,std::uint64_t gen) {
++    auto& bank = cache_.at(raw_bank(ppn));
++    const auto key = raw_key(ppn);
++    if (!record_event(bank,TimedEvent{at,++touch_sequence_,CacheEvent{key,0,at,gen}})) return false;
++    ++bank.future_consumers;
++    track_cache_events(raw_bank(ppn),bank);
++    return true;
++}
++double HbfDevice::raw_retry_after(std::uint64_t ppn,double at) const {
++    const auto found = cache_.find(raw_bank(ppn));
++    return found == cache_.end() || found->second.events.empty() ? at :
++        std::max(at,found->second.events.back().at_ns);
++}
++bool HbfDevice::decoded_valid(std::uint64_t ppn,double at,std::uint64_t gen) const {
++    if (!config_.grouped_geometry) return true;
++    const auto found = cache_.find(raw_bank(ppn));
++    if (found == cache_.end()) return false;
++    const auto state = project_cache(found->second,at);
++    const auto key = raw_key(ppn);
++    const auto page = std::find(state.begin(),state.end(),key);
++    if (page == state.end()) return false;
++    const auto index = page-state.begin();
++    return state.generation[index] == gen && state.ready_ns[index] <= at;
++}
++
+ void HbfDevice::advance_cache(double watermark) {
+     while (!program_completions_.empty() && program_completions_.begin()->first <= watermark) {
+         const auto [ready, ppn] = *program_completions_.begin();
+--- a/src/host/hbf_controller.hpp
++++ b/src/host/hbf_controller.hpp
+@@ -119,6 +119,7 @@
+     std::uint64_t raw_physical_programs = 0;
+     std::uint64_t mapping_program_payload_bytes = 0;
+     std::uint64_t gc_relocation_payload_bytes = 0;
++    std::uint64_t group_sense_commands = 0, group_sensed_pages = 0;
+     std::uint64_t page_reads = 0;
+     // Foreground data-page programs after write-buffer coalescing. Excludes
+     // mapping-page programs and every GC relocation program. Together:
+@@ -817,6 +818,7 @@
+ // GC/WL decisions live here; base-die remapping and physical PEC live in media_.
+ class HbfController {
+     bool internal_read_payload_ = false;
++    std::uint64_t last_group_generation_ = 0;
+     friend class HbfMappingPolicy;
+     // data_ready_ns: a host-issued physical program starts no earlier than
+     // its payload is assembled in controller memory (structural host FTLs).
+--- a/src/host/hbf_controller.cpp
++++ b/src/host/hbf_controller.cpp
+@@ -4048,6 +4048,9 @@
+ }
+ 
+ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, double data_ready_ns) {
++    if (config_.device.grouped_geometry &&
++        (request.op != Op::Read || request.address_space != AddressSpace::Static))
++        throw std::invalid_argument("grouped FlashLab requires immutable static reads");
+     if (request.read_data_path != ReadDataPath::Host &&
+         (request.op != Op::Read || request.address_space != AddressSpace::Static))
+         throw std::invalid_argument("SRAM data paths require static reads");
+@@ -4683,7 +4686,7 @@
+         // remains intact and the group kernel deposits each page's energy.
+         // This is execution batching only; arrivals, credits and cache decisions
+         // stay in page order, including between consecutive bank-sized groups.
+-        const bool grouped_pipeline = pages > 1 && trace_spans == nullptr &&
++        const bool grouped_pipeline = !config_.device.grouped_geometry && pages > 1 && trace_spans == nullptr &&
+             address_heatmap_ == nullptr && !mapping_is_local();
+         const auto group_width = static_cast<std::uint64_t>(planes_.size());
+         auto read_group = make_read_pipeline_group();
+@@ -5719,7 +5722,7 @@
+ }
+ void HbfController::read_buffer_insert(std::uint64_t ppn, double ready_ns) {
+     if (!blocks_.at(ppn / config_.device.pages_per_block).erase_pending)
+-        media_->cache_fill(ppn, ready_ns);
++        media_->cache_fill(ppn, ready_ns, config_.device.grouped_geometry ? last_group_generation_ : 0);
+ }
+ void HbfController::read_buffer_purge_page(std::uint64_t ppn) { media_->cache_purge_page(ppn); }
+ void HbfController::read_buffer_purge_block(std::size_t block) { media_->cache_purge_block(block); }
+@@ -6174,6 +6177,8 @@
+     // lookup. This deliberately separates data striping from metadata
+     // ownership; binding 512 consecutive global pages to one mapping page
+     // serialized an entire W512 stream onto one stack.
++    if (config_.device.grouped_geometry)
++        return (lpn/config_.device.planes_per_command_group)%config_.device.stacks;
+     return stack_for_vpn(mapping_vpn_for_lpn(lpn));
+ }
+ 
+@@ -9419,6 +9424,18 @@
+     if (source_page >= total_pages_) {
+         throw std::runtime_error(
+             "HBF static source page exceeds physical page capacity");
++    }
++    if (config_.device.grouped_geometry) {
++        const auto g = config_.device.planes_per_command_group;
++        auto group = source_page/g;
++        const auto stack = group%config_.device.stacks; group /= config_.device.stacks;
++        const auto dies = config_.device.channels_per_stack*config_.device.dies_per_channel;
++        const auto die = group%dies; group /= dies;
++        const auto groups_per_die = config_.device.planes_per_die/g;
++        const auto plane = die*config_.device.planes_per_die+(group%groups_per_die)*g+source_page%g;
++        const auto offset = group/groups_per_die;
++        const auto per_plane = std::uint64_t{config_.device.blocks_per_plane}*config_.device.pages_per_block;
++        return (stack*planes_per_stack()+plane)*per_plane+offset;
+     }
+     const auto stack = stack_for_lpn(source_page);
+     const auto stack_page_index = source_page / config_.device.stacks;
+@@ -10041,6 +10058,76 @@
+     ScheduledTransfer sense;
+     ScheduledTransfer lane_transfer;
+     ScheduledTransfer page_buffer;
++    double media_start = tsu.finish_ns, sense_done = tsu.finish_ns;
++    if (config_.device.grouped_geometry) {
++        const auto width = config_.device.planes_per_command_group;
++        const auto first_plane = addr.plane-addr.plane%width;
++        auto cursor = tsu.finish_ns;
++        for (;;) {
++            auto raw = media_->raw_page(ppn,cursor);
++            if (!raw) {
++                // All group members sense the same offset in one simultaneous
++                // interval. Preview the intersection before committing any one.
++                auto start = cursor;
++                for (;;) {
++                    auto next = start;
++                    for (std::uint32_t i=0;i<width;++i) {
++                        auto member = addr; member.plane = first_plane+i;
++                        auto& p = planes_.at(plane_index(member));
++                        auto& r = p.subarrays.at(subarray_index(member)).timeline;
++                        r.prune_before(reservation_causal_watermark_ns_);
++                        next = std::max(next,r.preview_start(start,config_.device.t_read_page_ns));
++                        for (const auto& w : p.full_plane_windows)
++                            if (w.end_ns > start && w.begin_ns < start+config_.device.t_read_page_ns)
++                                next = std::max(next,w.end_ns);
++                    }
++                    if (next == start) break;
++                    start = next;
++                }
++                const auto finish = start+config_.device.t_read_page_ns;
++                std::uint64_t generation = 0;
++                if (!media_->raw_reserve(ppn,start,finish,generation)) {
++                    cursor = media_->raw_retry_after(ppn,finish);
++                    continue;
++                }
++                for (std::uint32_t i=0;i<width;++i) {
++                    auto member = addr; member.plane = first_plane+i;
++                    auto& p = planes_.at(plane_index(member));
++                    auto& r = p.subarrays.at(subarray_index(member));
++                    const auto booked = reserve(start,config_.device.t_read_page_ns,r.timeline);
++                    if (booked.start_ns != start) throw std::logic_error("megaplane atomic sense moved");
++                    r.busy_ns += config_.device.t_read_page_ns; ++r.read_count; ++p.read_count;
++                    record_plane_media_busy(p,start,finish);
++                    if (i) thermal_deposit_media(stack_index(member),start,thermal_read_energy_j_);
++                }
++                ++stats_.group_sense_commands; stats_.group_sensed_pages += width;
++                breakdown.array_read_ns += config_.device.t_read_page_ns;
++                media_start = start; sense_done = finish;
++                if (spans) add_trace_span(spans,source_label+"/megaplane_sense","flash_array",
++                    addr.path(),start,finish,true,std::to_string(width)+" planes");
++                raw = physical::hbf::HbfDevice::RawPage{finish,generation};
++            }
++            lane.timeline.prune_before(reservation_causal_watermark_ns_);
++            buffer_bank.timeline.prune_before(reservation_causal_watermark_ns_);
++            const auto from = std::max(cursor,raw->ready_ns);
++            const auto lane_start = lane.timeline.preview_start(from,lane_ns);
++            const auto buffer_start = buffer_bank.timeline.preview_start(lane_start+lane_ns,page_buffer_ns);
++            const auto done = buffer_start+page_buffer_ns;
++            // Reserve the selected plane's raw-register consumer before any
++            // data calendar commit; a future eviction must preserve this lease.
++            if (!media_->raw_touch(ppn,done,raw->generation)) {
++                cursor = media_->raw_retry_after(ppn,done);
++                continue;
++            }
++            last_group_generation_ = raw->generation;
++            lane_transfer = reserve(lane_start,lane_ns,lane.timeline);
++            page_buffer = reserve(buffer_start,page_buffer_ns,buffer_bank.timeline);
++            lane_transfer.wait_ns = std::max(0.0,lane_start-from);
++            page_buffer.wait_ns = std::max(0.0,buffer_start-lane_transfer.finish_ns);
++            break;
++        }
++        breakdown.scheduler_queue_wait_ns += std::max(0.0,media_start-tsu.finish_ns);
++    } else {
+     double local_ready_ns = tsu.finish_ns;
+     for (;;) {
+         subarray.timeline.prune_before(reservation_causal_watermark_ns_);
+@@ -10092,9 +10179,9 @@
+             0.0, page_buffer.start_ns - lane_transfer.finish_ns);
+         break;
+     }
+-    const double media_start = sense.start_ns;
++    media_start = sense.start_ns;
+     breakdown.scheduler_queue_wait_ns += std::max(0.0, media_start - tsu.finish_ns);
+-    const double sense_done = media_start + config_.device.t_read_page_ns;
++    sense_done = media_start + config_.device.t_read_page_ns;
+     breakdown.array_read_ns += config_.device.t_read_page_ns;
+     if (spans != nullptr) {
+         const auto entity = subarray_entity(addr, subarray_index_value);
+@@ -10115,6 +10202,7 @@
+     subarray.busy_ns += config_.device.t_read_page_ns;
+     subarray.read_count++;
+ 
++    }
+     breakdown.scheduler_queue_wait_ns += lane_transfer.wait_ns;
+     breakdown.media_lane_transfer_ns += lane_ns;
+     if (spans != nullptr) {
+@@ -10138,8 +10226,10 @@
+     }
+     lane.busy_ns += lane_ns;
+     lane.read_count++;
+-    record_plane_media_busy(plane, media_start, sense_done);
+-    plane.read_count++;
++    if (!config_.device.grouped_geometry) {
++        record_plane_media_busy(plane, media_start, sense_done);
++        plane.read_count++;
++    }
+ 
+     breakdown.scheduler_queue_wait_ns += page_buffer.wait_ns;
+     breakdown.page_buffer_ns += page_buffer_ns;

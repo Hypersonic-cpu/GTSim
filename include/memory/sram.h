@@ -1,7 +1,7 @@
 #pragma once
 
 #include "memory_backend.h"
-#include <hbfine/address.hpp>
+#include <functional>
 
 namespace GTSim {
 // Physical SRAM quotas and tile leases are shared by ordinary and banked prefetch.
@@ -16,9 +16,12 @@ public:
         std::optional<PrefetchBuffer> buffer;
     };
 
-    ReadSramAllocator(const hbfine::Config& config, std::uint64_t base)
-        : config_(config),
-          base_(base) {}
+    struct Config {
+        int stacks{}, dies_per_stack{}, planes_per_die{}, page_bytes{};
+        std::uint64_t sram_bytes_per_plane{}, base_die_sram_bytes_per_stack{};
+    };
+    ReadSramAllocator(Config config, std::function<MemoryLocation(std::uint64_t)> locate)
+        : config_(config), locate_(std::move(locate)) {}
 
     std::optional<Reservation> reserve(std::uint64_t address,
                                        std::uint64_t bytes,
@@ -45,8 +48,8 @@ public:
         Reservation reservation{{}, buffer};
         for (auto page = address / config_.page_bytes * config_.page_bytes;
              page < address + bytes;) {
-            const auto a = hbfine::decode_address(page, base_, config_);
-            const auto plane = hbfine::physical_plane_id(a, config_);
+            const auto a = locate_(page);
+            const auto plane = (a.stack * config_.dies_per_stack + a.die) * config_.planes_per_die + a.plane;
             const auto size = static_cast<std::uint64_t>(config_.page_bytes);
             // Allocate whole pages; rotate remainder pages across plane IDs
             // so a one-page plane is not split into unusable half-pages.
@@ -106,8 +109,8 @@ private:
         std::size_t live{};
         std::uint64_t bytes{}, peak{};
     };
-    const hbfine::Config& config_;
-    std::uint64_t base_;
+    Config config_;
+    std::function<MemoryLocation(std::uint64_t)> locate_;
     int count_{};
     std::map<int, Slot> slots_;
 };

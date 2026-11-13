@@ -12,7 +12,7 @@ import time
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--build-dir', default='build-hbf')
+    parser.add_argument('--build-dir', default='build')
     parser.add_argument('--backend', choices=('baseline', 'hbfine', 'eventlab', 'flashlab'))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]

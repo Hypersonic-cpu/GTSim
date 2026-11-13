@@ -1,0 +1,242 @@
+--- a/include/hbf_eventlab/architecture/device_description.hpp
++++ b/include/hbf_eventlab/architecture/device_description.hpp
+@@ -8,6 +8,7 @@
+     std::uint32_t host_channels, dies_per_channel, banks_per_die, pages_per_block;
+     std::uint64_t blocks_per_bank;
+     std::uint32_t spare_blocks_per_bank = 0; // Additional physical capacity, invisible to Host.
++    std::uint32_t planes_per_command_group=1; // pages_per_block includes all group lanes
+     void validate() const;
+     std::uint64_t lanes() const;
+     std::uint64_t block_group_dlus() const;
+--- a/src/architecture/device_description.cpp
++++ b/src/architecture/device_description.cpp
+@@ -19,6 +19,8 @@
+     if (!dies_per_channel || dies_per_channel>16 || (dies_per_channel & (dies_per_channel-1)))
+         throw std::invalid_argument("device.geometry.dies_per_channel: expected 1, 2, 4, 8, or 16, also subject to speed grade");
+     if (!banks_per_die) throw std::invalid_argument("device.geometry.banks_per_die: must be positive");
++    if (!planes_per_command_group || planes_per_command_group>1024 || pages_per_block%planes_per_command_group)
++        throw std::invalid_argument("invalid coupled plane group");
+     if (!pages_per_block) throw std::invalid_argument("device.geometry.pages_per_block: must be positive");
+     if (!blocks_per_bank) throw std::invalid_argument("device.geometry.blocks_per_bank: must be positive");
+     (void)checked_mul(channel_bytes(), host_channels);
+--- a/src/policies/reference_address_layout.cpp
++++ b/src/policies/reference_address_layout.cpp
+@@ -6,12 +6,15 @@
+     if (a.channel >= geometry_.host_channels || a.dlu.value >= geometry_.channel_dlus() || a.byte_offset >= dlu_bytes)
+         throw std::out_of_range("media address outside geometry");
+     auto x = a.dlu.value;
++    const auto lanes=geometry_.planes_per_command_group;
++    const auto lane=x%lanes; x/=lanes;
+     const auto bank = static_cast<std::uint32_t>(x % geometry_.banks_per_die);
+     x /= geometry_.banks_per_die;
+     const auto die = static_cast<std::uint32_t>(x % geometry_.dies_per_channel);
+     x /= geometry_.dies_per_channel;
+-    const auto page = static_cast<PageId>(x % geometry_.pages_per_block);
+-    return {a.channel, die, bank, x / geometry_.pages_per_block, page, a.byte_offset};
++    const auto pages=geometry_.pages_per_block/lanes;
++    const auto page=static_cast<PageId>((x%pages)*lanes+lane);
++    return {a.channel, die, bank, x/pages, page, a.byte_offset};
+ }
+ LogicalNandAddress ReferenceAddressLayout::logical_view(ChannelAddress a) const {
+     const auto p = decode({a.channel, MediaDlu{a.local.value / dlu_bytes},
+@@ -24,9 +27,11 @@
+         b.bank >= geometry_.banks_per_die || b.block >= geometry_.blocks_per_bank ||
+         a.page >= geometry_.pages_per_block || a.byte_offset >= dlu_bytes)
+         throw std::out_of_range("logical geometry outside profile");
+-    auto x = b.block * geometry_.pages_per_block + a.page;
++    const auto lanes=geometry_.planes_per_command_group;
++    auto x = b.block * (geometry_.pages_per_block/lanes) + a.page/lanes;
+     x = x * geometry_.dies_per_channel + b.die;
+     x = x * geometry_.banks_per_die + b.bank;
++    x=x*lanes+a.page%lanes;
+     return LocalByteAddress{x * dlu_bytes + a.byte_offset};
+ }
+ } // namespace hbf_eventlab
+--- a/include/hbf_eventlab/runtime/bank_cache.hpp
++++ b/include/hbf_eventlab/runtime/bank_cache.hpp
+@@ -4,12 +4,18 @@
+ #include "hbf_eventlab/interfaces/assembly_storage.hpp"
+ #include <array>
+ #include <map>
++#include <functional>
++#include <vector>
+ 
+ namespace hbf_eventlab {
+-struct CacheFill { BankKey bank; std::uint32_t slot; Generation generation; };
++struct CacheFill { BankKey bank; std::uint32_t slot; Generation generation; std::uint32_t lane=0; };
+ // Two 4KiB slots per physical Bank. Invalidating a tag never destroys pinned results.
+ class BankCache final : public IReadResultStorage {
+ public:
++    void configure_groups(std::uint32_t lanes,std::function<const PageData*(PhysicalNandAddress)> source) {
++        if(!banks_.empty() || !lanes) throw std::logic_error("configure groups before IO");
++        lanes_=lanes; source_=std::move(source);
++    }
+     bool contains(PhysicalNandAddress) const;
+     bool can_fill(BankKey) const;
+     std::optional<CacheFill> begin_fill(PhysicalNandAddress,const PageData*);
+@@ -28,16 +34,19 @@
+     DataToken load(ReadResultId) const override;
+     void release(ReadResultId) noexcept override;
+     std::size_t used_bytes() const override; // physical slot storage, shared by any number of result handles
+-    std::size_t capacity_bytes() const override { return banks_.size()*2*dlu_bytes; }
++    std::size_t capacity_bytes() const override { return banks_.size()*2*dlu_bytes*lanes_; }
+ private:
+     struct Slot {
+         std::optional<PhysicalNandAddress> tag;
+-        PageData data{};
++        std::vector<PageData> data;
++        std::vector<bool> valid;
+         Generation generation{};
+         std::uint64_t age=0;
+         std::size_t references=0;
+         bool filling=false, fill_valid=false;
+     };
++    std::uint32_t lanes_=1;
++    std::function<const PageData*(PhysicalNandAddress)> source_;
+     struct Ref { CacheFill slot; std::uint32_t fragment; };
+     Slot& get(CacheFill);
+     const Slot& get(CacheFill) const;
+--- a/src/runtime/bank_cache.cpp
++++ b/src/runtime/bank_cache.cpp
+@@ -1,13 +1,13 @@
+ #include "hbf_eventlab/runtime/bank_cache.hpp"
+ namespace hbf_eventlab {
+ namespace {
+-bool same_page(PhysicalNandAddress a,PhysicalNandAddress b) {
+-    return block_of(a)==block_of(b) && a.page==b.page;
++bool same_page(PhysicalNandAddress a,PhysicalNandAddress b,std::uint32_t lanes) {
++    return block_of(a)==block_of(b) && a.page/lanes==b.page/lanes;
+ }
+ }
+ bool BankCache::contains(PhysicalNandAddress a) const {
+     const auto it=banks_.find(bank_of(a)); if(it==banks_.end()) return false;
+-    for(const auto& s:it->second) if(!s.filling && s.tag && same_page(*s.tag,a)) return true;
++    for(const auto& s:it->second) if(!s.filling && s.tag && same_page(*s.tag,a,lanes_) && s.valid.at(a.page%lanes_)) return true;
+     return false;
+ }
+ bool BankCache::can_fill(BankKey b) const {
+@@ -25,9 +25,15 @@
+     if(!victim) return {};
+     auto& s=slots[*victim]; s.generation=Generation{checked_add(s.generation.value,1)};
+     s.tag=a; s.tag->byte_offset=0; s.filling=true; ++filling_; s.fill_valid=page!=nullptr;
+-    if(page) s.data=*page;
++    s.data.resize(lanes_);s.valid.assign(lanes_,false);s.fill_valid=false;
++    auto sibling=a;sibling.byte_offset=0;
++    for(std::uint32_t lane=0;lane<lanes_;++lane) {
++        sibling.page=a.page/lanes_*lanes_+lane;
++        const auto* data=source_?source_(sibling):(lane==a.page%lanes_?page:nullptr);
++        if(data) {s.data[lane]=*data;s.valid[lane]=true;s.fill_valid=true;}
++    }
+     s.age=checked_add(age_,1); age_=s.age;
+-    return CacheFill{bank_of(a),*victim,s.generation};
++    return CacheFill{bank_of(a),*victim,s.generation,a.page%lanes_};
+ }
+ BankCache::Slot& BankCache::get(CacheFill f) {
+     auto& s=banks_.at(f.bank).at(f.slot);
+@@ -46,33 +52,34 @@
+ void BankCache::cancel_fill(CacheFill f) { auto& s=get(f); if(!s.filling) throw std::logic_error("fill already ended");
+     s.filling=false; --filling_; s.tag.reset(); }
+ ReadResultLease BankCache::reference(CacheFill f,std::uint32_t offset) {
+-    if(offset>=dlu_bytes || offset%host_unit_bytes) throw std::invalid_argument("bad Cache fragment");
++    if(offset>=dlu_bytes*lanes_ || offset%host_unit_bytes) throw std::invalid_argument("bad Cache fragment");
+     auto& s=get(f); const ReadResultId id{checked_add(next_,1)};
+     refs_.emplace(id,Ref{f,offset/host_unit_bytes}); if(s.references++==0) ++protected_; next_=id.value;
+     s.age=checked_add(age_,1); age_=s.age;
+     return ReadResultLease(*this,id);
+ }
+ ReadResultLease BankCache::pin_fill(CacheFill f,std::uint32_t offset) {
+-    if(!get(f).filling) throw std::logic_error("not a fill"); return reference(f,offset);
++    if(!get(f).filling) throw std::logic_error("not a fill"); return reference(f,f.lane*dlu_bytes+offset);
+ }
+ std::optional<ReadResultLease> BankCache::pin(PhysicalNandAddress a) {
+     auto it=banks_.find(bank_of(a)); if(it==banks_.end()) return {};
+     for(std::uint32_t i=0;i<2;++i) {
+         const auto& s=it->second[i];
+-        if(!s.filling && s.tag && same_page(*s.tag,a))
+-            return reference({bank_of(a),i,s.generation},a.byte_offset);
++        if(!s.filling && s.tag && same_page(*s.tag,a,lanes_) && s.valid.at(a.page%lanes_))
++            return reference({bank_of(a),i,s.generation},(a.page%lanes_)*dlu_bytes+a.byte_offset);
+     }
+     return {};
+ }
+ void BankCache::store(ReadResultId id,DataToken token) {
+     const auto& r=refs_.at(id); auto& s=get(r.slot);
+     if(!s.filling) throw std::logic_error("cannot mutate a saved Cache result");
+-    s.data.at(r.fragment)=token;
++    s.data.at(r.fragment/fragments_per_dlu).at(r.fragment%fragments_per_dlu)=token;
+ }
+ DataToken BankCache::load(ReadResultId id) const {
+     const auto& r=refs_.at(id); const auto& s=get(r.slot);
+     if(s.filling) throw std::logic_error("Cache fill not finished");
+-    return s.data.at(r.fragment);
++    if(!s.valid.at(r.fragment/fragments_per_dlu)) throw std::logic_error("uninitialized group lane");
++    return s.data.at(r.fragment/fragments_per_dlu).at(r.fragment%fragments_per_dlu);
+ }
+ void BankCache::release(ReadResultId id) noexcept {
+     const auto it=refs_.find(id); if(it==refs_.end()) return;
+@@ -84,14 +91,14 @@
+ }
+ void BankCache::invalidate_page(PhysicalNandAddress a) noexcept {
+     auto it=banks_.find(bank_of(a)); if(it==banks_.end()) return;
+-    for(auto& s:it->second) if(s.tag && same_page(*s.tag,a)) {s.tag.reset();s.fill_valid=false;}
++    for(auto& s:it->second) if(s.tag && same_page(*s.tag,a,lanes_)) {s.tag.reset();s.fill_valid=false;}
+ }
+ void BankCache::invalidate_all() noexcept {
+     for(auto& bank:banks_) for(auto& s:bank.second) { s.tag.reset(); s.fill_valid=false; }
+ }
+ std::size_t BankCache::used_bytes() const {
+     std::size_t n=0; for(const auto& b:banks_) for(const auto& s:b.second)
+-        if(s.tag || s.filling || s.references) n+=dlu_bytes;
++        if(s.tag || s.filling || s.references) n+=dlu_bytes*lanes_;
+     return n;
+ }
+ } // namespace hbf_eventlab
+--- a/include/hbf_eventlab/runtime/device_driver.hpp
++++ b/include/hbf_eventlab/runtime/device_driver.hpp
+@@ -19,6 +19,7 @@
+     bool drained() const;
+ };
+ struct DeviceStatistics {
++    std::uint64_t sensed_pages=0;
+     std::uint64_t prefetch_fill_bytes=0, resident_read_bytes=0, external_request_bytes=0, external_response_bytes=0;
+     std::uint64_t handoffs=0, request_transfers=0, accepted=0, delivered=0,
+                   senses=0, cache_hits=0, programs=0, erases=0, window_batches=0,
+--- a/src/runtime/device_driver.cpp
++++ b/src/runtime/device_driver.cpp
+@@ -40,6 +40,8 @@
+      writes_(description_,layout_,capacity_,media_,events_,admission_),
+      reads_(description_,layout_,capacity_,media_,admission_,writes_,egress_),
+      nand_policy_(std::move(nand)),link_policy_(std::move(link)),dispatch_policy_(std::move(dispatch)) {
++    cache_.configure_groups(description_.geometry().planes_per_command_group,
++        [this](auto address) {return media_.read(address);});
+     if(nand_policy_) config_.nand_scheduler="custom";
+     else {
+         if(config_.nand_scheduler=="fcfs") nand_policy_=std::make_unique<FcfsNandPolicy>();
+@@ -397,6 +399,7 @@
+             auto& tx=transactions_.at(choice.transaction); remove_window(tx); tx.read.reset(); notify_sense_order(tx);
+             if(statistics_sink_)statistics_sink_->observe(StatBankOperationStarted{ticket,MediaOperationKind::Read,operation->physical,events_.now()});
+             if(statistics_sink_)statistics_sink_->observe(StatReadServed{tx.id,ReadServiceKind::Sense,ticket,events_.now()});
++            stats_.sensed_pages+=description_.geometry().planes_per_command_group;
+             ++stats_.senses; emit("sense-issue",ch,ticket,operation->physical);
+             schedule(after(events_.now(),config_.media_timing.sense),EventPhase::Completion,[this,op=*operation,fill=*fill,bank,ticket] {
+                 cache_.finish_fill(fill); reads_.finish_read(op.id);
+--- a/src/configuration/simulation_configuration.cpp
++++ b/src/configuration/simulation_configuration.cpp
+@@ -99,6 +99,7 @@
+     add("device.geometry.dies_per_channel",d.geometry.dies_per_channel);
+     add("device.geometry.banks_per_die",d.geometry.banks_per_die);
+     add("device.geometry.pages_per_block",d.geometry.pages_per_block);
++    add("device.geometry.planes_per_command_group",d.geometry.planes_per_command_group);
+     add("device.geometry.blocks_per_bank",d.geometry.blocks_per_bank);
+     add("device.geometry.spare_blocks_per_bank",d.geometry.spare_blocks_per_bank);
+     add("device.capabilities.mocs_supported",d.capabilities.mocs_supported);
+@@ -181,7 +182,8 @@
+ }
+ ResolvedSimulationConfiguration resolve_configuration(SimulationConfiguration c) {
+     auto& d=c.device;const auto& g=d.geometry;
+-    if(d.spec_profile!="ocp_hbf_v0.7.0")throw std::invalid_argument("device.spec_profile: expected ocp_hbf_v0.7.0");
++    if(d.spec_profile!="ocp_hbf_v0.7.0" && d.spec_profile!="grouped_planes")throw std::invalid_argument("unknown device.spec_profile");
++    if(d.geometry.planes_per_command_group>1 && d.spec_profile!="grouped_planes")throw std::invalid_argument("plane groups require grouped_planes profile");
+     g.validate();
+     if(!d.selected.zone_size_dlus)d.selected.zone_size_dlus=g.block_group_dlus();
+     d.topology.die_to_core_channel=d.topology.resolved_routes(g);

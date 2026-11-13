@@ -1,0 +1,57 @@
+# FlashAccel-style read-only geometry with the requested reduced SRAM budget.
+# Per stack: 8 dies x 96 planes; 32 planes per command; 4 KiB NAND pages.
+# SRAM is 768 x 8 KiB private + 2 MiB base die = 8 MiB per stack.
+# Keep this hardware profile identical for prefetch on/off; the caller enables
+# prefetch separately. Two buffers partition it into 4 MiB slots per stack.
+topology: CoLocated
+hbm:
+  backend: naive
+  model_channels: true
+  stacks: 1
+  read_bw_GBps: 620
+  write_max_bw_GBps: 310
+hbf:
+  backend: hbfine
+  prefetch_hyperpage_order: true
+  eventlab_fragments_per_channel: 256
+  read_bw_GBps: 3072
+  write_bw_GBps: 167.77216
+  read_latency_cycles: 7920
+  write_latency_cycles: 148500
+  controller:
+    geometry: grouped_planes
+    stacks: 4
+    dies_per_stack: 8
+    planes_per_die: 96
+    planes_per_command_group: 32
+    banks_per_channel: 48
+    planes_per_bank: 1
+    blocks_per_plane: 342
+    pages_per_block: 192
+    read_target_GBps_per_stack: 768
+    write_target_GBps_per_stack: 41.94304
+    sense_latency_us: 4
+    program_latency_us: 75
+    enable_read_sram: true
+    read_sram_access_latency_ns: 20
+    read_sram_bandwidth_GBps_per_stack: 1536
+    allow_program: false
+    sram_bytes_per_plane: 8192
+    base_die_sram_bytes_per_stack: 2097152
+    write_pages_per_channel: 1
+d2dlink:
+  gpu_to_hbm:
+    bandwidth_GBps: 1536
+    latency_cycles: 10
+  gpu_to_hbf:
+    bandwidth_GBps: 6144
+    latency_cycles: 10
+address_layout:
+  enabled: true
+  hbm_base: 0
+  hbm_capacity_bytes: 17179869184
+  hbf_base: 17179869184
+  hbf_capacity_bytes: 826244333568
+  hbm_allocation_offset: 0
+
+placement: gemm_b_hbf

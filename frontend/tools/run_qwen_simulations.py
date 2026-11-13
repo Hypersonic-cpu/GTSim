@@ -1,4 +1,4 @@
-"""Run a textual Qwen program through ProgramExecutor, streaming via FIFOs.
+"""Run a textual ProgramIR through ProgramExecutor, streaming via FIFOs.
 
 Only manifests, provenance and timing logs are stored. Each kernel is expanded
 once in RAM; the existing C++ reader consumes its JSON from a named pipe.
@@ -58,12 +58,24 @@ def isolate_launch(flow, root, name, expert, params):
 
 
 def plan_program(
-    source, lib, params, residency=None, layouts=None, focus=None, expert=None
+    source, lib, params, residency=None, layouts=None, focus=None, expert=None, placements=None
 ):
     layouts = layouts or {}
     flow = compile_program(
         source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
     )
+    # Placement is a frontend binding; never rewrite read-only operator sources.
+    placements = placements or {}
+    known = {tensor.id for tensor in flow.tensors}
+    if placements.keys() - known:
+        raise ValueError(f"unknown tensor placements: {sorted(placements.keys() - known)}")
+    tiers = {name: A.MemorySpace(tier) for name, tier in placements.items()}
+    for tensor in flow.tensors:
+        if tiers.get(tensor.id) == A.MemorySpace.HBF and not (tensor.external and tensor.read_only):
+            raise ValueError(f"HBF placement requires read-only external weights: {tensor.id}")
+    flow = replace(flow, tensors=tuple(
+        replace(tensor, tier=tiers.get(tensor.id, tensor.tier)) for tensor in flow.tensors
+    ))
     root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
     if focus:
         flow = isolate_launch(flow, root, focus, expert, params)
@@ -267,6 +279,7 @@ def main():
     parser.add_argument("--memory", type=Path, required=True)
     parser.add_argument("--prefetch-config", type=Path)
     parser.add_argument("--tensor-layouts", type=Path)
+    parser.add_argument("--tensor-placements", type=Path, help="JSON mapping tensor names to HBM/HBF")
     parser.add_argument("--focus-launch")
     parser.add_argument("--focus-expert", type=int)
     parser.add_argument("--max-cycles", type=int)
@@ -279,6 +292,7 @@ def main():
         json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
     )
     layouts = json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
+    placements = json.loads(args.tensor_placements.read_text()) if args.tensor_placements else {}
     manifest, plans, expand = plan_program(
         args.source,
         args.lib,
@@ -287,6 +301,7 @@ def main():
         {name: A.TileMajorLayout(**layout) for name, layout in layouts.items()},
         args.focus_launch,
         args.focus_expert,
+        placements,
     )
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]
@@ -307,6 +322,7 @@ def main():
         params=params,
         residency=residency,
         tensor_layouts=layouts,
+        tensor_placements=placements,
         focus_launch=args.focus_launch,
         focus_expert=args.focus_expert,
         launch_overhead_cycles=0,
@@ -398,7 +414,8 @@ def main():
         json.dumps(
             dict(
                 version="new",
-                batch=params["B"],
+                batch=params.get("B"),
+                program=manifest["symbol"],
                 returncode=returncode,
                 cycles=outcome.get("timing", {}).get("total_cycles"),
             )

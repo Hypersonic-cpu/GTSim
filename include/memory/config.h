@@ -54,6 +54,8 @@ struct HBFConfig {
     HBFBackend backend{HBFBackend::Naive};
     HBFControllerConfig controller{};
     bool align_tensors_to_command_group{true};
+    bool prefetch_hyperpage_order{false};
+    std::size_t eventlab_fragments_per_channel{0};
 };
 
 struct D2DLinkConfig {

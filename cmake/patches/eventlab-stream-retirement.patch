@@ -1,0 +1,66 @@
+--- a/include/hbf_eventlab/host/workload.hpp
++++ b/include/hbf_eventlab/host/workload.hpp
+@@ -54,6 +54,9 @@
+     // 0 disables this active-input budget; independent of the lifetime guard.
+     std::size_t max_resident_fragments=0;
+     std::size_t max_resident_fragments_per_channel=0;
++    // Dependency-free streaming clients can discard terminal result records.
++    // Such clients must use monotonically increasing, never-reused Global IDs.
++    bool retain_completed_results=true;
+     // Host policies, not OCP requirements. Zero retains fail-on-error behavior.
+     std::uint32_t max_pending_retries=3; // additional attempts per refused command
+     std::uint32_t max_timeout_retries=3; // additional whole-DLU assembly rounds
+--- a/include/hbf_eventlab/host/host_driver.hpp
++++ b/include/hbf_eventlab/host/host_driver.hpp
+@@ -182,6 +182,8 @@
+     std::vector<std::size_t> resident_by_channel_;
+     std::map<GlobalRequestId,GlobalRequest> requests_;
+     std::map<GlobalRequestId,WorkResult> results_;
++    std::uint64_t highest_registered_global_=0;
++    bool registered_global_=false;
+     // Exact aggregates of results_, owned by registration and final transition.
+     // Count Globals (including future releases), never attempts, fragments or DLUs.
+     // Retained history is still used for dependencies and duplicate-ID checks.
+--- a/src/host/host_input.cpp
++++ b/src/host/host_input.cpp
+@@ -17,6 +17,9 @@
+     std::map<GlobalRequestId,const GlobalRequest*> ids;
+     std::uint64_t count=next_work_;
+     for(const auto& r:input) {
++        if(!config_.retain_completed_results && (!r.after.empty() ||
++           (registered_global_ && r.id.value<=highest_registered_global_)))
++            throw std::invalid_argument("compact streaming needs dependency-free, monotonically increasing Global IDs");
+         if(results_.count(r.id) || !ids.emplace(r.id,&r).second)
+             throw std::invalid_argument("duplicate Global ID");
+         if(r.op!=Op::Read && r.op!=Op::Write)throw std::invalid_argument("invalid operation");
+@@ -95,6 +98,8 @@
+     for(auto& item:input) {
+         const auto& r=item.request;
+         added.push_back(r.id);
++        highest_registered_global_=std::max(highest_registered_global_,r.id.value);
++        registered_global_=true;
+         requests_.emplace(r.id,r);
+         global_fragment_refs_.emplace(r.id,0);
+         const auto inserted=results_.emplace(r.id,WorkResult{r.id,LogicalResult::Pending,static_cast<std::size_t>(r.bytes/host_unit_bytes)});
+--- a/src/host/host_storage.cpp
++++ b/src/host/host_storage.cpp
+@@ -104,6 +104,9 @@
+         if(global_fragment_refs_.at(id)!=0 || results_.at(id).state==LogicalResult::Pending)
+             throw std::logic_error("Global reclaimed while still referenced/pending");
+         requests_.erase(id);global_fragment_refs_.erase(id);
++        // Completion callbacks own their result copies; resident work and
++        // attempts no longer reference this Global at this stable boundary.
++        if(!config_.retain_completed_results)results_.erase(id);
+         if(profile_)profile_->add(RuntimeCounter::ReclaimedRequests);
+     }
+     reclaimable_globals_.clear();
+--- a/src/configuration/simulation_configuration.cpp
++++ b/src/configuration/simulation_configuration.cpp
+@@ -120,6 +120,7 @@
+     add("host.retained_fragments",h.retained_fragments);add("host.max_logical_fragments",h.max_logical_fragments);
+     add("host.max_resident_fragments",h.max_resident_fragments);
+     add("host.max_resident_fragments_per_channel",h.max_resident_fragments_per_channel);
++    add("host.retain_completed_results",h.retain_completed_results);
+     add("host.recovery.max_replay_passes",h.max_replay_passes);
+     add("host.retry.max_pending_retries",h.max_pending_retries);add("host.retry.max_timeout_retries",h.max_timeout_retries);
+     add("host.retry.pending_delay_ps",h.pending_retry_delay);

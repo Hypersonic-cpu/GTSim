@@ -1,0 +1,85 @@
+--- a/include/hbf_eventlab/host/workload.hpp
++++ b/include/hbf_eventlab/host/workload.hpp
+@@ -53,6 +53,7 @@
+     std::size_t max_logical_fragments=1048576;
+     // 0 disables this active-input budget; independent of the lifetime guard.
+     std::size_t max_resident_fragments=0;
++    std::size_t max_resident_fragments_per_channel=0;
+     // Host policies, not OCP requirements. Zero retains fail-on-error behavior.
+     std::uint32_t max_pending_retries=3; // additional attempts per refused command
+     std::uint32_t max_timeout_retries=3; // additional whole-DLU assembly rounds
+--- a/include/hbf_eventlab/host/host_driver.hpp
++++ b/include/hbf_eventlab/host/host_driver.hpp
+@@ -57,6 +57,7 @@
+     InputAdmission try_submit(const std::vector<GlobalRequest>&);
+     InputAdmission try_submit(const GlobalRequest& r) { return try_submit(std::vector<GlobalRequest>{r}); }
+     InputAdmission try_start_incremental(const std::vector<GlobalRequest>&);
++    InputCapacity channel_input_capacity(ChannelId ch) const { return {config_.max_resident_fragments_per_channel,resident_by_channel_.at(ch),input_generation_}; }
+     InputCapacity input_capacity() const { return {config_.max_resident_fragments,work_.size(),input_generation_}; }
+     HostStorage storage() const;
+     // A coalesced event on reclaimed capacity, not a guarantee a batch fits.
+@@ -178,6 +179,7 @@
+     WriteRetentionStore retention_;
+     RecoveryManager recovery_;
+     std::vector<Channel> channels_;
++    std::vector<std::size_t> resident_by_channel_;
+     std::map<GlobalRequestId,GlobalRequest> requests_;
+     std::map<GlobalRequestId,WorkResult> results_;
+     // Exact aggregates of results_, owned by registration and final transition.
+--- a/src/host/host_driver.cpp
++++ b/src/host/host_driver.cpp
+@@ -12,6 +12,7 @@
+ HostDriver::HostDriver(IHostPort& p,EventQueue& e,const IHostInterleaver& i,HostConfiguration c,std::unique_ptr<IHostSendPolicy> policy)
+     :port_(p),events_(e),splitter_(i,p.layout()),config_(c),policy_(std::move(policy)),
+      retention_(c.retained_fragments),recovery_(c.max_replay_passes),channels_(p.description().geometry().host_channels) {
++    resident_by_channel_.resize(p.description().geometry().host_channels);
+     c.validate();
+     if(&p.notifications().events()!=&e) throw std::invalid_argument("Host and Device must share event clock");
+     if(policy_) config_.send_policy="custom";
+--- a/src/host/host_input.cpp
++++ b/src/host/host_input.cpp
+@@ -105,6 +105,7 @@
+         if(statistics_sink_ && r.offered_at)statistics_sink_->observe(StatInputRegistered{r.id,*r.offered_at,events_.now()});
+         for(auto& f:item.fragments) {
+             next_work_=checked_add(next_work_,1);f.id=LogicalWorkId{next_work_};work_.emplace(f.id,Work{f});
++            ++resident_by_channel_.at(f.address.channel);
+             if(profile_)profile_->add(RuntimeCounter::RegisteredFragments);
+             if(statistics_sink_)statistics_sink_->observe(StatWorkDefined{f.id,r.id,f.address,
+                 r.op==Op::Write?std::optional<std::uint64_t>{r.content}:std::nullopt});
+--- a/src/host/host_storage.cpp
++++ b/src/host/host_storage.cpp
+@@ -36,6 +36,16 @@
+         if(profile_) {profile_->add(RuntimeCounter::InputBackpressured);profile_->add(RuntimeCounter::BackpressuredFragments,count);}
+         return {InputDisposition::Backpressured,count,input_capacity()};
+     }
++    if(config_.max_resident_fragments_per_channel) {
++        std::vector<std::size_t> counts(resident_by_channel_.size());
++        for(const auto& p:prepared)for(const auto& f:p.fragments)++counts.at(f.address.channel);
++        for(std::size_t ch=0;ch<counts.size();++ch) {
++            const auto cap=config_.max_resident_fragments_per_channel;
++            if(counts[ch]>cap) return {InputDisposition::TooLarge,count,input_capacity()};
++            if(counts[ch]>cap-resident_by_channel_[ch])
++                return {InputDisposition::Backpressured,count,input_capacity()};
++        }
++    }
+     register_input(std::move(prepared));
+     if(initial) {incremental_=true;loaded_=true;start();}
+     if(profile_)profile_->add(RuntimeCounter::InputRegistered);
+@@ -69,6 +79,7 @@
+         if(!safe) {++it;continue;}
+         if(!u.replay)for(const auto& f:u.fragments) {
+             const auto erased=work_.erase(f.id);
++            if(erased)--resident_by_channel_.at(f.address.channel);
+             if(profile_)profile_->add(RuntimeCounter::ReclaimedWork,erased);
+         }
+         // Only normal writes appear in Version::normal; replay and reads cannot
+--- a/src/configuration/simulation_configuration.cpp
++++ b/src/configuration/simulation_configuration.cpp
+@@ -119,6 +119,7 @@
+     add("host.max_open_dlus_per_channel",h.max_open_dlus_per_channel);
+     add("host.retained_fragments",h.retained_fragments);add("host.max_logical_fragments",h.max_logical_fragments);
+     add("host.max_resident_fragments",h.max_resident_fragments);
++    add("host.max_resident_fragments_per_channel",h.max_resident_fragments_per_channel);
+     add("host.recovery.max_replay_passes",h.max_replay_passes);
+     add("host.retry.max_pending_retries",h.max_pending_retries);add("host.retry.max_timeout_retries",h.max_timeout_retries);
+     add("host.retry.pending_delay_ps",h.pending_retry_delay);

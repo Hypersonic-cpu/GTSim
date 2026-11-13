@@ -1,0 +1,165 @@
+--- a/src/physical/physical_types.hpp
++++ b/src/physical/physical_types.hpp
+@@ -78,6 +78,8 @@
+     }
+     throw std::runtime_error("unknown op");
+ }
++
++enum class ReadDataPath { Host, Prefetch, Resident };
+ 
+ struct PhysicalRequest {
+     std::string id{};
+@@ -90,6 +92,7 @@
+     std::uint64_t bytes = 0;
+     std::uint32_t stream_id = 0;
+     HeatmapTrafficSource heatmap_source = HeatmapTrafficSource::Direct;
++    ReadDataPath read_data_path = ReadDataPath::Host;
+ };
+ 
+ struct Breakdown {
+--- a/src/physical/simulation_session.hpp
++++ b/src/physical/simulation_session.hpp
+@@ -66,6 +66,7 @@
+     std::uint64_t addr = 0;
+     std::uint64_t bytes = 0;
+     double issue_ns = 0.0;
++    ReadDataPath read_data_path = ReadDataPath::Host;
+     // Only Barrier transactions may have non-zero duration. A barrier is a
+     // generic dependency/timer record, not a workload semantic annotation.
+     double duration_ns = 0.0;
+@@ -319,6 +320,11 @@
+ 
+     // Read-only setup evidence for the simulation-session ready receipt. This is
+     // physical device accounting, not a restatement of the requested image.
++    [[nodiscard]] host::HbfAddress hbf_static_location(std::uint64_t address) const {
++        if (!hbf_) throw SimulationInputError("static location needs HBF");
++        return hbf_->static_location(address);
++    }
++
+     [[nodiscard]] const host::HbfStats* hbf_stats() const {
+         return hbf_ ? &hbf_->stats() : nullptr;
+     }
+--- a/src/physical/simulation_session.cpp
++++ b/src/physical/simulation_session.cpp
+@@ -939,6 +939,7 @@
+             .bytes = transaction.bytes,
+             .stream_id = 0,
+             .heatmap_source = HeatmapTrafficSource::Direct,
++            .read_data_path = transaction.read_data_path,
+         });
+     }
+     if (transaction.target == SimulationTarget::D2dHbfToHbm ||
+--- a/src/physical/hbf/hbf_config.hpp
++++ b/src/physical/hbf/hbf_config.hpp
+@@ -47,6 +47,7 @@
+     double tsv_bandwidth_GBps = 1644.0;
+     double media_lane_bandwidth_GBps = 2048.0;
+     double logic_sram_bandwidth_GBps = 2048.0;
++    double read_sram_access_latency_ns = 0.0;
+     double page_buffer_bandwidth_GBps = 2048.0;
+     std::uint64_t command_address_bytes = 64;
+     // Per-request dispatch cost of the stack's logic scheduler. HBM-class
+--- a/src/host/hbf_controller.hpp
++++ b/src/host/hbf_controller.hpp
+@@ -95,6 +95,7 @@
+     std::uint64_t host_zone_remaps = 0;
+     std::uint64_t host_zone_invalidations = 0;
+     std::uint64_t host_zone_resets = 0;
++    std::uint64_t prefetch_fill_bytes = 0, resident_read_bytes = 0, resident_read_requests = 0;
+     std::uint64_t read_requests = 0;
+     std::uint64_t program_requests = 0;
+     std::uint64_t erase_requests = 0;
+@@ -815,6 +816,7 @@
+ // Host software facade with a timed physical device. Application mapping and
+ // GC/WL decisions live here; base-die remapping and physical PEC live in media_.
+ class HbfController {
++    bool internal_read_payload_ = false;
+     friend class HbfMappingPolicy;
+     // data_ready_ns: a host-issued physical program starts no earlier than
+     // its payload is assembled in controller memory (structural host FTLs).
+@@ -822,6 +824,9 @@
+         double data_ready_ns = 0.0);
+     void prepopulate_raw_media_page(std::uint64_t byte_address);
+ public:
++    [[nodiscard]] HbfAddress static_location(std::uint64_t address) const {
++        return decode_ppn(static_ppn_for_source_page(address / config_.device.page_size_bytes));
++    }
+     explicit HbfController(
+         HbfConfig config,
+         AddressHeatmap* address_heatmap = nullptr);
+--- a/src/host/hbf_controller.cpp
++++ b/src/host/hbf_controller.cpp
+@@ -4048,6 +4048,14 @@
+ }
+ 
+ PhysicalCompletion HbfController::issue_media(const PhysicalRequest& request, double data_ready_ns) {
++    if (request.read_data_path != ReadDataPath::Host &&
++        (request.op != Op::Read || request.address_space != AddressSpace::Static))
++        throw std::invalid_argument("SRAM data paths require static reads");
++    struct PathScope {
++        bool& value; bool old;
++        ~PathScope() { value = old; }
++    } path_scope{internal_read_payload_, internal_read_payload_};
++    internal_read_payload_ = request.read_data_path == ReadDataPath::Prefetch;
+     seed_media_image();
+     if (config_.host.mapping_mode == MappingMode::RawPhysical &&
+         request.address_space == AddressSpace::Logical) {
+@@ -4357,6 +4365,33 @@
+                 "wait_stack_state_dependency");
+         }
+     }
++
++    if (request.read_data_path == ReadDataPath::Resident) {
++        // GTSim owns the SRAM lease and publishes it only after the fill receipt.
++        // Preserve the native SRAM port and HBIO contention; no NAND/cache access.
++        const auto location=static_location(request.addr);
++        auto& logic=logic_dies_.at(location.stack);
++        const auto command_done=schedule_external_request_command(channel_index(location),
++            ingress_state_ready_ns, out.breakdown, trace_spans, "SRAM read", "user");
++        const auto duration=transfer_time_ns(request.bytes,config_.device.logic_sram_bandwidth_GBps);
++        const auto transfer=reserve(command_done,duration,logic.sram);
++        out.breakdown.scheduler_queue_wait_ns += transfer.wait_ns;
++        out.breakdown.sram_staging_ns += duration;
++        out.start_ns=transfer.start_ns;
++        out.finish_ns=schedule_external_read_egress(channel_index(location),request.bytes,
++            transfer.finish_ns+config_.device.read_sram_access_latency_ns,
++            out.breakdown,trace_spans,"sram_read_response","resident payload");
++        out.note="explicit-sram-resident";
++        out.physical_bytes=0;
++        ++stats_.read_requests; ++stats_.resident_read_requests;
++        ++stats_.scalar_read_requests;
++        stats_.scalar_read_pages += (request.addr % config_.device.page_size_bytes + request.bytes + config_.device.page_size_bytes - 1) / config_.device.page_size_bytes;
++        stats_.resident_read_bytes+=request.bytes;
++        stats_.stage_work += out.breakdown;
++        stats_.finish_ns=std::max(stats_.finish_ns,out.finish_ns);
++        return out;
++    }
++    if (request.read_data_path == ReadDataPath::Prefetch) stats_.prefetch_fill_bytes+=request.bytes;
+ 
+     if (config_.host.read_mshr_entries_per_stack && request.op == Op::Read &&
+         request.address_space == AddressSpace::Logical && !mapping_policy_) {
+@@ -8039,6 +8074,7 @@
+     Breakdown& breakdown,
+     std::vector<TraceSpan>* spans,
+     const std::string& detail, std::string_view source) {
++    if (internal_read_payload_) return earliest_ns;
+     const double command_ns = transfer_time_ns(
+         config_.device.command_address_bytes, physical::hbf::speed_grade(config_.device.speed_grade).payload_GBps_per_channel);
+     auto command = media_->transfer(channel, physical::hbf::HbfDevice::Direction::Command,
+@@ -8158,6 +8194,7 @@
+     std::vector<TraceSpan>* spans,
+     const std::string& name,
+     const std::string& detail) {
++    if (internal_read_payload_) return earliest_ns;
+     if (bytes == 0 || bytes > config_.device.page_size_bytes) {
+         throw std::runtime_error(
+             "HBF external read egress must contain 1..page_size payload bytes");
+@@ -11974,7 +12011,7 @@
+     }
+     const auto expected_page_admissions = checked_add(
+         stats_.read_split_pages,
+-        stats_.read_requests - stats_.read_splits - stats_.read_mshr_joined_reads -
++        stats_.read_requests - stats_.resident_read_requests - stats_.read_splits - stats_.read_mshr_joined_reads -
+             stats_.ingress_tag_read_buffer_hits - stats_.ingress_tag_write_buffer_hits,
+         "HBF expected page-read admissions");
+     if (checked_add(stats_.page_read_admission_events, stats_.page_read_run_pages,

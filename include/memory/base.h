@@ -26,6 +26,9 @@ struct MemoryRoutingHint {
     int consumer_node{-1};
 };
 
+enum class MemoryReadPath : std::uint8_t { Host, Prefetch, Resident };
+struct MemoryLocation { int stack{}, die{}, plane{}; };
+
 struct MemRequest {
     std::uint64_t request_id;
     std::uint64_t global_addr;
@@ -34,6 +37,7 @@ struct MemRequest {
     MemoryTier tier;
     MemoryRoutingHint routing{};
     std::uint64_t read_alias{};
+    MemoryReadPath read_path{MemoryReadPath::Host};
 };
 
 struct MemResponse {
@@ -103,11 +107,17 @@ public:
     virtual std::vector<MemoryBandwidthSample> bandwidth_samples() const {
         return {};
     }
+    virtual bool supports_sram_paths() const { return false; }
+    virtual MemoryLocation locate(std::uint64_t) const {
+        throw std::invalid_argument("backend does not expose physical SRAM placement");
+    }
     virtual bool supports_prefetch() const { return false; }
     virtual void preload_region(std::uint64_t, std::uint64_t, bool) {
         throw std::invalid_argument("backend does not support preload");
     }
 };
+
+std::unique_ptr<MemoryBackend> make_sram_backend(std::unique_ptr<MemoryBackend>, const HBFConfig&, std::uint64_t);
 
 std::unique_ptr<MemoryBackend> make_hbm_backend(const HBMConfig& config,
                                               double core_frequency_mhz);

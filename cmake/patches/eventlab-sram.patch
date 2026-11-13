@@ -1,0 +1,173 @@
+--- a/include/hbf_eventlab/common/host_protocol.hpp
++++ b/include/hbf_eventlab/common/host_protocol.hpp
+@@ -3,6 +3,7 @@
+ #include <optional>
+ 
+ namespace hbf_eventlab {
++enum class ReadDataPath { Host, Prefetch, Resident };
+ using ReadGroup = std::uint32_t;
+ // Public command/response values, independent of path implementation classes.
+ struct HostCommand {
+@@ -13,6 +14,7 @@
+     std::uint16_t axi_id;
+     ReadHint read_hint = ReadHint::Regular;
+     std::optional<ReadGroup> read_group;
++    ReadDataPath read_data_path=ReadDataPath::Host;
+ };
+ enum class ReadRestrictionReason { None, AwaitingReplay, ReplayInProgress, PhysicalRepairRequired };
+ struct ReadResponse {
+--- a/include/hbf_eventlab/host/workload.hpp
++++ b/include/hbf_eventlab/host/workload.hpp
+@@ -17,6 +17,7 @@
+     // Original producer time, retained across input-capacity retries. Metadata
+     // only: never schedules an event in the past. Must be <= not_before.
+     std::optional<Tick> offered_at;
++    ReadDataPath read_data_path=ReadDataPath::Host;
+ };
+ struct ContentKey {
+     LogicalBlockKey block;
+--- a/src/host/host_driver.cpp
++++ b/src/host/host_driver.cpp
+@@ -141,6 +141,7 @@
+         if(!u.command)u.command=CommandId{checked_add(next_command_,1)},next_command_=u.command->value;
+         const auto command=*u.command;
+         LocalTransaction tx{{command,u.op,f.address,static_cast<std::uint32_t>(u.fragments.size()*64),0,u.hint,u.group},{}};
++        tx.command.read_data_path=requests_.at(f.parent).read_data_path;
+         if(u.op==Op::Write)for(const auto& fragment:u.fragments)tx.data.push_back(fragment.data);
+         const auto life=std::weak_ptr<bool>(alive_);
+         if(profile_)profile_->add(RuntimeCounter::HandoffAttempts);
+--- a/include/hbf_eventlab/architecture/execution_configuration.hpp
++++ b/include/hbf_eventlab/architecture/execution_configuration.hpp
+@@ -36,6 +36,8 @@
+     std::size_t threshold=32; // 0 disables count trigger; timer/Batch remain active
+ };
+ struct ExecutionConfiguration {
++    double sram_bandwidth_GBps=1536.0;
++    Tick sram_access_latency{20000};
+     MediaTimingConfiguration media_timing;
+     UcieExecutionConfiguration ucie;
+     BufferConfiguration buffers;
+--- a/include/hbf_eventlab/runtime/device_driver.hpp
++++ b/include/hbf_eventlab/runtime/device_driver.hpp
+@@ -19,6 +19,7 @@
+     bool drained() const;
+ };
+ struct DeviceStatistics {
++    std::uint64_t prefetch_fill_bytes=0, resident_read_bytes=0, external_request_bytes=0, external_response_bytes=0;
+     std::uint64_t handoffs=0, request_transfers=0, accepted=0, delivered=0,
+                   senses=0, cache_hits=0, programs=0, erases=0, window_batches=0,
+                   cache_blocked=0, ingress_attempts=0;
+@@ -86,7 +87,7 @@
+         std::uint64_t accepted_sequence=0;
+         std::optional<WaitId> wait;
+         std::optional<ReadCandidate> read;
+-        bool released=false,cache_pending=false;
++        bool released=false,cache_pending=false,sram_ready=false;
+         std::optional<ReadResultLease> cache_result;
+         std::optional<PhysicalNandAddress> target;
+         std::optional<ReadResultId> egress;
+@@ -149,6 +150,7 @@
+     std::map<std::uint64_t,Transaction> transactions_;
+     std::map<CommandKey,std::uint64_t> identities_;
+     std::set<EventId> events_owned_;
++    Tick sram_next_{};
+     std::uint64_t next_attempt_=0;
+     DeviceStatistics stats_;
+     IStatisticsSink* statistics_sink_=nullptr;
+--- a/src/runtime/read_path.cpp
++++ b/src/runtime/read_path.cpp
+@@ -60,6 +60,12 @@
+     if (!view.current_contents) return {true,{ReadStatus::UnwrittenPage},{}};
+     if (media_.unusable(block_of(capacity_.inspect(cmd.address))))
+         return {true,{ReadStatus::TemporarilyRestricted,ReadRestrictionReason::PhysicalRepairRequired},{}};
++    if(cmd.read_data_path==ReadDataPath::Resident) {
++        const auto a=capacity_.inspect(cmd.address);
++        const auto* data=media_.read(a);
++        if(!data) return {true,{ReadStatus::UnwrittenPage},{}};
++        return {true,{ReadStatus::Success},data->at(a.byte_offset/host_unit_bytes)};
++    }
+     return {};
+ }
+ ReadSubmission ReadPath::immediate(const HostCommand& cmd,Observation observation) {
+--- a/src/runtime/device_driver.cpp
++++ b/src/runtime/device_driver.cpp
+@@ -1,4 +1,5 @@
+ #include "hbf_eventlab/runtime/device_driver.hpp"
++#include <cmath>
+ #include <algorithm>
+ 
+ namespace hbf_eventlab {
+@@ -109,7 +110,11 @@
+     if(!channel.rx.fits(payload)) waits.push_back(WaitKey::channel_key(WaitReason::IngressSpace,ch));
+     if(!waits.empty()) return {HandoffDisposition::NotTaken,{},std::move(waits)};
+     const TransferAttemptId id{checked_add(next_attempt_,1)};
+-    const auto service=checked_add(config_.ucie.overhead.request_control_bytes,payload);
++    const bool internal=cmd.read_data_path==ReadDataPath::Prefetch;
++    if(cmd.read_data_path!=ReadDataPath::Host && cmd.op!=Op::Read)
++        throw std::invalid_argument("SRAM data paths require read commands");
++    const auto service=internal?0:checked_add(config_.ucie.overhead.request_control_bytes,payload);
++    stats_.external_request_bytes+=service;
+     // There is no hidden unbounded request queue: source offers only when this lane
+     // can start. Request-side arbitration of multiple source records belongs to Host.
+     const std::vector<TransferCandidateView> offer{{id.value,id.value,cmd.op,service}};
+@@ -120,12 +125,12 @@
+     channel.transactions.insert(id.value);
+     channel.rx.reserve(payload); channel.request_busy=true; ++channel.request_flights;
+     next_attempt_=id.value; ++stats_.handoffs; ++stats_.request_transfers;
+-    const auto serialized=after(events_.now(),config_.ucie.serialization(service));
++    const auto serialized=after(events_.now(),internal?Tick{}:config_.ucie.serialization(service));
+     schedule(serialized,EventPhase::Completion,[this,ch] {
+         channels_[ch]->request_busy=false;
+         signals_.notify(WaitKey::channel_key(WaitReason::RequestLink,ch));
+     });
+-    schedule(after(serialized,config_.ucie.overhead.request_fixed_latency),EventPhase::Arrival,[this,ch,id] {
++    schedule(after(serialized,internal?Tick{}:config_.ucie.overhead.request_fixed_latency),EventPhase::Arrival,[this,ch,id] {
+         auto& t=transactions_.at(id.value); t.stage=Stage::Ingress;
+         --channels_[ch]->request_flights; // RX reservation becomes resident, unchanged accounting.
+         if(statistics_sink_)statistics_sink_->observe(StatAttemptAdvanced{id,AttemptMilestone::RxArrival,events_.now()});
+@@ -409,6 +414,21 @@
+         if(t.stage!=Stage::Accepted || t.cache_pending) continue;
+         if(cmd.op==Op::Read) {
+             const auto response=reads_.response(ch,cmd.id); if(!response) continue;
++            if(response->data && cmd.read_data_path!=ReadDataPath::Host && !t.sram_ready) {
++                if(!std::isfinite(config_.sram_bandwidth_GBps) || config_.sram_bandwidth_GBps<=0)
++                    throw std::invalid_argument("invalid SRAM port bandwidth");
++                const auto start=std::max(events_.now().value,sram_next_.value);
++                sram_next_=Tick{checked_add(start,static_cast<std::uint64_t>(std::ceil(host_unit_bytes*1000.0/config_.sram_bandwidth_GBps)))};
++                t.cache_pending=true;
++                const auto id=t.id.value;
++                schedule(after(sram_next_,config_.sram_access_latency),EventPhase::Completion,[this,id,ch] {
++                    auto& tx=transactions_.at(id);tx.cache_pending=false;tx.sram_ready=true;
++                    if(tx.input.command.read_data_path==ReadDataPath::Prefetch) stats_.prefetch_fill_bytes+=host_unit_bytes;
++                    else stats_.resident_read_bytes+=host_unit_bytes;
++                    request_pump(ch);
++                });
++                continue;
++            }
+             if(response->data) {
+                 auto slot=reads_.result_in(ch,cmd.id,egress_);
+                 if(!slot) {
+@@ -436,7 +456,8 @@
+         const auto& t=transactions_.at(identity); const auto& cmd=t.input.command;
+         if(t.stage!=Stage::Egress) continue;
+         const auto payload=cmd.op==Op::Read && reads_.response(ch,cmd.id)->data?host_unit_bytes:0;
+-        candidates.push_back({t.id.value,t.accepted_sequence,cmd.op,checked_add(config_.ucie.overhead.response_control_bytes,payload)});
++        const auto bytes=cmd.read_data_path==ReadDataPath::Prefetch?0:checked_add(config_.ucie.overhead.response_control_bytes,payload);
++        candidates.push_back({t.id.value,t.accepted_sequence,cmd.op,bytes});
+     }
+     if(candidates.empty()) return;
+     const auto id=link_policy_->select(candidates);
+@@ -444,9 +465,11 @@
+     if(chosen==candidates.end()) throw std::logic_error("link policy selected a noncandidate");
+     auto& t=transactions_.at(id); t.stage=Stage::ResponseLink;
+     channel.response_busy=true; ++channel.response_flights;
+-    const auto serialized=after(events_.now(),config_.ucie.serialization(chosen->service_bytes));
++    const bool internal=t.input.command.read_data_path==ReadDataPath::Prefetch;
++    stats_.external_response_bytes+=chosen->service_bytes;
++    const auto serialized=after(events_.now(),internal?Tick{}:config_.ucie.serialization(chosen->service_bytes));
+     schedule(serialized,EventPhase::Completion,[this,ch] { channels_[ch]->response_busy=false; request_pump(ch); });
+-    schedule(after(serialized,config_.ucie.overhead.response_fixed_latency),EventPhase::Completion,[this,id]{deliver(id);});
++    schedule(after(serialized,internal?Tick{}:config_.ucie.overhead.response_fixed_latency),EventPhase::Completion,[this,id]{deliver(id);});
+     emit("response-issue",ch,id);
+ }
+ void DeviceDriver::deliver(std::uint64_t id) {

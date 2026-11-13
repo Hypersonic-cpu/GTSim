@@ -31,12 +31,20 @@ MemorySystem::MemorySystem(int cache_size_bytes, int line_size_bytes, int hit_la
             if ((memory_config_.topology == MemoryTopology::FullHBM && tensors_.contains_tier(MemoryTier::HBF)) ||
                 (memory_config_.topology == MemoryTopology::FullHBF && tensors_.contains_tier(MemoryTier::HBM)))
                 throw std::invalid_argument("segmented allocations require a compatible explicit placement profile");
+            // TensorRegistry is unordered. Legal NAND initialization must follow
+            // physical address order, regardless of tensor IDs or hash iteration.
+            std::vector<const TensorMetadata*> preloaded;
             for (const auto& [id, tensor] : tensors_.entries()) {
                 (void)id;
-                if (hbf_ && tensor.initial_memory_tier == MemoryTier::HBF && tensor.preloaded) {
-                    const auto bytes = (tensor.byte_size() + 4095) / 4096 * 4096;
-                    hbf_->preload_region(tensor.global_base_address, bytes, tensor.read_only);
-                }
+                if (hbf_ && tensor.initial_memory_tier == MemoryTier::HBF && tensor.preloaded)
+                    preloaded.push_back(&tensor);
+            }
+            std::sort(preloaded.begin(), preloaded.end(), [](auto a, auto b) {
+                return a->global_base_address < b->global_base_address;
+            });
+            for (const auto* tensor : preloaded) {
+                const auto bytes = (tensor->byte_size() + 4095) / 4096 * 4096;
+                hbf_->preload_region(tensor->global_base_address, bytes, tensor->read_only);
             }
         }
         report_placement_override();
