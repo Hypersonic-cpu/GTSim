@@ -48,13 +48,6 @@ target_link_libraries(gtsim_hbf_layout PRIVATE gtsim_core)
 add_executable(gtsim_gemm workloads/gemm/gemm_h100.cpp)
 target_link_libraries(gtsim_gemm PRIVATE gtsim_core)
 
-add_library(gtsim_tile_ir STATIC src/tile_ir_parser.cpp src/tile_dag_builder.cpp)
-target_link_libraries(gtsim_tile_ir PUBLIC gtsim_core)
-add_executable(gtsim_gemm_ir workloads/gemm/gemm_ir.cpp)
-target_link_libraries(gtsim_gemm_ir PRIVATE gtsim_tile_ir)
-add_executable(gtsim_serve_ir workloads/serve/serve_ir.cpp)
-target_link_libraries(gtsim_serve_ir PRIVATE gtsim_tile_ir)
-
 add_executable(gtsim_fa3 workloads/fa3/fa3_h100.cpp)
 target_link_libraries(gtsim_fa3 PRIVATE gtsim_core)
 
@@ -64,10 +57,7 @@ target_link_libraries(gtsim_fa2 PRIVATE gtsim_core)
 option(GTSIM_BUILD_IR_FRAMEWORK "Build the layered IR framework and its tests" ON)
 if(GTSIM_BUILD_IR_FRAMEWORK)
   add_library(gtsim_execution STATIC
-    src/execution_ir/graph_codec.cpp
-    src/execution_ir/graph_materialize.cpp
     src/execution_ir/kernel_graph_builder.cpp
-    src/runtime/program_executor.cpp
     src/runtime/stream_protocol.cpp
     src/runtime/streaming_program_runner.cpp)
   target_link_libraries(gtsim_execution PUBLIC gtsim_core)
@@ -77,8 +67,6 @@ endif()
 
 
 include(CTest)
-option(GTSIM_ENABLE_LEGACY_TVM_TESTS "Enable legacy TVM compatibility tests" OFF)
-set(GTSIM_TVM_PYTHON "" CACHE FILEPATH "Python interpreter with the separately built pinned TVM (optional integration tests)")
 if(BUILD_TESTING)
   add_executable(hbf_prefetch_check tests/hbf_prefetch.cpp)
   target_link_libraries(hbf_prefetch_check PRIVATE gtsim_core)
@@ -97,21 +85,6 @@ if(BUILD_TESTING)
   target_link_libraries(fa2_tests PRIVATE gtsim_core)
   add_test(NAME fa2_decode_semantics COMMAND fa2_tests
            ${CMAKE_CURRENT_SOURCE_DIR}/configs/v0.1.0/a100-pcie40-simple.yaml)
-  add_executable(serve_ir_tests tests/serve_ir_tests.cpp)
-  target_link_libraries(serve_ir_tests PRIVATE gtsim_tile_ir)
-  add_test(NAME serve_ir_boundary COMMAND serve_ir_tests)
-  add_executable(tile_ir_tests tests/tile_ir_tests.cpp)
-  target_link_libraries(tile_ir_tests PRIVATE gtsim_tile_ir)
-  add_executable(tile_ir_parity_tests tests/tile_ir_parity_tests.cpp)
-  target_link_libraries(tile_ir_parity_tests PRIVATE gtsim_tile_ir)
-  add_test(NAME tile_ir_gemm_parity COMMAND tile_ir_parity_tests
-           ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/h100_gemm.gtsir 128 256 128)
-  add_test(NAME tile_ir_boundary COMMAND tile_ir_tests
-           ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/copy.gtsir
-           ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/h100_gemm.gtsir)
-  add_test(NAME tile_ir_smoke COMMAND gtsim_gemm_ir ${H100_ARCH_CONFIG}
-           --memory-config ${CMAKE_CURRENT_SOURCE_DIR}/configs/memconf/full-hbm.yaml
-           ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/copy.gtsir)
   add_test(NAME gemm_smoke COMMAND gtsim_gemm ${H100_ARCH_CONFIG}
            --memory-config ${MEMORY_FULL_HBM_CONFIG} 512 512 512)
   add_test(NAME fa3_smoke COMMAND gtsim_fa3 ${H100_ARCH_CONFIG}
@@ -174,34 +147,15 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/hbf/check_smoke.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR})
     set_tests_properties(mixed_hbfine_smoke PROPERTIES TIMEOUT 180)
-    add_test(NAME tile_ir_persistent_parity
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_manual_gemm.py
-              --oracle $<TARGET_FILE:tile_ir_parity_tests>)
     add_test(NAME workload_profile_boundary
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_workload_profile.py)
     add_test(NAME v0_1_0_regression
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_reference.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR} --verify)
   endif()
-  if(GTSIM_TVM_PYTHON AND GTSIM_ENABLE_LEGACY_TVM_TESTS)
-    add_test(NAME tvm_serving_semantics
-      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_serve.py)
-    add_test(NAME tvm_tensor_placement
-      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_placement.py
-              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
-    add_test(NAME tvm_gemm_frontend
-      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_gemm.py
-              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
-    add_test(NAME tvm_auto_schedule
-      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_auto_schedule.py
-              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
-    add_test(NAME tvm_memory_search
-      COMMAND ${GTSIM_TVM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tvm_memory_search.py
-              --build-dir ${CMAKE_CURRENT_BINARY_DIR})
-  endif()
 endif()
 
-install(TARGETS gtsim_core gtsim_tile_ir gtsim_gemm gtsim_gemm_ir gtsim_serve_ir gtsim_fa3 gtsim_fa2
+install(TARGETS gtsim_core gtsim_gemm gtsim_fa3 gtsim_fa2
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include/gtsim)

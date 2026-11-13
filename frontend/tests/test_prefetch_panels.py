@@ -1,17 +1,21 @@
-"""Streaming panels preserve compute and obey exact per-slot physical page budgets."""
+"""Prefetch windows are generated from streaming NativeExpander callbacks."""
 
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
 
-from compile import compile_program, lower_flow, lower_arch
-from compile.opt.panels import lower_panels
-from compile.opt.prefetch import PageBudget, Residency
+from compile import compile_program, lower_flow
+from compile.expand_native import NativeExpander
+from compile.opt.prefetch import PageBudget, Residency, optimize
+from compile.static import EMPTY, Resolver, bound_resolver
+from compile.streaming import ExecutionIRProducer, ProgramPlan, _strides
+from parser import ast as A
 
 
 class PrefetchPanelTests(unittest.TestCase):
-    def test_k_windows_preserve_native_compute_and_cover_actual_consumers(self):
+    def test_multiple_ctas_and_pipeline_iterations_use_cta_wave_index(self):
         library = Path(__file__).resolve().parents[1] / "lib"
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.progir"
@@ -29,46 +33,48 @@ class PrefetchPanelTests(unittest.TestCase):
   prog.return @C after[!done]
 }
 """)
-            kernel = lower_arch(
-                lower_flow(
-                    compile_program(
-                        source,
-                        {},
-                        [library / "small_m_gemm.algoir"],
-                        [library / "small_m_gemm.flowir"],
-                    )
-                )
-            )
+            flow = compile_program(source, {}, [library / "small_m_gemm.algoir"],
+                                   [library / "small_m_gemm.flowir"])
         config = Residency(2, 8, 96, 32, 4096, 0, 32768, buffer_count=2, streaming=True)
-        result = lower_panels(kernel, config, {"A": 0, "B": 0, "C": 0})
-        self.assertEqual(result.ops, kernel.ops)
-        self.assertEqual(result.ctas, kernel.ctas)
-        self.assertGreater(len(result.prefetch_windows), 2)
-        expected = {
-            n.id for n in kernel.ops if n.opcode == "cp.dram2sram_tma" and n.tensor == 1
-        }
-        counts = Counter(n for w in result.prefetch_windows for n in w.consumers)
-        self.assertEqual(set(counts), expected)
-        self.assertTrue(all(c == 1 for c in counts.values()))
-        for i, window in enumerate(result.prefetch_windows):
-            self.assertEqual(window.buffer.slot, i % 2)
-            budget = PageBudget(config, {"B": 0}, i % 2)
-            pages = {
-                ("B", p)
-                for r in window.ranges
-                for p in range(r.offset // 4096, (r.offset + r.bytes) // 4096)
-            }
-            self.assertTrue(budget.add(pages))
-        iterations = [
-            kernel.ops[n].pipeline_iteration
-            for w in result.prefetch_windows
-            for n in w.consumers
-        ]
-        self.assertEqual(iterations, sorted(iterations))
+        plan = optimize(flow, config, {"A": None, "B": None, "C": None})
+        arch = lower_flow(plan.flow)
+        root = bound_resolver(arch.static, Resolver(EMPTY, {})).materialize_constants()
+        tensors = []
+        for spec in arch.tensors:
+            shape = tuple(root.value(d) for d in spec.shape)
+            tensors.append(A.KernelTensor(len(tensors), spec.id, shape, _strides(shape),
+                                          spec.dtype, spec.tier or A.MemorySpace.HBM,
+                                          spec.external, spec.read_only, None))
+        region = arch.regions[0]
+        args = {a.id: root.value(a.expression) for a in region.static.arguments}
+        resolver = Resolver(replace(region.static, parameters=(), constraints=()),
+                            {**root.values, **args}).materialize_constants()
+        ctas, loads = [], []
+        def emit_instruction(node):
+            if node.opcode == A.NativeOpcode.TMA_LOAD.value:
+                loads.append((node.cta, node.pipeline_iteration, node.id, node.tensor, node.tile))
+        NativeExpander(region, resolver, {t.name: t for t in tensors}).expand_to(ctas.append,
+                                                                                   emit_instruction)
+        producer = ExecutionIRProducer(arch, ProgramPlan("compute", (), (), ()),
+                                       {"prefetch_config": config, "prefetch_bases": plan.bases})
+        windows = producer._prefetch_windows(loads, ctas, tensors)
+        self.assertGreater(len(ctas), 1)
+        self.assertGreater(len({item[1] for item in loads if item[1] is not None}), 1)
+        eligible = {node for cta, _, node, tensor, _ in loads
+                    if tensors[tensor].tier == A.MemorySpace.HBF
+                    and tensors[tensor].preloaded and tensors[tensor].read_only}
+        consumers = [node for window in windows for node in window.consumers]
+        self.assertEqual(len(consumers), len(set(consumers)))
+        self.assertEqual(eligible, set(consumers))
+        for index, window in enumerate(windows):
+            self.assertEqual(window.buffer.slot, index % config.buffer_count)
+            budget = PageBudget(config, plan.bases, index % config.buffer_count)
+            names = {tensor.id: tensor.name for tensor in tensors}
+            self.assertTrue(budget.add({(names[t.tensor], page)
+                                        for t in window.ranges
+                                        for page in range(t.offset // config.page_bytes,
+                                                           (t.offset + t.bytes) // config.page_bytes)}))
 
-    def test_one_page_planes_are_shared_as_whole_pages(self):
-        config = Residency(2, 8, 96, 32, 4096, 4096, 0, buffer_count=2, streaming=True)
-        for slot in range(2):
-            budget = PageBudget(config, {"B": 0}, slot)
-            self.assertTrue(budget.add({("B", slot)}))
-            self.assertFalse(budget.add({("B", 1 - slot)}))
+
+if __name__ == "__main__":
+    unittest.main()

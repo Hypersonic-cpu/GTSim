@@ -32,12 +32,13 @@ PYTHON
 
 The `ast/` source directory is loaded under the private Python namespace
 `gtsim_text_ast` to avoid shadowing Python's standard-library `ast` module.
-New `.nvir` exports use MLIR-like text; ExecIR DAGs use JSON.
+New `.nvir` exports use MLIR-like text; the runtime streams concrete native
+instructions over IPC instead of writing a complete DAG JSON file.
 
 `two_gemms.progir` invokes the same algorithm and schedule twice, with K=192 and
 K=256. `two_gemms.flowir` is the generated unified FlowIR: two symbolic scheduled
 bodies connected through tensor H, with distinct `static.bind` arguments.
-`two_gemms.nvir` retains structured Native loops and conditions;
-`two_gemms.dag.json` contains the final 3,718-node ExecIR DAG. Parameter resolution,
-odd/even branch selection, and loop expansion occur only at Arch → Exec.
+`two_gemms.nvir` retains structured Native loops and conditions. Parameter
+resolution, odd/even branch selection, and loop expansion occur only while the
+requested ArchIR region is streamed to GTSim.
 Compilation commands and current scope are in `frontend/README.md`.

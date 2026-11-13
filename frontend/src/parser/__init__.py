@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from . import ast
-from .ast import ProgIR, AlgoIR, FlowIR, ArchIR, ExecIR
+from .ast import ProgIR, AlgoIR, FlowIR, ArchIR
 from . import syntax, semantic
 
 
@@ -102,7 +102,6 @@ __all__ = [
     "AlgoIR",
     "FlowIR",
     "ArchIR",
-    "ExecIR",
     "ParseError",
     "parse",
     "parse_file",

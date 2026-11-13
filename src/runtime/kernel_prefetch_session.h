@@ -1,30 +1,23 @@
 #pragma once
 
-#include "runtime/execution_program.h"
+#include "execution_ir/kernel_graph.h"
+#include "runtime/program_timing.h"
 
 namespace GTSim::ExecutionIR {
 // Kernel-local memory windows follow actual copy completion, independently of
 // operation names, workload type, or numerical tensor values.
 class KernelPrefetchSession {
 public:
-    KernelPrefetchSession(MemorySystem& memory, const Kernel& kernel,
-                          const std::vector<std::pair<int, int>>& bindings,
-                          std::uint64_t& next_epoch, int cycle)
-        : memory_(memory),
-          owners_(kernel.ops.size(), -1) {
-        initialize(*kernel.prefetch_windows, kernel.ops.size(), bindings,
-                   [&](int node) { return kernel.ops[node].op == "cp.dram2sram_tma"; },
-                   next_epoch, cycle);
-    }
-
     KernelPrefetchSession(MemorySystem& memory,
                           const std::vector<PrefetchWindow>& plans,
                           std::size_t op_count,
                           const std::vector<std::pair<int, int>>& bindings,
                           std::uint64_t& next_epoch, int cycle)
-        : memory_(memory), owners_(op_count, -1) {
-        initialize(plans, op_count, bindings,
-                   [](int) { return true; }, next_epoch, cycle);
+        : memory_(memory),
+          owners_(op_count, -1) {
+        initialize(
+            plans, op_count, bindings, [](int) { return true; }, next_epoch,
+            cycle);
     }
 
     KernelPrefetchSession(const KernelPrefetchSession&) = delete;
@@ -38,7 +31,8 @@ private:
                     std::uint64_t& next_epoch, int cycle) {
         (void)op_count;
         const std::map<int, int> ids(bindings.begin(), bindings.end());
-        if (plans.empty()) throw std::invalid_argument("empty streaming window plan");
+        if (plans.empty())
+            throw std::invalid_argument("empty streaming window plan");
         count_ = plans.front().buffer.count;
         if (count_ < 2)
             throw std::invalid_argument(
@@ -92,7 +86,6 @@ private:
     }
 
 public:
-
     void complete(int node, int cycle) {
         const int index = owners_.at(node);
         if (index < 0) return;

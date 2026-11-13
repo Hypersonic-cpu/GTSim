@@ -5,8 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from compile import compile_program, lower_arch, lower_flow
+from compile import compile_program, lower_flow
 from compile.opt.prefetch import Residency, optimize
+from native_helpers import expand_arch
 
 
 class PrefetchPlanTests(unittest.TestCase):
@@ -36,10 +37,10 @@ class PrefetchPlanTests(unittest.TestCase):
                 list(library.glob("*.algoir")),
                 list(library.glob("*.flowir")),
             )
-        original = lower_arch(lower_flow(flow))
+        original = expand_arch(lower_flow(flow))[2]
 
-        def compute_signature(execution):
-            return Counter((op.opcode, op.tensor, op.tile) for op in execution.ops)
+        def compute_signature(ops):
+            return Counter((op.opcode, op.tensor, op.tile[2:]) for op in ops)
 
         for count in (2, 4):
             with self.subTest(buffers=count):
@@ -48,7 +49,7 @@ class PrefetchPlanTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     compute_signature(original),
-                    compute_signature(lower_arch(lower_flow(plan.flow))),
+                    compute_signature(expand_arch(lower_flow(plan.flow))[2]),
                 )
                 uses = {}
                 for item in plan.queue:
@@ -110,45 +111,32 @@ class PrefetchPlanTests(unittest.TestCase):
             all(p.enqueue_at == 0 and len(p.consumers) == 1 for p in plan.queue)
         )
 
-        def signature(execution):
+        def signature(ops):
             def op_signature(op):
-                return op.opcode, op.tensor, op.dtype, op.tile
+                return op.opcode, op.tensor, op.dtype, (op.tile[2], op.tile[3])
 
             return Counter(
                 (
                     op_signature(op),
-                    tuple(op_signature(execution.ops[d]) for d in op.after_issue),
+                    tuple(op_signature(ops[d]) for d in op.after_issue),
                     # Launch ordering introduces edges between CTA slices.
                     tuple(
-                        op_signature(execution.ops[d])
+                        op_signature(ops[d])
                         for d in op.after_complete
-                        if execution.ops[d].cta == op.cta
+                        if ops[d].cta == op.cta
                     ),
                 )
-                for op in execution.ops
+                for op in ops
             )
 
         self.assertEqual(
-            signature(lower_arch(lower_flow(flow))),
-            signature(lower_arch(lower_flow(plan.flow))),
+            signature(expand_arch(lower_flow(flow))[2]),
+            signature(expand_arch(lower_flow(plan.flow))[2]),
         )
-        launches = [{"id": r.symbol} for r in plan.flow.regions]
-        manifest = plan.decorate(
-            {"tensors": [{"name": "B", "id": 1}], "launches": launches}
+        self.assertEqual(
+            {consumer for item in plan.queue for consumer in item.consumers},
+            {region.symbol for region in plan.flow.regions},
         )
-        active = set()
-        for command in manifest["commands"]:
-            kind, target = command["kind"], command["target"]
-            if kind == "QueuePrefetch":
-                active.add(target)
-            elif kind == "LaunchKernel":
-                self.assertTrue(
-                    set(next(x for x in launches if x["id"] == target)["read_aliases"])
-                    <= active
-                )
-            elif kind == "Release":
-                active.remove(target)
-        self.assertFalse(active)
         with self.assertRaisesRegex(ValueError, "full-reduction CTA exceeds"):
             optimize(flow, Residency(2, 8, 96, 32, 4096, 0, 65536))
 

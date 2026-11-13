@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from .layout import TileMajorLayout
-from .common import Header, DataType, MemorySpace, ImmediateValue
+from .common import DataType, MemorySpace, ImmediateValue
 
 
 class ExecutionResource(str, Enum):
@@ -56,10 +56,21 @@ class ArchInstruction:
 
 
 @dataclass(frozen=True)
-class FlatKernel(Header):
-    target: str
-    tensors: tuple[KernelTensor, ...]
-    ctas: tuple[CTA, ...]
-    ops: tuple[ArchInstruction, ...]
-    partial_outputs: tuple[int, ...]
-    outputs: tuple[int, ...]
+class PrefetchBuffer:
+    slot: int
+    count: int
+    epoch: int
+
+
+@dataclass(frozen=True)
+class PrefetchRange:
+    tensor: int
+    offset: int
+    bytes: int
+
+
+@dataclass(frozen=True)
+class PrefetchWindow:
+    buffer: PrefetchBuffer
+    consumers: tuple[int, ...]
+    ranges: tuple[PrefetchRange, ...]

@@ -16,11 +16,10 @@ class Event:
 
 
 class NativeExpander:
-    def __init__(self, region, resolver, tensors, nodes=None, ctas=None):
+    def __init__(self, region, resolver, tensors):
         self.region, self.resolver, self.tensors = region, resolver, tensors
         self.scope_resolver = resolver
-        self.nodes, self.ctas = nodes, ctas
-        self.next_node_id = len(nodes) if nodes is not None else 0
+        self.next_node_id = 0
         self.emit_cta_callback = None
         self.emit_instruction_callback = None
         outer = tuple(loop.variable for loop in region.domain.loops)
@@ -40,7 +39,7 @@ class NativeExpander:
         self.index = {}
         self.patterns = {op.id: op for op in region.ops}
         self.warp_bases = {}
-        self.next_warp = sum(c.warps for c in (ctas or ()))
+        self.next_warp = 0
         for pattern in region.ops:
             for dependency in (
                 *pattern.dependencies,
@@ -231,8 +230,6 @@ class NativeExpander:
                         ),
                         point.get(self.region.domain.pipeline.loop.variable),
                 )
-                if self.nodes is not None:
-                    self.nodes.append(instruction)
                 if self.emit_instruction_callback is not None:
                     self.emit_instruction_callback(instruction)
                 self.next_node_id += 1
@@ -252,7 +249,7 @@ class NativeExpander:
                 continue
             local_cta = point[self.region.cta_variable]
             if local_cta not in cta_ids:
-                identity = len(self.ctas) if self.ctas is not None else len(cta_ids)
+                identity = len(cta_ids)
                 cta_ids[local_cta] = identity
                 self.warp_bases[identity] = self.next_warp
                 self.next_warp += self.region.resources.warps
@@ -264,8 +261,6 @@ class NativeExpander:
                     resources.shared_bytes,
                     resources.register_bytes,
                 )
-                if self.ctas is not None:
-                    self.ctas.append(cta_record)
                 if self.emit_cta_callback is not None:
                     self.emit_cta_callback(cta_record)
             cta = cta_ids[local_cta]
@@ -286,8 +281,6 @@ class NativeExpander:
 
     def expand_to(self, emit_cta, emit_instruction):
         """Expand one region while emitting each record immediately."""
-        if self.nodes is not None or self.ctas is not None:
-            raise ValueError("streaming expansion requires empty node storage")
         self.next_node_id = 0
         self.emit_cta_callback = emit_cta
         self.emit_instruction_callback = emit_instruction

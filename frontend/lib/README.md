@@ -38,7 +38,8 @@ results describe the prior, more serialized text schedules. New latency estimate
 remain uncalibrated.
 
 `static.args` attaches immediate operands such as position, theta, epsilon and
-channel coefficients to scheduled operations. They survive into structured Native
-IR and become concrete ExecIR metadata only in the final lowering. The simulator
-is a timing engine; arithmetic opcodes can represent a timing-cost class rather
-than numerically executing the algorithm formulas.
+channel coefficients to scheduled operations. They survive into structured
+Native IR and become concrete instruction metadata only while the requested
+region is expanded. The simulator is a timing engine; arithmetic opcodes can
+represent a timing-cost class rather than numerically executing the algorithm
+formulas.

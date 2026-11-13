@@ -1,4 +1,4 @@
-"""Structural serialization for the copied AST, including Native/Execution IR."""
+"""Structural serialization for the canonical frontend AST."""
 
 from dataclasses import fields, is_dataclass
 from enum import Enum
@@ -65,7 +65,7 @@ def dumps(ir):
 def loads(text):
     result = decode(json.loads(text))
     if not isinstance(
-        result, (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR, A.ExecIR, A.ExecProgram)
+        result, (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR)
     ):
         raise ValueError("expected an IR root record")
     return result

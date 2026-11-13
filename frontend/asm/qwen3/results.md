@@ -36,7 +36,8 @@ write bytes after normalizing packed versus separate allocations.
   Split output remains FP32 and the separate combine kernel uses LSE weights.
 - RoPE uses the half-channel layout. New structured static operands retain each
   request's actual position, theta, epsilon and channel coefficients through
-  Native IR into ExecIR. Legacy cost graphs do not retain all such operands.
+  Native IR into the streamed instruction representation. Legacy cost graphs do
+  not retain all such operands.
 - The new KV and expert-weight allocations are packed. Only selected expert
   regions and each request/head's valid cache region are accessed. Equal logical
   byte coverage does not imply identical L2 set mapping or HBM transactions.
@@ -65,9 +66,10 @@ Small-M MMA baseline, not a calibrated claim of faster Hopper Grouped GEMM.
 ## Execution and timing scope
 
 All four new/legacy B=1/16 Programs completed through the same existing C++
-ProgramExecutor. Each run retained persistent GPU/MemorySystem/L2 and stable
+streaming runner. Each run retained persistent GPU/MemorySystem/L2 and stable
 allocations, with one ordered stream, zero launch overhead and no kernel overlap.
-Kernel JSON was transferred through named pipes; no large DAG files were saved.
+Instruction batches were transferred through a Unix socket; no large DAG files
+were saved.
 The first status check was made at least 15 minutes after launch as requested;
 all four jobs had completed by that check.
 
@@ -98,7 +100,7 @@ duration despite its different graph.
 Detailed structural differences are in `dag-differences.md`. Complete ordered
 kernel intervals, duration deltas and per-kernel HBM reads are in
 `validation/results/text-qwen/four-runs/comparison.md` and `comparison.json`.
-Each case subdirectory retains `result.json`, `simulation.log`, `program.gtsir`
+Each case subdirectory retains `result.json` and `simulation.log`
 and `provenance.json` with binary/configuration/source hashes. New timings remain
 uncalibrated, and no reference MAPE/accuracy figures are transferred to them.
 

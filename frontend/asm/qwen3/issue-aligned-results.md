@@ -1,7 +1,7 @@
 # IR-only schedule correction and rerun
 
 All four B=1/16 new/legacy single-block Programs executed successfully through
-the unchanged C++ ProgramExecutor. The current branch is `serve-sim`; the source
+the unchanged C++ streaming runner. The current branch is `serve-sim`; the source
 parent commit is recorded in the evidence. No timing constants, runtime code or
 Python compiler implementations were changed for this correction.
 

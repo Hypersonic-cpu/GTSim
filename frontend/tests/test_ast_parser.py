@@ -210,37 +210,24 @@ class ASTParserTests(unittest.TestCase):
             )
             self.assertIn("%compiler_count > 0", root.static.constraints)
             self.assertEqual(parser.parse(parser.serialize(root)), root)
-        for cls in (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR, A.ExecIR):
+        for cls in (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR):
             self.assertEqual(
                 next(f for f in fields(cls) if f.name == "static").type,
                 A.StaticDeclarations,
             )
 
-    def test_all_five_ir_class_structural_roundtrip(self):
+    def test_canonical_ir_class_structural_roundtrip(self):
         prog = parser.parse_file(REFERENCE / "example.progir")
         algo = parser.parse_file(REFERENCE / "gemm.algoir")
         flow = parser.parse_file(REFERENCE / "gemm.flowir")
         from compile import lower_flow
 
         arch = lower_flow(flow)
-        execution = A.ExecIR(
-            "dag",
-            A.StaticDeclarations((), (), (), (), ()),
-            "sm90",
-            (),
-            (),
-            (),
-            (),
-            (),
-            (),
-            None,
-            (),
-        )
-        for obj in (prog, algo, flow, arch, execution):
+        for obj in (prog, algo, flow, arch):
             parsed = parser.parse(dumps(obj))
             self.assertIs(type(parsed), type(obj))
             self.assertEqual(parsed, obj)
-        for obj in (arch, execution):
+        for obj in (arch,):
             self.assertEqual(parser.parse(parser.serialize(obj)), obj)
 
     def test_ast_has_no_implicit_defaults_or_compatibility_fields(self):

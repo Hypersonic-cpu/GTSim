@@ -157,11 +157,13 @@ void Simulator::print_configuration(bool verbose) {
         *output_stream << "HBF backend: bank_plane; profile "
                        << (c.geometry == HBFGeometryProfile::OCPReference
                                ? "ocp_reference"
-                               : grouped ? "grouped_planes" : "hbflex_research")
+                           : grouped ? "grouped_planes"
+                                     : "hbflex_research")
                        << "; stacks " << c.stacks << "; Host Channels "
                        << c.stacks * 16 << "; command units "
-                       << (grouped ? c.stacks * hbfine::command_groups_per_stack(c)
-                                   : c.stacks * 16 * c.banks_per_channel)
+                       << (grouped
+                               ? c.stacks * hbfine::command_groups_per_stack(c)
+                               : c.stacks * 16 * c.banks_per_channel)
                        << "; Planes "
                        << c.stacks * c.dies_per_stack * c.planes_per_die
                        << "; buffers per command unit 2; planes per sense "
@@ -239,9 +241,12 @@ void Simulator::print_statistics(bool verbose) {
     *output_stream << "Off-chip memory statistics:\n";
     print_tier_stats("  HBM", memory_stats.hbm);
     print_tier_stats("  HBF", memory_stats.hbf);
-    for (const auto& [tier, snapshot] : simulated_gpu->memory_system->tier_counters()) {
+    for (const auto& [tier, snapshot] :
+         simulated_gpu->memory_system->tier_counters()) {
         for (const auto& [name, value] : snapshot.device.cumulative)
-            *output_stream << "Backend counter " << (tier == MemoryTier::HBF ? "HBF " : "HBM ") << name << "=" << value << "\n";
+            *output_stream << "Backend counter "
+                           << (tier == MemoryTier::HBF ? "HBF " : "HBM ")
+                           << name << "=" << value << "\n";
     }
     const auto backend = simulated_gpu->memory_system->hbm_backend_statistics();
     if (config.memory.hbm.backend == HBMBackend::Ramulator2) {
@@ -298,7 +303,8 @@ void Simulator::print_statistics(bool verbose) {
         scalar("accepted_requests", hbf.accepted_requests);
         scalar("completed_requests", hbf.completed_requests);
         scalar("failed_requests", hbf.failed_requests);
-        if (config.memory.hbf.controller.geometry == HBFGeometryProfile::GroupedPlanes) {
+        if (config.memory.hbf.controller.geometry ==
+            HBFGeometryProfile::GroupedPlanes) {
             std::uint64_t logical_bytes = 0;
             for (const auto* node : dag->nodes) {
                 if (!node->finished ||
@@ -308,12 +314,14 @@ void Simulator::print_statistics(bool verbose) {
                     continue;
                 const auto& tensor = dag->tensors().at(node->matrix_id);
                 if (tensor.initial_memory_tier == MemoryTier::HBF)
-                    logical_bytes += static_cast<std::uint64_t>(tile_total_elements(node->tile)) *
+                    logical_bytes += static_cast<std::uint64_t>(
+                                         tile_total_elements(node->tile)) *
                                      bytes_per_element(tensor.dtype);
             }
             scalar("kernel_logical_hbf_read_bytes", logical_bytes);
-            scalar("sense_commands", hbf.senses /
-                        config.memory.hbf.controller.planes_per_command_group);
+            scalar("sense_commands",
+                   hbf.senses /
+                       config.memory.hbf.controller.planes_per_command_group);
         }
         scalar("host_read_bytes", hbf.host_read_bytes);
         scalar("host_write_bytes", hbf.host_write_bytes);
@@ -1423,18 +1431,11 @@ void Simulator::print_results() {
 } // namespace GTSim
 
 namespace GTSim {
-void Simulator::bind_kernel(DAG* next) {
-    if (!next) throw std::invalid_argument("missing next kernel");
-    KernelExecutionSession::rebind(*this, *next);
-}
-
 void Simulator::attach_graph(DAG& graph) {
-    if (dag != nullptr)
-        throw std::logic_error("a kernel graph is already attached");
     if (graph.nodes.empty())
         throw std::invalid_argument("cannot attach an empty kernel graph");
     node_completion_observer = {};
-    KernelExecutionSession::initialize(*this, graph, true);
+    KernelExecutionSession::attach(*this, graph);
 }
 
 bool Simulator::run_active_graph(int max_cycles, bool verbose) {
@@ -1442,9 +1443,9 @@ bool Simulator::run_active_graph(int max_cycles, bool verbose) {
     return run(max_cycles, verbose);
 }
 
-void Simulator::verify_graph_retired() const {
+void Simulator::verify_retired() const {
     if (!dag) throw std::logic_error("no active kernel graph");
-    KernelExecutionSession::retire(*this);
+    KernelExecutionSession::verify_retired(*this);
 }
 
 void Simulator::detach_graph() {

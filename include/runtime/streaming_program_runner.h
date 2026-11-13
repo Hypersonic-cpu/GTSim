@@ -1,8 +1,7 @@
 #pragma once
 
 #include "execution_ir/kernel_graph_builder.h"
-#include "runtime/dependency_tokens.h"
-#include "runtime/execution_program.h"
+#include "runtime/program_timing.h"
 #include "runtime/stream_protocol.h"
 
 #include <map>
@@ -24,9 +23,8 @@ private:
     struct LaunchDef {
         std::string id;
         std::string stream_id;
+        std::uint64_t sequence{};
         std::vector<std::pair<int, int>> bindings;
-        std::vector<TokenId> wait_tokens;
-        TokenId signal_token;
         std::vector<std::string> read_aliases;
     };
     struct CommandDef {
@@ -56,12 +54,16 @@ private:
     std::map<std::string, PrefetchDef> prefetch_regions_;
     std::map<std::string, MemorySystem::ReadAlias> aliases_;
     std::map<std::string, int> events_;
-    DependencyTokens tokens_;
+    struct StreamState {
+        std::uint64_t completed_launches{};
+        std::int64_t last_completion_cycle{};
+    } stream_state_;
     ProgramTiming timing_;
     std::uint64_t next_prefetch_epoch_{};
     bool manifest_ready_{};
 
     void receive_program_manifest();
+    void validate_commands() const;
     void execute_command(const CommandDef& command);
     void execute_launch(const LaunchDef& launch);
     void start_prefetch(const CommandDef& command);

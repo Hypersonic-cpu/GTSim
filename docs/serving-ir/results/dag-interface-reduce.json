@@ -1,0 +1,48 @@
+{
+  "baseline_commit": "fc1226489474b452430d1b1b53a1aa2465adde8b",
+  "refactored_commit": "see final git commit",
+  "timeout_seconds": 900,
+  "cases": {
+    "T1": {"workload":"two_gemms.progir","config":"FullHBM, NUM_SMS=1","cycles":38948,
+      "old_fifo":{"python_cpu":1.01,"cpp_cpu":1.61,"python_rss_mib":29.21,"cpp_rss_mib":25.73,"combined_rss_mib":54.94,"wall":2.6632},
+      "previous_socket":{"python_cpu":1.00,"cpp_cpu":1.84,"python_rss_mib":24.32,"cpp_rss_mib":40.15,"combined_rss_mib":63.77,"wall":2.7622},
+      "refactored_socket":{"python_cpu":1.02,"cpp_cpu":1.60,"python_rss_mib":24.53,"cpp_rss_mib":41.04,"combined_rss_mib":65.57,"wall":2.6978}},
+    "T2": {"workload":"two_gemms.progir","config":"FullHBM, NUM_SMS=132","cycles":14914,"layers":[6824,8090],
+      "old_fifo":{"python_cpu":1.01,"cpp_cpu":0.79,"python_rss_mib":29.05,"cpp_rss_mib":36.15,"combined_rss_mib":65.20,"wall":1.9066},
+      "previous_socket":{"python_cpu":1.00,"cpp_cpu":0.97,"python_rss_mib":24.20,"cpp_rss_mib":40.15,"combined_rss_mib":63.51,"wall":1.8981},
+      "refactored_socket":{"python_cpu":1.02,"cpp_cpu":0.80,"python_rss_mib":24.60,"cpp_rss_mib":41.29,"combined_rss_mib":65.83,"wall":1.8851}},
+    "T3": {"workload":"example.progir, 128x256x64","config":"HBF 4F1M, streaming prefetch","cycles":11769,
+      "old_fifo":{"python_cpu":0.33,"cpp_cpu":0.43,"python_rss_mib":23.43,"cpp_rss_mib":15.82,"combined_rss_mib":39.25,"wall":0.8739},
+      "previous_socket":{"python_cpu":0.34,"cpp_cpu":0.48,"python_rss_mib":22.65,"cpp_rss_mib":37.28,"combined_rss_mib":59.93,"wall":0.9235},
+      "refactored_socket":{"python_cpu":0.32,"cpp_cpu":0.46,"python_rss_mib":26.61,"cpp_rss_mib":37.99,"combined_rss_mib":60.44,"wall":0.8915}},
+    "T4": {"workload":"example.progir, 512x512x512","config":"HBFine 4F1M, streaming prefetch","cycles":25964,
+      "old_fifo":{"python_cpu":2.05,"cpp_cpu":1.98,"python_rss_mib":36.16,"cpp_rss_mib":68.42,"combined_rss_mib":100.33,"wall":4.0788},
+      "previous_socket":{"python_cpu":2.10,"cpp_cpu":1.97,"python_rss_mib":28.84,"cpp_rss_mib":67.96,"combined_rss_mib":96.80,"wall":3.7871},
+      "refactored_socket":{"python_cpu":2.16,"cpp_cpu":1.58,"python_rss_mib":28.63,"cpp_rss_mib":62.69,"combined_rss_mib":91.32,"wall":3.7747}},
+    "T5": {"workload":"qwen3/one_block.progir, Qwen3-30B-A3B, B=1, context=512","config":"FullHBM, one complete block","cycles":397765,
+      "old_fifo":{"python_cpu":152.97,"cpp_cpu":45.10,"python_rss_mib":589.89,"cpp_rss_mib":839.41,"combined_rss_mib":1160.81,"wall":152.3884},
+      "previous_socket":{"python_cpu":174.76,"cpp_cpu":60.93,"python_rss_mib":471.28,"cpp_rss_mib":757.34,"combined_rss_mib":1006.47,"wall":160.5852},
+      "refactored_socket":{"python_cpu":160.47,"cpp_cpu":47.25,"python_rss_mib":470.09,"cpp_rss_mib":688.49,"combined_rss_mib":999.38,"wall":154.9619}}
+  },
+  "notes": [
+    "T1-T4 cycles match the frozen baseline; T2 is 6824+8090.",
+    "T5 uses frontend/asm/qwen3/b1_ctx512.json and executes all 18 launches.",
+    "CPU is sampled over the Python process and gtsim_program descendants; combined RSS is the sampled simultaneous peak.",
+    "Final validation: 19 targeted CTest cases and 24 frontend unit tests pass; workload_profile_boundary retains four pre-existing builder-profile warnings shared with the frozen baseline."
+  ],
+  "production_loc": {
+    "baseline_cpp": 14439,
+    "baseline_python": 8546,
+    "refactored_cpp": 13052,
+    "refactored_python": 7087,
+    "added": 758,
+    "removed": 3604,
+    "net": -2846,
+    "breakdown": {
+      "cpp_core": {"baseline": 12586, "refactored": 11342},
+      "cpp_workloads": {"baseline": 1853, "refactored": 1710},
+      "frontend_src": {"baseline": 5488, "refactored": 5167},
+      "frontend_tools": {"baseline": 3058, "refactored": 1920}
+    }
+  }
+}

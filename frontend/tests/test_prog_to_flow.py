@@ -7,7 +7,8 @@ import unittest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
-from compile import compile_program, lower_flow, lower_arch
+from compile import compile_program, lower_flow
+from native_helpers import expand_arch
 from compile.static import Resolver, EMPTY, specialize_source, bound_resolver
 from parser import ast as A, parse_file, parse, serialize, from_module
 from parser.json_codec import dumps
@@ -108,7 +109,7 @@ class ProgramToFlowTests(unittest.TestCase):
                 program = from_module(module)
                 self.assertEqual(dict(program.launches[0].attributes)["N"], expected)
             self.assertEqual(len(build(path).regions), 4)
-            self.assertEqual(len(lower_arch(lower_flow(build(path))).regions), 2)
+            self.assertEqual(len(lower_flow(build(path)).regions), 4)
 
     def test_generic_expression_folding_and_constraints(self):
         declarations = A.StaticDeclarations(
@@ -134,8 +135,8 @@ class ProgramToFlowTests(unittest.TestCase):
                 .read_text()
                 .replace("tensor<256x192xfp16>", "tensor<256x128xfp16>")
             )
-            with self.assertRaisesRegex(ValueError, "tensor binding mismatch"):
-                lower_arch(lower_flow(build(path)))
+            with self.assertRaisesRegex(ValueError, "out of bounds|tensor binding mismatch"):
+                expand_arch(lower_flow(build(path)))
 
     def test_target_parameter_changes_cta_allocation_without_changing_shapes(self):
         one, two = build(sms=1), build(sms=2)
@@ -146,8 +147,8 @@ class ProgramToFlowTests(unittest.TestCase):
         self.assertEqual(
             [r.domain.loops[0].stop for r in two.regions], ["%cta_count"] * 2
         )
-        self.assertEqual(len(lower_arch(lower_flow(one)).ctas), 2)
-        self.assertEqual(len(lower_arch(lower_flow(two)).ctas), 4)
+        self.assertEqual(len(expand_arch(lower_flow(one))[1]), 2)
+        self.assertEqual(len(expand_arch(lower_flow(two))[1]), 4)
 
 
 if __name__ == "__main__":

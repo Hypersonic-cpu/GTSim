@@ -7,7 +7,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from compile import compile_program, lower_flow, lower_arch
+from compile import compile_program, lower_flow
+from native_helpers import expand_arch
 from run_gemm_tiling_search import flow_variant
 
 
@@ -34,17 +35,16 @@ class SkinnyTilingTests(unittest.TestCase):
   prog.return @C after[!done]
 }}
 """)
-                execution = lower_arch(
+                execution = expand_arch(
                     lower_flow(
-                        compile_program(
-                            source, {}, [library / "small_m_gemm.algoir"], [flow]
-                        )
+                        compile_program(source, {}, [library / "small_m_gemm.algoir"], [flow])
                     )
                 )
-                tensors = {t.name: t.id for t in execution.tensors}
-                loads = [n for n in execution.ops if n.opcode == "cp.dram2sram_tma"]
-                stores = [n for n in execution.ops if n.opcode == "cp.sram2dram_tma"]
-                matrix = [n for n in execution.ops if n.opcode == "mma.sync.m16n8k16"]
+                tensor_records, ctas, ops = execution
+                tensors = {t.name: t.id for t in tensor_records}
+                loads = [n for n in ops if n.opcode == "cp.dram2sram_tma"]
+                stores = [n for n in ops if n.opcode == "cp.sram2dram_tma"]
+                matrix = [n for n in ops if n.opcode == "mma.sync.m16n8k16"]
                 self.assertEqual(len(matrix), 512 // 8 * (bk // 16))
                 self.assertTrue(
                     all(
@@ -59,7 +59,7 @@ class SkinnyTilingTests(unittest.TestCase):
                     bk * 512,
                 )
                 self.assertEqual(sum(n.tile[2] * n.tile[3] for n in stores), 4 * 512)
-                for cta in execution.ctas:
+                for cta in ctas:
                     weights = {
                         n.id
                         for n in loads

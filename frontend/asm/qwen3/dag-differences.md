@@ -17,14 +17,14 @@ valid regions, selected experts and residual identities agree.
 
 The text path parses actual ProgIR/AlgoIR/FlowIR source into the independent
 `src/ast` representations, composes shared library regions, lowers structured
-FlowIR to ArchIR and expands native operations at ArchIR-to-ExecIR. Static
+FlowIR to ArchIR and expands native operations at the streaming boundary. Static
 parameters, branches and loops are resolved at that final stage. The Qwen
 Program contains composition and tensor bindings rather than instruction loops.
 
 The comparison's legacy path uses `gtsim_frontend`'s current Qwen Program builder,
 algorithm instantiation and Hopper/Execution lowerers. These imports are confined
 to comparison/benchmark tools; the new parser/compiler does not call them.
-Both executable graphs are interpreted by the same unchanged C++ ProgramExecutor.
+Both executable graphs are interpreted by the same C++ DAG execution core.
 
 ## Matrix kernels
 

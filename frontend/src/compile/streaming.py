@@ -1,11 +1,11 @@
 """Kernel-at-a-time frontend producer and the Unix framed transport.
 
-The producer keeps the bound ArchIR and a compact launch plan.  Native
+The producer keeps the bound ArchIR and a compact launch plan. Native
 instructions are emitted directly from ``NativeExpander.expand_to`` when the
-GTSim process asks for one launch; no program-wide ExecIR is built.
+GTSim process asks for one launch; no program-wide execution graph is built.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import json
 import socket
 import struct
@@ -15,7 +15,14 @@ from parser import ast as A
 from .expand_native import NativeExpander
 from .static import EMPTY, Resolver, bound_resolver
 from .opt.prefetch import PageBudget, spans
-from .export_runtime import PIPELINES
+PIPELINES = {
+    A.ExecutionResource.LOAD: "LD",
+    A.ExecutionResource.STORE: "ST",
+    A.ExecutionResource.MATRIX: "Tensor",
+    A.ExecutionResource.ARITHMETIC: "SIMD",
+    A.ExecutionResource.SPECIAL_FUNCTION: "SFU",
+    A.ExecutionResource.SHUFFLE: "SHFL",
+}
 
 
 PROTOCOL_VERSION = 1
@@ -62,8 +69,7 @@ class LaunchPlan:
     stream_id: str
     arch_region_index: int
     tensor_bindings: tuple[tuple[int, int], ...]
-    wait_tokens: tuple[str, ...]
-    signal_token: str
+    sequence: int
     read_aliases: tuple[str, ...] = ()
 
 
@@ -78,56 +84,118 @@ class ProgramPlan:
     launch_overhead_cycles: int = 0
 
 
-def make_program_plan(arch, manifest, regions):
-    """Build a compact plan from the existing runtime manifest.
+def _tensor_record(tensor):
+    result = {
+        "id": tensor.id,
+        "name": tensor.name,
+        "shape": list(tensor.shape),
+        "strides": list(tensor.strides),
+        "dtype": tensor.dtype.value,
+        "tier": tensor.tier.value,
+        "preloaded": tensor.preloaded,
+        "read_only": tensor.read_only,
+    }
+    if tensor.tile_major is not None:
+        result["tile_major"] = asdict(tensor.tile_major)
+    return result
 
-    ``manifest`` contains only metadata; ``regions`` are ArchIR regions and do
-    not contain expanded instructions.  A completion token is automatically
-    chained on the single ordered stream, while explicit command records are
-    preserved verbatim.
+
+def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
+    """Build compact runtime metadata directly from source/ArchIR.
+
+    No complete execution graph or legacy manifest dictionary is constructed. A
+    launch sequence is the only cross-kernel dependency because the runner
+    owns one ordered stream and retains at most one active DAG.
     """
-    if len(manifest.get("streams", ())) != 1:
+    streams = tuple(getattr(source_program, "streams", (arch.stream,)))
+    if len(streams) != 1 or not streams[0]:
         raise ValueError("streaming execution supports exactly one stream")
-    stream = manifest["streams"][0]
+    stream = streams[0]
     region_indices = {region.symbol: i for i, region in enumerate(regions)}
+    source_commands = tuple(getattr(source_program, "commands", ()))
     command_launches = tuple(
-        command.get("target")
-        for command in manifest["commands"]
-        if command.get("kind") == "LaunchKernel"
+        command.target
+        for command in source_commands
+        if command.kind == A.CommandKind.LAUNCH and command.target in region_indices
     )
-    manifest_launches = tuple(launch["id"] for launch in manifest["launches"])
-    if command_launches != manifest_launches:
-        raise ValueError(
-            "single-stream command order must match the launch manifest"
-        )
+    launch_ids = command_launches or tuple(region.symbol for region in regions)
+    if set(launch_ids) != set(region_indices) or len(launch_ids) != len(region_indices):
+        raise ValueError("single-stream command order must match active ArchIR regions")
     launches = []
-    previous_token = None
-    for launch in manifest["launches"]:
-        launch_id = launch["id"]
-        if launch_id not in region_indices:
-            raise ValueError(f"launch has no active ArchIR region: {launch_id}")
-        wait = (previous_token,) if previous_token else ()
-        signal = launch_id + ".done"
+    for sequence, launch_id in enumerate(launch_ids):
         launches.append(
             LaunchPlan(
                 launch_id,
                 stream,
                 region_indices[launch_id],
-                tuple(tuple(pair) for pair in launch.get("bindings", ())),
-                wait,
-                signal,
-                tuple(launch.get("read_aliases", ())),
+                tuple((tensor.id, tensor.id) for tensor in tensors),
+                sequence,
             )
         )
-        previous_token = signal
+    commands = []
+    for command in source_commands:
+        if command.kind == A.CommandKind.LAUNCH:
+            if command.target in region_indices:
+                commands.append({"kind": "LaunchKernel", "target": command.target})
+        elif command.kind == A.CommandKind.SYNCHRONIZE:
+            if command.target and command.target != stream:
+                raise ValueError("cross-stream synchronize is unsupported")
+            commands.append({"kind": "StreamSynchronize", "target": command.target})
+        elif command.kind == A.CommandKind.RECORD_EVENT:
+            commands.append({"kind": "RecordEvent", "target": command.target})
+        elif command.kind == A.CommandKind.WAIT_EVENT:
+            commands.append({"kind": "WaitEvent", "target": command.target})
+    if not commands:
+        commands = [
+            {"kind": "LaunchKernel", "target": launch_id}
+            for launch_id in launch_ids
+        ] + [{"kind": "StreamSynchronize", "target": stream}]
+    prefetches = []
+    if prefetch is not None:
+        tensor_ids = {tensor.name: tensor.id for tensor in tensors}
+        for item in prefetch.queue:
+            record = {
+                "id": item.id,
+                "tensor": tensor_ids[item.span.tensor],
+                "offset": item.span.offset,
+                "bytes": item.span.bytes,
+            }
+            if item.buffer is not None:
+                record["buffer"] = asdict(item.buffer)
+            prefetches.append(record)
+        users = {}
+        for item in prefetch.queue:
+            for name in item.consumers:
+                users.setdefault(name, []).append(item.id)
+        launches = [replace(launch, read_aliases=tuple(users.get(launch.launch_id, ())))
+                    for launch in launches]
+        enqueue = {}
+        release = {}
+        for item in prefetch.queue:
+            enqueue.setdefault(item.enqueue_at, []).append(item.id)
+            release.setdefault(item.consumers[-1], []).append(item.id)
+        expanded = []
+        launch_index = 0
+        for command in commands:
+            if command["kind"] == "LaunchKernel":
+                target = command["target"]
+                expanded.extend({"kind": "QueuePrefetch", "target": item}
+                                for item in enqueue.get(launch_index, ()))
+                expanded.append(command)
+                expanded.extend({"kind": "Release", "target": item}
+                                for item in release.get(target, ()))
+                launch_index += 1
+            else:
+                expanded.append(command)
+        commands = expanded
     return ProgramPlan(
         stream,
-        tuple(manifest["tensors"]),
-        tuple(manifest["commands"]),
+        tuple(_tensor_record(tensor) for tensor in tensors),
+        tuple(commands),
         tuple(launches),
-        tuple(manifest.get("prefetches", ())),
-        manifest.get("symbol", arch.symbol),
-        manifest.get("launch_overhead_cycles", 0),
+        tuple(prefetches),
+        arch.symbol,
+        0,
     )
 
 
@@ -153,9 +221,8 @@ class ExecutionIRProducer:
                 "LaunchDef",
                 id=launch.launch_id,
                 stream_id=launch.stream_id,
+                sequence=launch.sequence,
                 tensor_bindings=[list(pair) for pair in launch.tensor_bindings],
-                wait_tokens=list(launch.wait_tokens),
-                signal_token=launch.signal_token,
                 read_aliases=list(launch.read_aliases),
             )
         for prefetch in self.plan.prefetches:
@@ -175,13 +242,17 @@ class ExecutionIRProducer:
     def emit_kernel(self, launch_id: str, writer) -> None:
         if self._active_launch is not None:
             raise RuntimeError("concurrent kernel expansion is forbidden")
-        launch = next((x for x in self.plan.launches if x.launch_id == launch_id), None)
+        launch = next(
+            (x for x in self.plan.launches if x.launch_id == launch_id), None
+        )
         if launch is None:
             raise KeyError(launch_id)
         self._active_launch = launch_id
         try:
             region = self.arch_ir.regions[launch.arch_region_index]
-            root = bound_resolver(self.arch_ir.static, Resolver(EMPTY, {})).materialize_constants()
+            root = bound_resolver(
+                self.arch_ir.static, Resolver(EMPTY, {})
+            ).materialize_constants()
             arguments = {
                 arg.id: root.value(arg.expression) for arg in region.static.arguments
             }
@@ -210,14 +281,23 @@ class ExecutionIRProducer:
                 "KernelBegin",
                 launch_id=launch.launch_id,
                 stream_id=launch.stream_id,
-                wait_tokens=list(launch.wait_tokens),
-                signal_token=launch.signal_token,
+                sequence=launch.sequence,
                 tensor_bindings=[list(pair) for pair in launch.tensor_bindings],
                 read_aliases=list(launch.read_aliases),
             )
             ctas = []
             loads = []
             store_areas = {}
+            instruction_batch = []
+            instruction_batch_bytes = 0
+
+            def flush_instructions():
+                nonlocal instruction_batch_bytes
+                if not instruction_batch:
+                    return
+                writer.send("InstructionBatch", instructions=list(instruction_batch))
+                instruction_batch.clear()
+                instruction_batch_bytes = 0
             # A kernel's output contract is the set of tensors it actually
             # stores.  Program-level returns may omit intermediates (e.g. H in
             # a two-GEMM chain), so using ArchIR.outputs here would reject a
@@ -225,6 +305,7 @@ class ExecutionIRProducer:
             output_ids = set()
 
             def emit_cta(cta):
+                flush_instructions()
                 ctas.append(cta)
                 writer.send(
                     "CTA",
@@ -236,29 +317,60 @@ class ExecutionIRProducer:
                 )
 
             def emit_instruction(node):
-                writer.send(
-                    "Instruction",
-                    id=node.id,
-                    name=node.name,
-                    op=node.opcode,
-                    pipeline=PIPELINES[node.resource],
-                    cta=node.cta,
-                    warp=node.warp,
-                    tensor=node.tensor if node.tensor is not None else 0,
-                    dtype=node.dtype.value,
-                    leading_dim=node.leading_dim or 0,
-                    tile=list(node.tile),
-                    after_issue=list(node.after_issue),
-                    after_complete=list(node.after_complete),
+                nonlocal instruction_batch_bytes
+                instruction = {
+                    "id": node.id,
+                    "name": node.name,
+                    "op": node.opcode,
+                    "pipeline": PIPELINES[node.resource],
+                    "cta": node.cta,
+                    "warp": node.warp,
+                    "tensor": node.tensor if node.tensor is not None else 0,
+                    "dtype": node.dtype.value,
+                    "leading_dim": node.leading_dim or 0,
+                    "tile": list(node.tile),
+                    "after_issue": list(node.after_issue),
+                    "after_complete": list(node.after_complete),
+                }
+                instruction_bytes = len(
+                    json.dumps(instruction, separators=(",", ":")).encode()
+                )
+                # Include the complete InstructionBatch envelope and closing
+                # array/object delimiters in the bounded-size estimate.
+                projected = (
+                    instruction_batch_bytes
+                    + instruction_bytes
+                    + (1 if instruction_batch else 0)
+                    + 45
+                )
+                if len(instruction_batch) >= 512 or projected > 256 * 1024:
+                    flush_instructions()
+                    if instruction_bytes + 45 > 256 * 1024:
+                        raise ValueError("one instruction exceeds batch size limit")
+                instruction_batch.append(instruction)
+                instruction_batch_bytes += instruction_bytes + (
+                    1 if len(instruction_batch) > 1 else 0
                 )
                 if node.opcode == A.NativeOpcode.TMA_LOAD.value and node.tensor is not None:
-                    loads.append((node.cta, node.pipeline_iteration, node.id, node.tensor, node.tile))
+                    loads.append(
+                        (
+                            node.cta,
+                            node.pipeline_iteration,
+                            node.id,
+                            node.tensor,
+                            node.tile,
+                        )
+                    )
                 if node.opcode == A.NativeOpcode.TMA_STORE.value and node.tensor is not None:
-                    store_areas[node.tensor] = store_areas.get(node.tensor, 0) + node.tile[2] * node.tile[3]
+                    store_areas[node.tensor] = (
+                        store_areas.get(node.tensor, 0)
+                        + node.tile[2] * node.tile[3]
+                    )
                     output_ids.add(node.tensor)
 
             expander = NativeExpander(region, resolver, by_name)
             expander.expand_to(emit_cta, emit_instruction)
+            flush_instructions()
 
             for window in self._prefetch_windows(loads, ctas, tensors):
                 writer.send(
@@ -336,7 +448,7 @@ class ExecutionIRProducer:
                 )
             )
 
-        for _, _, node_id, tensor_id, tile in eligible:
+        for cta_id, iteration, node_id, tensor_id, tile in eligible:
             tensor = tensors_by_id[tensor_id]
             r, c, h, w = tile
             width = 2 if tensor.dtype in (A.DataType.BF16, A.DataType.FP16) else 4
@@ -351,7 +463,7 @@ class ExecutionIRProducer:
                         (tensor.name, p)
                         for p in range(begin // config.page_bytes, (end - 1) // config.page_bytes + 1)
                     )
-            current_wave = waves[_]
+            current_wave = waves[cta_id]
             if current_wave != active_wave:
                 finish()
                 consumers = []

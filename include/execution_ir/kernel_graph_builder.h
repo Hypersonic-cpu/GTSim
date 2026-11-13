@@ -1,7 +1,6 @@
 #pragma once
 
 #include "execution_ir/kernel_graph.h"
-#include "runtime/dependency_tokens.h"
 #include "simulator.h"
 
 #include <map>
@@ -16,8 +15,7 @@ namespace GTSim::ExecutionIR {
 struct KernelHeader {
     std::string launch_id;
     std::string stream_id;
-    std::vector<TokenId> wait_tokens;
-    TokenId signal_token;
+    std::uint64_t sequence{};
     std::vector<std::pair<int, int>> tensor_bindings;
     std::vector<std::string> read_aliases;
 };
@@ -61,16 +59,10 @@ private:
     std::map<int, int> warp_bases_;
     std::vector<int> sm_next_subpartition_;
     int next_warp_id_{};
-    std::vector<std::set<int>> deps_;
-    std::vector<std::vector<int>> children_;
     std::vector<PrefetchWindow> prefetch_windows_;
-    std::set<std::string> instruction_names_;
     std::set<int> read_allocations_, write_allocations_;
-    std::map<std::tuple<int, int, std::string>, std::vector<int>> collectives_;
-    std::map<int, std::vector<std::array<int, 4>>> output_regions_;
-    std::map<int, std::string> opcodes_;
+    std::map<int, std::uint64_t> output_areas_;
     std::set<int> prefetch_consumers_;
-    std::set<int> outputs_;
 
     void require_started() const;
     static DataType parse_dtype(const std::string& value);

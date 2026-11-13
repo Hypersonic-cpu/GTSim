@@ -20,20 +20,17 @@ namespace GTSim {
 // Forward declarations
 class Memory;
 
-enum class SchedulePolicy {
-    GTO,
-    RR
-};
+enum class SchedulePolicy { GTO, RR };
 
 // Scheduler implementing per-subpartition GTO (Greedy-Then-Oldest) policy
 class Scheduler {
 public:
     int scheduler_warp_num;
-    std::vector<std::vector<DAGNode*>> scheduler_warp;  // Nodes per warp
-    std::vector<std::uint8_t>* scoreboard;              // Track completed nodes (global)
-    std::vector<std::deque<DAGNode*>> ready_warp;       // Ready nodes per warp
-    std::unordered_map<int, DAGNode*> node_dict;        // Quick node lookup
-    std::vector<int> warp_head_index;                   // Current head per warp
+    std::vector<std::vector<DAGNode*>> scheduler_warp; // Nodes per warp
+    std::vector<std::uint8_t>* scoreboard; // Track completed nodes (global)
+    std::vector<std::deque<DAGNode*>> ready_warp; // Ready nodes per warp
+    std::unordered_map<int, DAGNode*> node_dict;  // Quick node lookup
+    std::vector<int> warp_head_index;             // Current head per warp
 
     // Track last issued pipeline per warp for fairness (O2 feature)
     std::vector<std::optional<std::string>> last_issued_pipeline;
@@ -48,14 +45,15 @@ public:
     int subpartition_id;
 
     // Configuration flags
-    bool O2_enabled;  // Dynamic allocation
+    bool O2_enabled; // Dynamic allocation
     SchedulePolicy schedule_policy;
     int rr_cursor;
 
     // TB residency optimization: O(1) lookup with event-driven updates
-    std::vector<bool> warp_is_resident;                      // Per-warp residency flag
-    std::unordered_map<int, std::vector<int>> tb_to_warps;   // Map TB ID to its warp IDs
-    std::vector<int> resident_warps;                          // Event-maintained scheduler candidates
+    std::vector<bool> warp_is_resident; // Per-warp residency flag
+    std::unordered_map<int, std::vector<int>>
+        tb_to_warps;                 // Map TB ID to its warp IDs
+    std::vector<int> resident_warps; // Event-maintained scheduler candidates
 
     // Pipeline lookup optimization: O(1) hash map instead of O(N) linear search
     std::unordered_map<std::string, Pipeline*> pipeline_map;
@@ -71,7 +69,8 @@ public:
     std::array<std::vector<int>, kMemoryOpTypes> memory_next_issue_cycle;
     int startup_delay_cycles;
 
-    Scheduler(int warp_count, bool o2 = false, SchedulePolicy policy = SchedulePolicy::GTO)
+    Scheduler(int warp_count, bool o2 = false,
+              SchedulePolicy policy = SchedulePolicy::GTO)
         : scheduler_warp_num(warp_count),
           scheduler_warp(warp_count),
           scoreboard(nullptr),
@@ -93,7 +92,31 @@ public:
           tma_issue_interval_cache(warp_count, -1),
           sram_next_issue_cycle(0),
           memory_next_issue_cycle{},
-          startup_delay_cycles(0) {}  // Default: no warps resident
+          startup_delay_cycles(0) {} // Default: no warps resident
+
+    // Clear graph-local state while retaining the scheduler object and its
+    // persistent pipeline/TMA/TMEM bindings.  A new kernel can therefore
+    // reuse the GPU's scheduling resources without reallocating them.
+    void reset_for_graph(int warp_count) {
+        scheduler_warp_num = warp_count;
+        scheduler_warp.assign(warp_count, {});
+        ready_warp.assign(warp_count, {});
+        warp_head_index.assign(warp_count, 0);
+        last_issued_pipeline.assign(warp_count, std::nullopt);
+        last_issue_cycle.assign(warp_count, -1000);
+        warp_is_resident.assign(warp_count, false);
+        tma_next_issue_cycle.assign(warp_count, 0);
+        tma_issue_interval_cache.assign(warp_count, -1);
+        node_dict.clear();
+        tb_to_warps.clear();
+        resident_warps.clear();
+        scoreboard = nullptr;
+        subpartition_id = -1;
+        last_issued_warp = -1;
+        rr_cursor = 0;
+        sram_next_issue_cycle = 0;
+        init_memory_issue_cycles(warp_count);
+    }
 
     void init_memory_issue_cycles(int warp_count) {
         for (auto& vec : memory_next_issue_cycle) {
@@ -102,11 +125,13 @@ public:
     }
 
     // Initialize scheduler with nodes
-    void init_with_nodes(const std::vector<DAGNode*>& nodes, int total_nodes, int sp_id,
+    void init_with_nodes(const std::vector<DAGNode*>& nodes, int total_nodes,
+                         int sp_id,
                          std::vector<std::uint8_t>* global_scoreboard) {
+        reset_for_graph(scheduler_warp_num);
         scoreboard = global_scoreboard;
-        init_memory_issue_cycles(scheduler_warp_num);
-        if (scoreboard && scoreboard->size() < static_cast<size_t>(total_nodes)) {
+        if (scoreboard &&
+            scoreboard->size() < static_cast<size_t>(total_nodes)) {
             scoreboard->resize(total_nodes, 0);
         }
         subpartition_id = sp_id;
@@ -148,7 +173,8 @@ public:
         if (it != tb_to_warps.end()) {
             for (int warp_id : it->second) {
                 warp_is_resident[warp_id] = false;
-                auto resident_it = std::find(resident_warps.begin(), resident_warps.end(), warp_id);
+                auto resident_it = std::find(resident_warps.begin(),
+                                             resident_warps.end(), warp_id);
                 if (resident_it != resident_warps.end()) {
                     resident_warps.erase(resident_it);
                 }
@@ -157,7 +183,8 @@ public:
     }
 
     // Main scheduling function - returns list of issued nodes
-    std::vector<DAGNode*> schedule(int current_cycle, std::vector<Pipeline*>& pipelines,
+    std::vector<DAGNode*> schedule(int current_cycle,
+                                   std::vector<Pipeline*>& pipelines,
                                    Memory* sram, L2Cache* l2);
 
     void enqueue_ready(DAGNode* node) {
@@ -201,7 +228,8 @@ public:
     }
 
     bool tma_ready(const DAGNode* node, int current_cycle) const {
-        if (node->warp_id < 0 || node->warp_id >= static_cast<int>(tma_next_issue_cycle.size())) {
+        if (node->warp_id < 0 ||
+            node->warp_id >= static_cast<int>(tma_next_issue_cycle.size())) {
             return false;
         }
         return current_cycle >= tma_next_issue_cycle[node->warp_id];
@@ -223,13 +251,14 @@ private:
                                   Memory* sram, L2Cache* l2);
 
     // Helper: Try to issue one instruction from given warp
-    std::pair<DAGNode*, Pipeline*> try_issue_from_warp(
-        int warp_id, int current_cycle, std::vector<Pipeline*>& pipelines,
-        Memory* sram, L2Cache* l2);
+    std::pair<DAGNode*, Pipeline*>
+    try_issue_from_warp(int warp_id, int current_cycle,
+                        std::vector<Pipeline*>& pipelines, Memory* sram,
+                        L2Cache* l2);
 
     // Helper: Issue a node and update tracking state
     void issue_node(DAGNode* node, Pipeline* pipe, int current_cycle,
-                   Memory* sram, L2Cache* l2, int issue_span_override = -1);
+                    Memory* sram, L2Cache* l2, int issue_span_override = -1);
 };
 
 } // namespace GTSim

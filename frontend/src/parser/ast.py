@@ -23,7 +23,6 @@ for _name in (
     "layout",
     "graph",
     "arch",
-    "execution",
 ):
     _module = import_module(f"{_NAMESPACE}.{_name}")
     for _key, _value in vars(_module).items():

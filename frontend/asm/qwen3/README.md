@@ -33,9 +33,9 @@ expert Gate/Up projection has shape 4096 × 3072 per expert. The model has 94
 layers, and this Program describes one block. The sample uses a synthetic
 routing trace, a 10,000-token history and four attention splits.
 
-Use `one_block.progir` for all-HBM placement or
-`flash-accel/one_block.progir` for read-only weights in HBF. Q, K/V cache,
-attention results and intermediate activations are in HBM in both programs.
+Use `one_block.progir` for all-HBM placement or the HBF placement options for
+read-only weights. Q, K/V cache, attention results and intermediate activations
+are in HBM in both programs.
 
 ## Compilation
 
@@ -45,9 +45,10 @@ PYTHONPATH=frontend/src python3 -m compile.run_text \
   --params frontend/asm/qwen3/b16.json
 ```
 
-`--emit-ir --out DIR` optionally emits compact FlowIR/ArchIR. Full DAG serialization
-is not part of this default path. Per-kernel materialization preserves the source
-Program's complete ordered block and avoids retaining all expanded graphs at once.
+`--emit-ir --out DIR` optionally emits compact FlowIR/ArchIR. Full DAG
+serialization is not part of this path. Per-kernel expansion preserves the
+source Program's complete ordered block and avoids retaining all expanded
+graphs at once.
 
 The independent CPU operator oracle is `frontend/tools/qwen_semantic_oracle.py`;
 `audit_qwen_addresses.py` checks request/head/split/expert association and position
@@ -60,11 +61,11 @@ initial comparison before the IR-only synchronization/precision correction.
 
 ## Run the simulator
 
-The textual program can execute through the C++ runner without saving giant
-kernel DAG files. A named pipe transfers each materialized kernel directly to
-the existing ProgramExecutor JSON reader. The small Program manifest, source
-hashes, simulator log and result JSON are retained. Each case runs a full block
-on its own persistent GPU state; different cases are independent experiments.
+The textual program executes through the stream-only C++ runner without saving
+giant kernel DAG files. A Unix socket transfers each materialized kernel as
+bounded `InstructionBatch` messages. The compact manifest, source hashes,
+simulator log and result JSON are retained. Each case runs a full block on its
+own persistent GPU state; different cases are independent experiments.
 
 Build the runner if needed:
 
