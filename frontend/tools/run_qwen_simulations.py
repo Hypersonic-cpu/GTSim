@@ -1,7 +1,7 @@
-"""Run a textual ProgramIR through ProgramExecutor, streaming via FIFOs.
+"""Run a textual ProgramIR through the persistent GTSim execution interface.
 
-Only manifests, provenance and timing logs are stored. Each kernel is expanded
-once in RAM; the existing C++ reader consumes its JSON from a named pipe.
+The default Unix-socket path expands one requested kernel at a time.  The
+``fifo`` option remains available as a compatibility/regression path.
 """
 
 import argparse
@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import threading
 from time import perf_counter
@@ -21,7 +22,12 @@ from compile import compile_program, lower_flow
 from compile.arch_to_exec import lower_region, strides
 from compile.static import EMPTY, Resolver, bound_resolver
 from compile.export_runtime import PIPELINES, tensor_record
-from parser import ast as A
+from compile.streaming import (
+    ExecutionIRProducer,
+    SocketFramedTransport,
+    make_program_plan,
+)
+from parser import ast as A, parse_file
 
 
 def sha(path):
@@ -126,6 +132,38 @@ def plan_program(
             if not g.iterations
         ):
             regions.append(region)
+    source_program = parse_file(source)
+    active_ids = {region.symbol for region in regions}
+    source_commands = []
+    if isinstance(source_program, A.ProgIR):
+        for command in source_program.commands:
+            if command.kind == A.CommandKind.LAUNCH:
+                if command.target in active_ids:
+                    source_commands.append(
+                        dict(record="Command", kind="LaunchKernel", target=command.target)
+                    )
+            elif command.kind == A.CommandKind.SYNCHRONIZE:
+                source_commands.append(
+                    dict(
+                        record="Command",
+                        kind="StreamSynchronize",
+                        target=command.target,
+                        after=list(command.after),
+                    )
+                )
+            elif command.kind == A.CommandKind.RECORD_EVENT:
+                source_commands.append(
+                    dict(record="Command", kind="RecordEvent", target=command.target)
+                )
+            elif command.kind == A.CommandKind.WAIT_EVENT:
+                source_commands.append(
+                    dict(record="Command", kind="WaitEvent", target=command.target)
+                )
+    if not source_commands:
+        source_commands = [
+            dict(record="Command", kind="LaunchKernel", target=r.symbol)
+            for r in regions
+        ] + [dict(record="Command", kind="StreamSynchronize", target=arch.stream)]
     launches = [
         dict(
             record="ExecutionLaunch",
@@ -145,11 +183,7 @@ def plan_program(
         streams=[arch.stream],
         tensors=[tensor_record(t) for t in tensors],
         launches=launches,
-        commands=[
-            dict(record="Command", kind="LaunchKernel", target=r.symbol)
-            for r in regions
-        ]
-        + [dict(record="Command", kind="StreamSynchronize", target="")],
+        commands=source_commands,
     )
     if prefetch is not None:
         prefetch.decorate(manifest)
@@ -169,7 +203,144 @@ def plan_program(
             kernel = lower_panels(kernel, prefetch.streaming, prefetch.bases)
         return kernel
 
-    return manifest, regions, expand
+    # The stream producer addresses regions by this compact, active-region
+    # index.  No instruction list is created here.
+    arch = replace(arch, regions=tuple(regions))
+    return manifest, regions, expand, arch, prefetch
+
+
+def run_streaming_interface(
+    args,
+    params,
+    manifest,
+    regions,
+    arch,
+    prefetch,
+    layouts,
+    residency,
+    raw_layouts,
+    placements,
+):
+    """Run the persistent socket protocol; expand only requested kernels."""
+    plan = make_program_plan(arch, manifest, regions)
+    producer = ExecutionIRProducer(
+        arch,
+        plan,
+        {
+            "prefetch_config": prefetch.streaming if prefetch is not None else None,
+            "prefetch_bases": prefetch.bases if prefetch is not None else None,
+            "layouts": layouts,
+        },
+    )
+    args.out.mkdir(parents=True, exist_ok=True)
+    source_paths = sorted(
+        [
+            *Path("frontend/src").rglob("*.py"),
+            *args.lib.glob("*ir"),
+            args.source,
+            args.params,
+        ]
+    )
+    provenance = dict(
+        version="stream-v1",
+        params=params,
+        residency=residency,
+        tensor_layouts=raw_layouts,
+        tensor_placements=placements,
+        focus_launch=args.focus_launch,
+        focus_expert=args.focus_expert,
+        launch_overhead_cycles=plan.launch_overhead_cycles,
+        max_frame=args.max_frame,
+        runner_sha256=sha(args.runner),
+        max_cycles=args.max_cycles,
+        architecture_sha256=sha(args.architecture),
+        memory_sha256=sha(args.memory),
+        git_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        source_sha256={str(path): sha(path) for path in source_paths},
+        transport="AF_UNIX socketpair; length-prefixed JSON; on-demand Kernel IR",
+    )
+    (args.out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    start = perf_counter()
+    log = (args.out / "simulation.log").open("w")
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    command = [
+        str(args.runner),
+        str(args.architecture),
+        "--memory-config",
+        str(args.memory),
+        "--stream-fd",
+        str(child.fileno()),
+    ]
+    if args.max_cycles:
+        command += ["--max-cycles", str(args.max_cycles)]
+    command += ["--max-frame", str(args.max_frame)]
+    process = subprocess.Popen(
+        command,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        pass_fds=(child.fileno(),),
+    )
+    child.close()
+    transport = SocketFramedTransport(parent, args.max_frame)
+    records = []
+    completed = set()
+    program_end_sent = False
+    failures = []
+    try:
+        producer.emit_program_manifest(transport)
+        while True:
+            message = transport.receive()
+            kind = message["type"]
+            if kind == "RequestKernel":
+                producer.emit_kernel(message["launch_id"], transport)
+            elif kind == "KernelDone":
+                completed.add(message["launch_id"])
+                if len(completed) == len(plan.launches) and not program_end_sent:
+                    transport.send("ProgramEnd", symbol=plan.symbol)
+                    program_end_sent = True
+            elif kind == "ProgramDone":
+                break
+            elif kind == "Error":
+                raise RuntimeError(message.get("message", "GTSim stream error"))
+            else:
+                raise RuntimeError(f"unexpected GTSim stream message: {kind}")
+        returncode = process.wait()
+    except BaseException:
+        failures.append(traceback.format_exc())
+        process.terminate()
+        returncode = process.wait()
+        raise
+    finally:
+        parent.close()
+        log.close()
+    outcome = {
+        "version": "stream-v1",
+        "batch": params.get("B"),
+        "program": plan.symbol,
+        "returncode": returncode,
+        "elapsed_seconds": perf_counter() - start,
+        "kernels": records,
+        "errors": failures,
+        "transport": "unix socketpair framed JSON",
+    }
+    if returncode:
+        raise RuntimeError(f"GTSim streaming runner failed with {returncode}")
+    lines = (args.out / "simulation.log").read_text().splitlines()
+    timing_line = next(line for line in lines if line.startswith("Program timing JSON: "))
+    outcome["timing"] = json.loads(timing_line.split(": ", 1)[1])
+    (args.out / "result.json").write_text(json.dumps(outcome, indent=2) + "\n")
+    print(
+        json.dumps(
+            {
+                "version": "stream-v1",
+                "batch": params.get("B"),
+                "program": plan.symbol,
+                "returncode": returncode,
+                "cycles": outcome["timing"].get("total_cycles"),
+            }
+        ),
+        flush=True,
+    )
 
 
 def write_kernel(kernel, output):
@@ -282,9 +453,18 @@ def main():
     parser.add_argument("--tensor-placements", type=Path, help="JSON mapping tensor names to HBM/HBF")
     parser.add_argument("--focus-launch")
     parser.add_argument("--focus-expert", type=int)
+    parser.add_argument(
+        "--interface",
+        choices=("stream", "fifo"),
+        default="stream",
+        help="frontend-to-GTSim transport (stream is the persistent default)",
+    )
     parser.add_argument("--max-cycles", type=int)
+    parser.add_argument("--max-frame", type=int, default=1 << 20)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    if args.max_frame <= 0 or args.max_frame > 0xFFFFFFFF:
+        parser.error("--max-frame must be in [1, 4294967295]")
     args.out.mkdir(parents=True, exist_ok=True)
     params = json.loads(args.params.read_text())
     start = perf_counter()
@@ -293,7 +473,7 @@ def main():
     )
     layouts = json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
     placements = json.loads(args.tensor_placements.read_text()) if args.tensor_placements else {}
-    manifest, plans, expand = plan_program(
+    manifest, plans, expand, arch, prefetch = plan_program(
         args.source,
         args.lib,
         params,
@@ -303,12 +483,38 @@ def main():
         args.focus_expert,
         placements,
     )
+    if args.interface == "stream":
+        run_streaming_interface(
+            args,
+            params,
+            manifest,
+            plans,
+            arch,
+            prefetch,
+            {name: A.TileMajorLayout(**layout) for name, layout in layouts.items()},
+            residency,
+            layouts,
+            placements,
+        )
+        return
     for launch in manifest["launches"]:
         path = args.out / launch["kernel_file"]
         if path.exists():
             raise FileExistsError(path)
         os.mkfifo(path)
-    (args.out / "program.gtsir").write_text(json.dumps(manifest, indent=2) + "\n")
+    # The compatibility JSON schema predates the compact command dependency
+    # sidecar.  Keep the richer ``after`` field on the socket path, but omit it
+    # when feeding the legacy reader.
+    legacy_manifest = json.loads(json.dumps(manifest))
+    for command in legacy_manifest.get("commands", []):
+        command.pop("after", None)
+        if command.get("kind") == "StreamSynchronize":
+            # The legacy Program schema only accepts an empty sync target;
+            # the stream protocol retains the original stream identifier.
+            command["target"] = ""
+    (args.out / "program.gtsir").write_text(
+        json.dumps(legacy_manifest, indent=2) + "\n"
+    )
     source_paths = sorted(
         [
             *Path("frontend/src").rglob("*.py"),

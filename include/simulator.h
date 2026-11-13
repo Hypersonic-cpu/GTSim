@@ -343,6 +343,83 @@ public:
         admission_guard.release();
     }
 
+    // Program-lifetime construction.  The TensorRegistry is owned by the
+    // caller (normally StreamingProgramRunner) and outlives every attached
+    // kernel graph.  No DAG or launch-local scheduler is created here.
+    Simulator(const SimulatorConfig& cfg, const TensorRegistry& tensors)
+        : config(cfg),
+          dag(nullptr),
+          cycle(0),
+          log_file(nullptr),
+          output_stream(&std::cout),
+          completed_node_count(0) {
+        // SM schedulers are allocated before the first graph arrives.  A
+        // conservative capacity avoids rebuilding the persistent GPU merely
+        // because a later kernel uses more warps than the default profile.
+        config.warp_count = std::max(config.warp_count, config.max_warps_per_sm);
+        if (config.cluster_size > 0) {
+            const int active_sms =
+                (config.num_sms / config.cluster_size) * config.cluster_size;
+            config.num_sms = std::max(0, active_sms);
+        }
+
+        simulated_gpu = new GPU(
+            config.num_sms, config.warp_count, config.tensor_core_throughput,
+            config.simd_throughput, config.sfu_throughput,
+            config.ls_throughput_bytes, config.tensor_core_latency_cycles,
+            config.simd_latency_cycles, config.sfu_latency_cycles,
+            config.shfl_latency_cycles, config.ls_latency_cycles,
+            config.tensor_core_width, config.simd_width, config.sfu_width,
+            config.ls_width_bytes, config.sram_latency_cycles,
+            config.sram_bandwidth_bytes_per_cycle, config.sram_queue_depth,
+            config.O2_dynamic_allocation, config.schedule_policy,
+            config.max_concurrent_blocks_per_sm, config.l2_cache_size_bytes,
+            config.l2_line_size_bytes, config.l2_hit_latency_cycles,
+            config.l2_bandwidth_bytes_per_cycle,
+            config.l2_write_bandwidth_bytes_per_cycle, config.l2_queue_depth,
+            config.l2_max_transactions_per_cycle_per_sp, config.l2_bypass_cache,
+            config.memory, config.core_frequency_mhz,
+            config.tma_setup_latency_cycles, config.tma_issue_interval_cycles,
+            config.tma_issue_rate_bytes_per_cycle, config.tmem_cols_per_cta,
+            config.tmem_issue_interval_cycles, config.tmem_read_latency_cycles,
+            config.tmem_read_bandwidth_bytes_per_cycle,
+            config.tmem_write_latency_cycles,
+            config.tmem_write_bandwidth_bytes_per_cycle,
+            config.tmem_queue_depth, config.startup_delay_cycles,
+            config.block_schedule_latency_cycles, tensors);
+
+        if (config.noc_enabled) {
+            const int cluster_size = config.noc_sms_per_cluster;
+            if (config.noc_topology == NoCTopology::MESH) {
+                int rows = config.noc_mesh_rows;
+                int cols = config.noc_mesh_cols;
+                if (rows <= 0 || cols <= 0) {
+                    const int mesh_sms =
+                        (cluster_size > 0) ? cluster_size : config.num_sms;
+                    cols = static_cast<int>(std::ceil(std::sqrt(mesh_sms)));
+                    rows = (mesh_sms + cols - 1) / cols;
+                }
+                const int num_links = rows * (cols - 1) + (rows - 1) * cols;
+                int link_bw = config.noc_link_bandwidth_bytes_per_cycle;
+                if (link_bw <= 0 && num_links > 0)
+                    link_bw = config.noc_bandwidth_bytes_per_cycle / num_links;
+                simulated_gpu->noc = new MeshNoC(
+                    config.noc_mesh_base_latency_cycles,
+                    config.noc_latency_cycles,
+                    config.noc_bandwidth_bytes_per_cycle,
+                    config.noc_queue_depth, rows, cols, cluster_size, link_bw,
+                    config.noc_mesh_sm_mapping);
+            } else {
+                simulated_gpu->noc =
+                    new CrossbarNoC(config.noc_latency_cycles,
+                                    config.noc_bandwidth_bytes_per_cycle,
+                                    config.noc_queue_depth, cluster_size);
+            }
+            for (auto* sm : simulated_gpu->sms)
+                sm->set_noc(simulated_gpu->noc);
+        }
+    }
+
     ~Simulator() {
         delete simulated_gpu;
         if (log_file) {
@@ -353,6 +430,13 @@ public:
 
     // Rebind launch-local scheduling on the existing GPU after full completion.
     void bind_kernel(DAG* next);
+
+    // Persistent-program graph lifecycle.  At most one graph may be attached
+    // and all scheduler/SM references are cleared before detach returns.
+    void attach_graph(DAG& graph);
+    bool run_active_graph(int max_cycles, bool verbose = false);
+    void verify_graph_retired() const;
+    void detach_graph();
 
     // Set log file for output
     bool set_log_file(const std::string& filename) {

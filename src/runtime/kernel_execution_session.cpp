@@ -111,4 +111,61 @@ void KernelExecutionSession::rebind(Simulator& simulator, DAG& dag) {
     simulator.cycle = std::max(simulator.cycle, simulator.memory_drain_cycle);
     initialize(simulator, dag, true);
 }
+
+void KernelExecutionSession::detach(Simulator& simulator) {
+    if (!simulator.dag) return;
+    if (simulator.completed_node_count != simulator.dag->nodes.size())
+        throw std::logic_error("cannot detach an incomplete kernel graph");
+
+    // No callback may capture a KernelPrefetchSession once the graph is
+    // released.  The caller normally clears it first; doing it here as well
+    // makes exception cleanup idempotent.
+    simulator.node_completion_observer = {};
+    auto* gpu = simulator.simulated_gpu;
+    gpu->pending_remote_reads.clear();
+    gpu->pending_remote_writes.clear();
+    gpu->forward_to_sram_retry_queue.clear();
+    gpu->return_retry_queue.clear();
+
+    for (auto* sm : gpu->sms) {
+        sm->all_tb_ids.clear();
+        sm->resident_tb_ids.clear();
+        sm->tb_to_nodes.clear();
+        sm->tb_remaining_count.clear();
+        sm->node_id_to_tb_id.clear();
+        sm->tb_dispatch_ready.clear();
+        sm->waiting_tb_queue = {};
+        sm->cta_resources.clear();
+        sm->shared_used = sm->registers_used = sm->warps_used = 0;
+        sm->tmem->reset();
+        sm->tmem->init_warp_state(simulator.config.warp_count);
+
+        for (auto* sp : sm->sps) {
+            sp->pending_memory_ops.clear();
+            sp->retry_queue_sram.clear();
+            sp->retry_queue_l2.clear();
+            sp->deferred_tmem_pair_completions.clear();
+            sp->barrier_queue.clear();
+            sp->set_node_to_sp_map(nullptr);
+            sp->set_completed_node_counter(nullptr);
+            delete sp->sp_scheduler;
+            sp->sp_scheduler = new Scheduler(
+                simulator.config.warp_count, simulator.config.O2_dynamic_allocation,
+                simulator.config.schedule_policy);
+            sp->sp_scheduler->set_pipelines(&sp->pipelines);
+            sp->sp_scheduler->set_tma_unit(sm->tma);
+            sp->sp_scheduler->set_tmem_unit(sm->tmem);
+            sp->sp_scheduler->set_peer_schedulers(&sm->sp_schedulers);
+            sm->sp_schedulers[sp->subpartition_id] = sp->sp_scheduler;
+            sp->sp_register->register_totally_used = 0;
+        }
+    }
+    simulator.global_scoreboard.clear();
+    simulator.node_id_to_sp.clear();
+    simulator.node_id_to_sm.clear();
+    gpu->set_node_to_sp_map(nullptr);
+    gpu->set_node_to_sm_map(nullptr);
+    simulator.completed_node_count = 0;
+    simulator.dag = nullptr;
+}
 } // namespace GTSim

@@ -9,5 +9,6 @@ public:
                            bool replace_schedulers);
     static void retire(const Simulator& simulator);
     static void rebind(Simulator& simulator, DAG& dag);
+    static void detach(Simulator& simulator);
 };
 } // namespace GTSim

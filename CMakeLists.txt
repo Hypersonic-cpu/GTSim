@@ -63,7 +63,13 @@ target_link_libraries(gtsim_fa2 PRIVATE gtsim_core)
 
 option(GTSIM_BUILD_IR_FRAMEWORK "Build the layered IR framework and its tests" ON)
 if(GTSIM_BUILD_IR_FRAMEWORK)
-  add_library(gtsim_execution STATIC src/execution_ir/graph_codec.cpp src/execution_ir/graph_materialize.cpp src/runtime/program_executor.cpp)
+  add_library(gtsim_execution STATIC
+    src/execution_ir/graph_codec.cpp
+    src/execution_ir/graph_materialize.cpp
+    src/execution_ir/kernel_graph_builder.cpp
+    src/runtime/program_executor.cpp
+    src/runtime/stream_protocol.cpp
+    src/runtime/streaming_program_runner.cpp)
   target_link_libraries(gtsim_execution PUBLIC gtsim_core)
   add_executable(gtsim_program workloads/serve/program_runner.cpp)
   target_link_libraries(gtsim_program PRIVATE gtsim_execution)

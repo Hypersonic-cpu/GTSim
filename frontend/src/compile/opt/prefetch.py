@@ -158,22 +158,57 @@ class PrefetchPlan:
             )
             for p in self.queue
         ]
-        commands = []
-        for i, launch in enumerate(manifest["launches"]):
-            name = launch["id"]
-            if name in users:
-                launch["read_aliases"] = users[name]
-            commands.extend(
-                dict(record="Command", kind="QueuePrefetch", target=p)
-                for p in enqueue[i]
-            )
-            commands.append(dict(record="Command", kind="LaunchKernel", target=name))
-            commands.extend(
-                dict(record="Command", kind="Release", target=p) for p in releases[name]
-            )
-        manifest["commands"] = commands + [
-            dict(record="Command", kind="StreamSynchronize", target="")
-        ]
+        for launch in manifest["launches"]:
+            if launch["id"] in users:
+                launch["read_aliases"] = users[launch["id"]]
+
+        # Keep the source ProgramIR command stream when one is available.  In
+        # particular, ``prog_to_flow`` consumes explicit synchronizations and
+        # events while constructing FlowIR, so the runtime sidecar is the only
+        # place where those commands can survive.  Prefetch operations are
+        # inserted immediately around the corresponding launch without
+        # reordering or dropping the original host commands.
+        source_commands = manifest.get("commands")
+        if source_commands:
+            launch_index = {
+                launch["id"]: i for i, launch in enumerate(manifest["launches"])
+            }
+            commands = []
+            seen_launches = set()
+            for command in source_commands:
+                if command.get("kind") != "LaunchKernel":
+                    commands.append(command)
+                    continue
+                name = command.get("target")
+                if name not in launch_index or name in seen_launches:
+                    raise ValueError("runtime launch order differs from the prefetch plan")
+                index = launch_index[name]
+                commands.extend(
+                    dict(record="Command", kind="QueuePrefetch", target=p)
+                    for p in enqueue[index]
+                )
+                commands.append(command)
+                commands.extend(
+                    dict(record="Command", kind="Release", target=p)
+                    for p in releases[name]
+                )
+                seen_launches.add(name)
+            if seen_launches != set(launch_index):
+                raise ValueError("runtime command stream omits a planned launch")
+        else:
+            commands = []
+            for i, launch in enumerate(manifest["launches"]):
+                name = launch["id"]
+                commands.extend(
+                    dict(record="Command", kind="QueuePrefetch", target=p)
+                    for p in enqueue[i]
+                )
+                commands.append(dict(record="Command", kind="LaunchKernel", target=name))
+                commands.extend(
+                    dict(record="Command", kind="Release", target=p) for p in releases[name]
+                )
+            commands.append(dict(record="Command", kind="StreamSynchronize", target=""))
+        manifest["commands"] = commands
         return manifest
 
 

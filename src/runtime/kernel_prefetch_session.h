@@ -12,8 +12,33 @@ public:
                           std::uint64_t& next_epoch, int cycle)
         : memory_(memory),
           owners_(kernel.ops.size(), -1) {
+        initialize(*kernel.prefetch_windows, kernel.ops.size(), bindings,
+                   [&](int node) { return kernel.ops[node].op == "cp.dram2sram_tma"; },
+                   next_epoch, cycle);
+    }
+
+    KernelPrefetchSession(MemorySystem& memory,
+                          const std::vector<PrefetchWindow>& plans,
+                          std::size_t op_count,
+                          const std::vector<std::pair<int, int>>& bindings,
+                          std::uint64_t& next_epoch, int cycle)
+        : memory_(memory), owners_(op_count, -1) {
+        initialize(plans, op_count, bindings,
+                   [](int) { return true; }, next_epoch, cycle);
+    }
+
+    KernelPrefetchSession(const KernelPrefetchSession&) = delete;
+
+private:
+    template <class ConsumerPredicate>
+    void initialize(const std::vector<PrefetchWindow>& plans,
+                    std::size_t op_count,
+                    const std::vector<std::pair<int, int>>& bindings,
+                    ConsumerPredicate consumer_predicate,
+                    std::uint64_t& next_epoch, int cycle) {
+        (void)op_count;
         const std::map<int, int> ids(bindings.begin(), bindings.end());
-        const auto& plans = *kernel.prefetch_windows;
+        if (plans.empty()) throw std::invalid_argument("empty streaming window plan");
         count_ = plans.front().buffer.count;
         if (count_ < 2)
             throw std::invalid_argument(
@@ -35,8 +60,8 @@ public:
             for (auto range : plan.ranges) {
                 range.tensor = ids.at(range.tensor);
                 ranges.push_back(
-                    {range, memory.prefetch_range(range.tensor, range.offset,
-                                                  range.bytes)});
+                    {range, memory_.prefetch_range(range.tensor, range.offset,
+                                                   range.bytes)});
             }
             std::sort(ranges.begin(), ranges.end(),
                       [](const auto& a, const auto& b) {
@@ -53,12 +78,11 @@ public:
             for (int node : window.consumers) {
                 if (node < 0 ||
                     static_cast<std::size_t>(node) >= owners_.size() ||
-                    owners_[node] != -1 ||
-                    kernel.ops[node].op != "cp.dram2sram_tma")
+                    owners_[node] != -1 || !consumer_predicate(node))
                     throw std::invalid_argument("invalid prefetch consumer");
                 owners_[node] = i;
             }
-            memory.bind_node_read_aliases(window.consumers, window.aliases);
+            memory_.bind_node_read_aliases(window.consumers, window.aliases);
             windows_.push_back(std::move(window));
             traces_.push_back({plan.buffer.slot, base + i, bytes});
         }
@@ -66,6 +90,8 @@ public:
              i < count_ && static_cast<std::size_t>(i) < windows_.size(); ++i)
             advance(i, cycle);
     }
+
+public:
 
     void complete(int node, int cycle) {
         const int index = owners_.at(node);

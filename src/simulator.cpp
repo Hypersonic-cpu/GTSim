@@ -306,7 +306,7 @@ void Simulator::print_statistics(bool verbose) {
                      node->op_type != OpType::CP_DRAM2SRAM &&
                      node->op_type != OpType::LD_DRAM2REG))
                     continue;
-                const auto& tensor = dag->tensor_registry.at(node->matrix_id);
+                const auto& tensor = dag->tensors().at(node->matrix_id);
                 if (tensor.initial_memory_tier == MemoryTier::HBF)
                     logical_bytes += static_cast<std::uint64_t>(tile_total_elements(node->tile)) *
                                      bytes_per_element(tensor.dtype);
@@ -1426,5 +1426,28 @@ namespace GTSim {
 void Simulator::bind_kernel(DAG* next) {
     if (!next) throw std::invalid_argument("missing next kernel");
     KernelExecutionSession::rebind(*this, *next);
+}
+
+void Simulator::attach_graph(DAG& graph) {
+    if (dag != nullptr)
+        throw std::logic_error("a kernel graph is already attached");
+    if (graph.nodes.empty())
+        throw std::invalid_argument("cannot attach an empty kernel graph");
+    node_completion_observer = {};
+    KernelExecutionSession::initialize(*this, graph, true);
+}
+
+bool Simulator::run_active_graph(int max_cycles, bool verbose) {
+    if (!dag) throw std::logic_error("no active kernel graph");
+    return run(max_cycles, verbose);
+}
+
+void Simulator::verify_graph_retired() const {
+    if (!dag) throw std::logic_error("no active kernel graph");
+    KernelExecutionSession::retire(*this);
+}
+
+void Simulator::detach_graph() {
+    KernelExecutionSession::detach(*this);
 }
 } // namespace GTSim

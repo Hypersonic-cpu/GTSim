@@ -683,12 +683,24 @@ struct CTAResources {
 class DAG {
 public:
     TensorRegistry tensor_registry;
+    // Streaming execution keeps the program-wide registry outside the
+    // kernel-local DAG.  Legacy builders continue to use the owning value
+    // above; the streaming builder installs a non-owning view instead.
+    const TensorRegistry* tensor_registry_view{nullptr};
     std::unordered_map<int, CTAResources> cta_resources;
     std::vector<DAGNode*> nodes;
     std::unordered_map<int, DAGNode*> nodes_dict;
     std::unordered_map<std::string, DAGNode*> nodes_by_name;
 
     DAG() = default;
+
+    void use_tensor_registry(const TensorRegistry& registry) {
+        tensor_registry_view = &registry;
+    }
+
+    const TensorRegistry& tensors() const {
+        return tensor_registry_view ? *tensor_registry_view : tensor_registry;
+    }
 
     void add_node(DAGNode* node) {
         nodes.push_back(node);
@@ -760,6 +772,9 @@ public:
         nodes_dict.clear();
         nodes_by_name.clear();
         cta_resources.clear();
+        // A view is owned by the Program and may be reinstalled for the next
+        // kernel.  Never retain it after a legacy DAG is cleared.
+        tensor_registry_view = nullptr;
     }
 
     ~DAG() {

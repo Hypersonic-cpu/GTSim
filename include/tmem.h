@@ -19,6 +19,21 @@ public:
         next_issue_cycle.assign(std::max(0, warp_count), 0);
     }
 
+    // Launch-local TMEM allocation and paired-CTA rendezvous state must not
+    // retain node/CTA IDs after a kernel is detached.  The actual TMEM unit
+    // remains part of the persistent GPU.
+    void reset() {
+        next_issue_cycle.clear();
+        cta_allocated_cols.clear();
+        cta_issued_mma_seq.clear();
+        cta_pair_issue_seq.clear();
+        node_pair_seq.clear();
+        pair_pending.clear();
+        pair_issue_pending.clear();
+        node_issue_grant_cycle.clear();
+        release_tokens.clear();
+    }
+
     bool can_issue(const DAGNode* node, int current_cycle) {
         if (!node || !is_tmem_op(node)) {
             return true;
