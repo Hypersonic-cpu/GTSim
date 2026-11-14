@@ -61,16 +61,14 @@ private:
     std::vector<int> sm_next_subpartition_;
     int next_warp_id_{};
     std::vector<PrefetchWindow> prefetch_windows_;
-    std::vector<std::uint8_t> allocation_modes_;
+#ifndef NDEBUG
     std::vector<std::uint64_t> output_areas_;
-    std::vector<std::uint8_t> prefetch_consumers_;
+#endif
 
     void require_started() const;
     static DataType parse_dtype(const std::string& value);
     static const std::unordered_map<std::string_view, std::string_view>&
     supported_ops();
-    bool bound_tensor(int local_id) const;
-    int global_tensor_id(int local_id) const;
     void clear_bindings() noexcept;
 };
 

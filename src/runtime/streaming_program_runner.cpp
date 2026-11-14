@@ -311,10 +311,18 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
         header.tensor_bindings.emplace_back(binding[0], binding[1]);
     KernelGraphBuilder builder(registry_, config_);
     builder.begin(std::move(header));
+    std::unique_ptr<DAG> active_dag;
+    std::unique_ptr<KernelPrefetchSession> panel;
     [[maybe_unused]] auto cleanup = std::experimental::scope_exit([&] {
         builder.abort();
+        memory_->clear_node_read_aliases();
         simulator_->node_completion_observer = {};
-        if (simulator_->dag) simulator_->detach_graph();
+        if (active_dag) {
+            panel.reset();
+            simulator_.reset();
+            memory_ = nullptr;
+            l2_ = nullptr;
+        }
     });
     while (true) {
         const auto message = transport_.receive();
@@ -334,17 +342,17 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             KernelEnd contract{end.op_count, end.cta_count, end.outputs,
                                end.partial_outputs};
             auto built = builder.finish(contract);
+            active_dag = std::move(built.dag);
             std::vector<MemorySystem::ReadAlias> bindings;
             for (const auto& name : launch.read_aliases) {
                 bindings.push_back(aliases_.at(name));
             }
             memory_->bind_read_aliases(std::move(bindings));
-            memory_->prepare_node_read_aliases(built.dag->nodes.size());
 
-            std::unique_ptr<KernelPrefetchSession> panel;
             if (!built.prefetch_windows.empty()) {
+                memory_->prepare_node_read_aliases(active_dag->nodes.size());
                 panel = std::make_unique<KernelPrefetchSession>(
-                    *memory_, built.prefetch_windows, built.dag->nodes.size(),
+                    *memory_, built.prefetch_windows, active_dag->nodes.size(),
                     launch.bindings, next_prefetch_epoch_, simulator_->cycle);
             }
             KernelTiming launch_timing;
@@ -363,7 +371,7 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             launch_timing.start_cycle = simulator_->cycle;
             launch_timing.l2_lines_before = l2_->resident_line_count();
             const auto background_before = memory_->background_cycles();
-            simulator_->attach_graph(*built.dag);
+            simulator_->attach_graph(*active_dag);
             if (panel)
                 simulator_->node_completion_observer = [&](int node, int now) {
                     panel->complete(node, now);
@@ -374,9 +382,8 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             if (panel) launch_timing.prefetch_windows = panel->finish();
             launch_timing.l2_lines_after = l2_->resident_line_count();
             launch_timing.device_complete_cycle = simulator_->cycle;
-            simulator_->verify_retired();
-            KernelExecutionSession::detach(*simulator_);
-            built.dag.reset();
+            simulator_->detach_graph();
+            active_dag.reset();
             launch_timing.complete_cycle =
                 std::max(simulator_->cycle, simulator_->memory_drain_cycle);
             launch_timing.background_compute_cycles =

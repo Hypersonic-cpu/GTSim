@@ -152,6 +152,12 @@ if(BUILD_TESTING)
     add_test(NAME v0_1_0_regression
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_reference.py
               --build-dir ${CMAKE_CURRENT_BINARY_DIR} --verify)
+    if(GTSIM_BUILD_IR_FRAMEWORK)
+      add_test(NAME streaming_lifecycle
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/streaming_lifecycle.py
+                --build-dir ${CMAKE_CURRENT_BINARY_DIR})
+      set_tests_properties(streaming_lifecycle PROPERTIES TIMEOUT 180)
+    endif()
   endif()
 endif()
 

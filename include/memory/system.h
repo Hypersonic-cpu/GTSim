@@ -245,6 +245,10 @@ public:
     void prepare_node_read_aliases(std::size_t node_count) {
         node_read_aliases_.assign(node_count, {});
     }
+    void clear_node_read_aliases() noexcept {
+        std::vector<std::shared_ptr<std::vector<ReadAlias>>>().swap(
+            node_read_aliases_);
+    }
     void bind_node_read_aliases(
         const std::vector<int>& nodes,
         std::shared_ptr<std::vector<ReadAlias>> aliases) {
