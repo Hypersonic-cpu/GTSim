@@ -8,7 +8,6 @@
 #include <set>
 
 namespace GTSim::ExecutionIR {
-namespace {
 
 struct ProgramBeginWire {
     int protocol_version{};
@@ -57,6 +56,8 @@ struct KernelEndWire {
 struct InstructionBatchWire {
     std::vector<Instruction> instructions;
 };
+
+namespace {
 
 DataType parse_dtype(const std::string& value) {
     if (value == "fp16") return DataType::FP16;

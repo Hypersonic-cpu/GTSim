@@ -40,6 +40,7 @@ ExternalProject_Add(flashlab_native
   SOURCE_DIR "${flashlab_patched_source}"
   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/flashlab-integrated"
   CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
   BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target hbfsim_core --parallel ${GTSIM_NATIVE_BUILD_JOBS}
   BUILD_ALWAYS TRUE
   INSTALL_COMMAND ""

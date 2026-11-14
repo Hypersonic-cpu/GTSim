@@ -8,10 +8,12 @@
 #include <glaze/json/read.hpp>
 
 namespace GTSim::ExecutionIR {
-namespace {
+
 struct Envelope {
     std::string type;
 };
+
+namespace {
 
 void read_all(int fd, void* destination, std::size_t bytes) {
     auto* out = static_cast<char*>(destination);
