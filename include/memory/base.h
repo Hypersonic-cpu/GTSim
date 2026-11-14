@@ -38,6 +38,9 @@ struct MemRequest {
     MemoryRoutingHint routing{};
     std::uint64_t read_alias{};
     MemoryReadPath read_path{MemoryReadPath::Host};
+    // Validation-only expected digest.  Zero means that the backend should
+    // report the physical-address shadow digest instead.
+    std::uint64_t shadow_digest{};
 };
 
 struct MemResponse {
@@ -48,7 +51,34 @@ struct MemResponse {
     int size_bytes{};
     MemoryOperation operation{MemoryOperation::Read};
     int error_code{}; // zero on success; backend-specific diagnostic on failure
+    std::uint64_t shadow_digest{};
 };
+
+// Validation-only deterministic payload. Backends do not store a full byte
+// array, but every media path reports the same digest for a logical range.
+inline std::uint64_t memory_shadow_digest(std::uint64_t address,
+                                          std::uint64_t bytes) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (std::uint64_t i = 0; i < bytes; ++i) {
+        std::uint64_t value = address + i;
+        value ^= value >> 33;
+        value *= 0xff51afd7ed558ccdULL;
+        value ^= value >> 33;
+        hash ^= static_cast<std::uint8_t>(value);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+inline std::uint64_t memory_logical_shadow_digest(int tensor_id,
+                                                  std::uint64_t offset,
+                                                  std::uint64_t bytes) {
+    const auto key = (static_cast<std::uint64_t>(
+                          static_cast<std::uint32_t>(tensor_id)) *
+                      0x9e3779b97f4a7c15ULL) ^
+                     (offset + 0x517cc1b727220a95ULL);
+    return memory_shadow_digest(key, bytes);
+}
 
 struct PrefetchBuffer {
     int slot{}, count{};
@@ -92,6 +122,19 @@ public:
                      std::optional<PrefetchBuffer> = std::nullopt) {
         throw std::invalid_argument("device does not support prefetch");
     }
+    // Queue a descriptor without reserving SRAM. The SRAM-side prefetch
+    // engine owns admission and returns a handle in its own ID domain.
+    virtual std::uint64_t
+    enqueue_prefetch(std::uint64_t, std::uint64_t,
+                     std::optional<PrefetchBuffer> = std::nullopt) {
+        throw std::invalid_argument("device does not support queued prefetch");
+    }
+    virtual void advance_prefetch(int) {}
+    virtual std::uint64_t prefetch_alias(std::uint64_t handle) const {
+        return handle;
+    }
+    virtual void on_demand_miss(std::uint64_t, std::uint64_t,
+                                std::uint64_t) {}
     virtual void start_prefetch(std::uint64_t) {
         throw std::invalid_argument("device does not support prefetch");
     }
@@ -101,6 +144,8 @@ public:
     }
     virtual std::uint64_t residency_epoch() const { return 0; }
     virtual std::size_t pending_background_requests() const { return 0; }
+    virtual std::uint64_t prefetch_capacity_stalls() const { return 0; }
+    virtual std::uint64_t prefetch_canceled() const { return 0; }
     virtual MemoryBackendStatistics backend_statistics() const { return {}; }
     virtual DeviceCounters device_counters() const { return {}; }
     virtual HBFBackendStatistics hbf_statistics() const { return {}; }

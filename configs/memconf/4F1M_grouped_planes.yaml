@@ -3,6 +3,8 @@
 # SRAM is 768 x 8 KiB private + 2 MiB base die = 8 MiB per stack.
 # Keep this hardware profile identical for prefetch on/off; the caller enables
 # prefetch separately. Two buffers partition it into 4 MiB slots per stack.
+# Row-major N-slab pages are sparse by row, so the descriptor queue is sized
+# for the complete Qwen one-block page set rather than limiting valid ranges.
 topology: CoLocated
 hbm:
   backend: naive
@@ -12,8 +14,14 @@ hbm:
   write_max_bw_GBps: 310
 hbf:
   backend: hbfine
+  address_mapping_policy: megapage_round_robin
   prefetch_hyperpage_order: true
   eventlab_fragments_per_channel: 256
+  prefetch_engine:
+    enabled: true
+    queue_capacity: 65536
+    admission_policy: fifo_hol
+    cancel_queued_on_demand_miss: false
   read_bw_GBps: 3072
   write_bw_GBps: 167.77216
   read_latency_cycles: 7920

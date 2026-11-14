@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
     try {
         int max_cycles = 100000000;
         std::size_t max_frame = GTSim::ExecutionIR::kDefaultStreamFrameLimit;
+        bool verify_memory_reads = false;
         auto config = GTSim::make_h100_sxm_variants(argv[1]);
         GTSim::ArchConfYamlReader(argv[3]).parse(config);
         config.silence_mode = true;
@@ -31,9 +32,13 @@ int main(int argc, char** argv) {
                 throw std::invalid_argument(
                     "--stream-fd must be a nonnegative int");
             for (int i = 6; i < argc; ++i) {
+                const std::string_view option(argv[i]);
+                if (option == "--verify-memory-reads") {
+                    verify_memory_reads = true;
+                    continue;
+                }
                 if (i + 1 >= argc)
                     throw std::invalid_argument("invalid stream runner option");
-                const std::string_view option(argv[i]);
                 const std::string_view value(argv[++i]);
                 if (option == "--max-cycles") {
                     const auto cycles_end = value.data() + value.size();
@@ -61,7 +66,7 @@ int main(int argc, char** argv) {
             }
             GTSim::ExecutionIR::FramedTransport transport(fd, max_frame);
             auto timing = GTSim::ExecutionIR::StreamingProgramRunner(
-                              config, transport, max_cycles)
+                              config, transport, max_cycles, verify_memory_reads)
                               .run();
             std::cout << "Program timing JSON: "
                       << glz::write_json(timing).value() << '\n';

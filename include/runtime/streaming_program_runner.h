@@ -15,7 +15,8 @@ namespace GTSim::ExecutionIR {
 class StreamingProgramRunner {
 public:
     StreamingProgramRunner(SimulatorConfig config, FramedTransport& transport,
-                           int max_cycles = 100000000);
+                           int max_cycles = 100000000,
+                           bool verify_memory_reads = false);
 
     ProgramTiming run();
 

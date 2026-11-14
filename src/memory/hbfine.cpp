@@ -49,7 +49,10 @@ public:
             responses.push_back({request.request_id, request.global_addr, request.tier,
                                  completion.error == hbfine::Error::None,
                                  request.operation == MemoryOperation::Read ? request.size_bytes : 16,
-                                 request.operation, static_cast<int>(completion.error)});
+                                 request.operation, static_cast<int>(completion.error),
+                                 request.operation == MemoryOperation::Read
+                                     ? request.shadow_digest
+                                     : 0});
             pending_.erase(completion.request_id);
 
         }

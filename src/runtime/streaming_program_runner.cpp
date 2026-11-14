@@ -7,6 +7,8 @@
 #include <cassert>
 #include <charconv>
 #include <experimental/scope>
+#include <iomanip>
+#include <sstream>
 #include <set>
 #include <unordered_set>
 
@@ -81,13 +83,15 @@ void require_type(const Message& message, std::string_view expected) {
 
 StreamingProgramRunner::StreamingProgramRunner(SimulatorConfig config,
                                                FramedTransport& transport,
-                                               int max_cycles)
+                                               int max_cycles,
+                                               bool verify_memory_reads)
     : config_(std::move(config)),
       transport_(transport),
       max_cycles_(max_cycles),
       registry_(config_.memory.address_layout) {
     if (max_cycles_ <= 0)
         throw std::invalid_argument("max_cycles must be positive");
+    config_.memory.verify_memory_reads = verify_memory_reads;
 }
 
 void StreamingProgramRunner::receive_program_manifest() {
@@ -320,6 +324,10 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
         if (active_dag) {
             panel.reset();
             simulator_.reset();
+            // An attached graph is never detached on an exceptional or
+            // timed-out launch.  Destroy the owner only after Simulator has
+            // stopped observing it, so its raw dag pointer cannot dangle.
+            active_dag.reset();
             memory_ = nullptr;
             l2_ = nullptr;
         }
@@ -480,13 +488,49 @@ ProgramTiming StreamingProgramRunner::run() {
         timing_.background_cycles = memory_->background_cycles();
         timing_.prefetch_capacity_stalls = memory_->prefetch_capacity_stalls();
         timing_.prefetch_canceled = memory_->prefetch_canceled();
-        for (const auto& [tier, stats] : memory_->tier_counters()) {
+        const auto tier_stats = memory_->tier_counters();
+        for (const auto& [tier, stats] : tier_stats) {
             const std::string name = memory_tier_name(tier);
             timing_.traffic_bytes.emplace(name + "_read", stats.read_bytes);
             timing_.traffic_bytes.emplace(name + "_write", stats.write_bytes);
         }
         timing_.persistent_gpu = timing_.persistent_memory =
             timing_.persistent_l2 = timing_.stable_allocations = true;
+        const auto audit = memory_->read_audit();
+        if (config_.memory.verify_memory_reads) {
+            timing_.data_check.checked_reads = audit.checked_reads;
+            timing_.data_check.checked_bytes = audit.checked_bytes;
+            timing_.data_check.mismatched_bytes = audit.mismatched_bytes;
+            std::ostringstream digest;
+            digest << std::hex << std::setfill('0') << std::setw(16)
+                   << audit.digest_sum << std::setw(16) << audit.digest_xor;
+            timing_.data_check.logical_read_digest = digest.str();
+            timing_.data_check.shadow_payload_mode = "hash_or_bytewise";
+            timing_.data_check.partition_oracle_pass =
+                audit.mismatched_bytes == 0;
+        }
+        const auto& hbf_counters = tier_stats.at(MemoryTier::HBF).device.cumulative;
+        timing_.prefetch_stats.queued =
+            hbf_counters.contains("prefetch_queued")
+                ? hbf_counters.at("prefetch_queued")
+                : 0;
+        timing_.prefetch_stats.admitted =
+            hbf_counters.contains("prefetch_started")
+                ? hbf_counters.at("prefetch_started")
+                : 0;
+        timing_.prefetch_stats.completed =
+            hbf_counters.contains("prefetch_completed")
+                ? hbf_counters.at("prefetch_completed")
+                : 0;
+        timing_.prefetch_stats.resident_read_bytes =
+            hbf_counters.contains("resident_read_bytes")
+                ? hbf_counters.at("resident_read_bytes")
+                : 0;
+        timing_.prefetch_stats.fallback_read_bytes =
+            hbf_counters.contains("fallback_read_bytes")
+                ? hbf_counters.at("fallback_read_bytes")
+                : 0;
+        timing_.prefetch_stats.canceled = timing_.prefetch_canceled;
         transport_.send_json(make_typed_json(
             "ProgramDone", "{\"symbol\":" + json_quote(symbol_) +
                                ",\"total_cycles\":" +

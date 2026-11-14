@@ -18,6 +18,13 @@ enum class HBFBackend { Naive, HBFine, BankPlane = HBFine, EventLab, FlashLab };
 using HBFGeometryProfile = hbfine::GeometryProfile;
 using HBFControllerConfig = hbfine::Config;
 
+struct PrefetchEngineConfig {
+    bool enabled{true};
+    int queue_capacity{1024};
+    std::string admission_policy{"fifo_hol"};
+    bool cancel_queued_on_demand_miss{false};
+};
+
 struct RamulatorHBMConfig {
     std::string config_file;
     int stacks{5};
@@ -53,6 +60,8 @@ struct HBFConfig {
     std::uint64_t capacity_bytes{};
     HBFBackend backend{HBFBackend::Naive};
     HBFControllerConfig controller{};
+    PrefetchEngineConfig prefetch_engine{};
+    std::string address_mapping_policy{"megapage_round_robin"};
     bool align_tensors_to_command_group{true};
     bool prefetch_hyperpage_order{false};
     std::size_t eventlab_fragments_per_channel{0};
@@ -73,6 +82,7 @@ struct MemorySystemConfig {
     D2DLinkConfig hbm_to_hbf{1500.0, 10, 65536};
     MemoryAddressLayout address_layout{};
     TensorPlacementProfile placement{TensorPlacementProfile::AllHBM};
+    bool verify_memory_reads{false};
 };
 
 inline double bytes_per_cycle_from_GBps(double bandwidth_GBps,
@@ -167,6 +177,14 @@ inline void validate_memory_system_config(const MemorySystemConfig& config, doub
         !valid_latency(config.hbf.write_latency_cycles) ||
         !valid_capacity(config.hbf.queue_capacity)) {
         throw std::invalid_argument("invalid HBF memory configuration");
+    }
+    if (config.hbf.address_mapping_policy != "megapage_round_robin" &&
+        config.hbf.address_mapping_policy != "linear_page") {
+        throw std::invalid_argument("invalid HBF address mapping policy");
+    }
+    if (config.hbf.prefetch_engine.queue_capacity <= 0 ||
+        config.hbf.prefetch_engine.admission_policy != "fifo_hol") {
+        throw std::invalid_argument("invalid HBF prefetch engine configuration");
     }
     const D2DLinkConfig* links[] = {&config.gpu_to_hbm, &config.gpu_to_hbf,
                                     &config.hbm_to_hbf};

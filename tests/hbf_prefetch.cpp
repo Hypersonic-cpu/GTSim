@@ -88,6 +88,34 @@ int main() {
     require(after_fill != 0, "capacity not reclaimed after a released fill");
     device->release_prefetch(after_fill);
     for (const auto token : spill) device->release_prefetch(token);
+
+    // Queued descriptors are owned by the SRAM-side engine.  Admission is
+    // FIFO, a queued miss can cancel only before admission, and release of a
+    // still-queued descriptor is not reported as a miss cancellation.
+    auto queued_config = config;
+    queued_config.prefetch_engine.queue_capacity = 4;
+    queued_config.prefetch_engine.cancel_queued_on_demand_miss = true;
+    auto queued = make_hbf_backend(queued_config, 1980, 0);
+    queued->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
+    const auto first_queued = queued->enqueue_prefetch(0, 4096);
+    const auto second_queued = queued->enqueue_prefetch(4096, 4096);
+    require(first_queued && second_queued &&
+                queued->prefetch_alias(first_queued) == 0,
+            "queued prefetch admitted before its engine tick");
+    queued->advance_prefetch(0);
+    require(queued->prefetch_alias(first_queued) != 0 &&
+                queued->prefetch_alias(second_queued) != 0,
+            "FIFO queued prefetch admission failed");
+    const auto canceled_queued = queued->enqueue_prefetch(8192, 4096);
+    queued->on_demand_miss(canceled_queued, 8192, 128);
+    require(queued->prefetch_alias(canceled_queued) == 0,
+            "queued miss cancellation left a stale alias");
+    queued->release_prefetch(canceled_queued);
+    require(queued->device_counters().cumulative.at("prefetch_canceled") == 1,
+            "queued miss cancellation accounting is wrong");
+    queued->release_prefetch(first_queued);
+    queued->release_prefetch(second_queued);
+
     auto shared = make_hbf_backend(config, 1980, 0);
     shared->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
     auto address = hbfine::decode_address(0, 0, c);

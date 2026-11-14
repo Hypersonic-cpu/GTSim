@@ -118,7 +118,8 @@ public:
 
     std::vector<int> step(int current_cycle) {
         last_step_cycle_ = current_cycle;
-        admit_prefetch_queue();
+        if (hbm_) hbm_->advance_prefetch(current_cycle);
+        if (hbf_) hbf_->advance_prefetch(current_cycle);
         std::vector<int> completed = l2_->step(current_cycle);
         collect_l2_requests(current_cycle);
         launch_pending_requests(current_cycle);
@@ -152,11 +153,20 @@ public:
         return background_cycles_;
     }
     std::uint64_t prefetch_capacity_stalls() const {
-        return prefetch_capacity_stalls_;
+        return (hbm_ ? hbm_->prefetch_capacity_stalls() : 0) +
+               (hbf_ ? hbf_->prefetch_capacity_stalls() : 0);
     }
     std::uint64_t prefetch_canceled() const {
-        return prefetch_canceled_;
+        return (hbm_ ? hbm_->prefetch_canceled() : 0) +
+               (hbf_ ? hbf_->prefetch_canceled() : 0);
     }
+
+    struct ReadAudit {
+        std::uint64_t checked_reads{}, checked_bytes{}, mismatched_bytes{};
+        std::uint64_t digest_sum{}, digest_xor{};
+    };
+
+    ReadAudit read_audit() const { return read_audit_; }
 
     struct ReadAlias {
         MemoryTier tier;
@@ -197,9 +207,8 @@ public:
                      std::optional<PrefetchBuffer> buffer = std::nullopt) {
         auto alias = prefetch_range(tensor_id, offset, bytes);
         alias.buffer = buffer;
-        alias.queue_id = next_queue_id_++;
-        queued_prefetches_.emplace(alias.queue_id, alias);
-        prefetch_queue_.push_back(alias.queue_id);
+        alias.queue_id = device(alias.tier).enqueue_prefetch(
+            alias.address, alias.bytes, alias.buffer);
         return alias;
     }
 
@@ -208,22 +217,16 @@ public:
     }
 
     bool prefetch_ready(const ReadAlias& alias) const {
-        const auto& current =
-            alias.queue_id ? queued_prefetches_.at(alias.queue_id) : alias;
-        return current.token &&
-               device(current.tier).prefetch_ready(current.token);
+        if (alias.queue_id)
+            return device(alias.tier).prefetch_ready(alias.queue_id);
+        return alias.token && device(alias.tier).prefetch_ready(alias.token);
     }
 
     void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
         if (require_idle && !foreground_idle())
             throw std::logic_error("release requires foreground retirement");
         if (alias.queue_id) {
-            const auto queued = queued_prefetches_.at(alias.queue_id);
-            if (queued.token)
-                device(queued.tier).release_prefetch(queued.token);
-            else
-                ++prefetch_canceled_;
-            queued_prefetches_.erase(alias.queue_id);
+            device(alias.tier).release_prefetch(alias.queue_id);
         } else {
             device(alias.tier).release_prefetch(alias.token);
         }
@@ -345,6 +348,8 @@ private:
     struct RequestRoute {
         MemoryTier tier;
         int start_cycle;
+        std::uint64_t address{}, bytes{}, expected_digest{};
+        MemoryOperation operation{MemoryOperation::Read};
     };
 
     int last_step_cycle_{};
@@ -370,37 +375,8 @@ private:
     std::unordered_map<std::uint64_t, RequestRoute> request_routes_;
     std::vector<ReadAlias> read_aliases_;
     std::vector<std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
-    std::deque<std::uint64_t> prefetch_queue_;
-    std::unordered_map<std::uint64_t, ReadAlias> queued_prefetches_;
-    std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{},
-        prefetch_canceled_{};
-    std::uint64_t next_queue_id_{1}, blocked_head_{}, blocked_epoch_{};
-
-    void admit_prefetch_queue() {
-        while (!prefetch_queue_.empty()) {
-            const auto id = prefetch_queue_.front();
-            const auto found = queued_prefetches_.find(id);
-            if (found == queued_prefetches_.end()) {
-                // The last consumer finished before this request could issue.
-                prefetch_queue_.pop_front();
-                continue;
-            }
-            auto& alias = found->second;
-            auto& backend = device(alias.tier);
-            const auto epoch = backend.residency_epoch();
-            if (blocked_head_ == id && blocked_epoch_ == epoch) return;
-            alias.token = backend.reserve_prefetch(alias.address, alias.bytes,
-                                                   alias.buffer);
-            if (!alias.token) {
-                ++prefetch_capacity_stalls_;
-                blocked_head_ = id;
-                blocked_epoch_ = epoch;
-                return;
-            }
-            backend.start_prefetch(alias.token);
-            prefetch_queue_.pop_front();
-        }
-    }
+    std::uint64_t background_cycles_{};
+    ReadAudit read_audit_{};
 
     MemoryBackend& device(MemoryTier tier) const {
         auto* selected = tier == MemoryTier::HBM ? hbm_.get() : hbf_.get();
@@ -493,23 +469,66 @@ private:
                     request.global_addr - alias.address < alias.bytes &&
                     static_cast<std::uint64_t>(request.size_bytes) <=
                         alias.bytes - (request.global_addr - alias.address)) {
-                    request.read_alias =
-                        alias.queue_id
-                            ? queued_prefetches_.at(alias.queue_id).token
-                            : alias.token;
+                    request.read_alias = alias.queue_id
+                                             ? device(alias.tier).prefetch_alias(
+                                                   alias.queue_id)
+                                             : alias.token;
+                    if (alias.queue_id && !request.read_alias)
+                        device(alias.tier).on_demand_miss(
+                            alias.queue_id, request.global_addr,
+                            static_cast<std::uint64_t>(request.size_bytes));
                     if (!request.read_alias)
                         statistics_for(tier).unadmitted_alias_read_bytes +=
                             request.size_bytes;
                 }
             }
         }
+        std::uint64_t expected_digest{};
+        if (memory_config_.verify_memory_reads &&
+            request.operation == MemoryOperation::Read) {
+            const auto bytes = static_cast<std::uint64_t>(
+                std::max(1, request.size_bytes));
+            expected_digest = memory_shadow_digest(request.global_addr, bytes);
+            request.shadow_digest = expected_digest;
+            for (const auto& [tensor_id, tensor] : tensors_.entries()) {
+                if (tensor.contains(request.global_addr) &&
+                    bytes <= tensor.byte_size() &&
+                    request.global_addr - tensor.global_base_address <=
+                        tensor.byte_size() - bytes) {
+                    expected_digest = memory_logical_shadow_digest(
+                        tensor_id,
+                        request.global_addr - tensor.global_base_address,
+                        bytes);
+                    request.shadow_digest = expected_digest;
+                    break;
+                }
+            }
+        }
         const auto [it, inserted] = request_routes_.emplace(
-            request.request_id, RequestRoute{tier, current_cycle});
+            request.request_id,
+            RequestRoute{tier,
+                         current_cycle,
+                         request.global_addr,
+                         static_cast<std::uint64_t>(
+                             std::max(1, request.size_bytes)),
+                         request.operation == MemoryOperation::Read
+                             ? expected_digest
+                             : 0,
+                         request.operation});
         if (!inserted) {
             throw std::logic_error(
                 "duplicate memory request id in MemorySystem");
         }
         TierMemoryStatistics& stats = statistics_for(tier);
+        if (memory_config_.verify_memory_reads &&
+            request.operation == MemoryOperation::Read) {
+            const auto key = expected_digest;
+            ++read_audit_.checked_reads;
+            read_audit_.checked_bytes +=
+                static_cast<std::uint64_t>(std::max(1, request.size_bytes));
+            read_audit_.digest_sum += key;
+            read_audit_.digest_xor ^= key + 0x9e3779b97f4a7c15ULL;
+        }
         ++stats.request_count;
         if (request.operation == MemoryOperation::Read) {
             ++stats.read_requests;
@@ -640,6 +659,12 @@ private:
 
     void route_response(const MemResponse& response, int /*current_cycle*/) {
         const auto& route = request_routes_.at(response.request_id);
+        if (memory_config_.verify_memory_reads &&
+            route.operation == MemoryOperation::Read &&
+            (!response.completed || response.error_code ||
+             response.size_bytes != static_cast<int>(route.bytes) ||
+             response.shadow_digest != route.expected_digest))
+            read_audit_.mismatched_bytes += route.bytes;
         switch (memory_config_.topology) {
             case MemoryTopology::FullHBM:
                 pending_hbm_response_.push_back(response);

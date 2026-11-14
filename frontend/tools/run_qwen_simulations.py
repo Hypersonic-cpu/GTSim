@@ -5,6 +5,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import resource
 import socket
 import subprocess
 import traceback
@@ -13,6 +14,13 @@ from time import perf_counter
 from compile import compile_program, lower_flow
 from compile.static import EMPTY, Resolver, bound_resolver
 from compile.streaming import ExecutionIRProducer, SocketFramedTransport, _strides, make_program_plan
+from compile.opt.partition import (
+    PartitionPolicy,
+    PhysicalLayout,
+    memory_topology,
+    partition_flow,
+)
+from compile.opt.prefetch import PrefetchPlan, Residency, optimize
 from parser import ast as A, parse_file
 
 
@@ -44,7 +52,17 @@ def isolate_launch(flow, root, name, expert, params):
 
 
 def plan_program(
-    source, lib, params, residency=None, layouts=None, focus=None, expert=None, placements=None
+    source,
+    lib,
+    params,
+    residency=None,
+    layouts=None,
+    focus=None,
+    expert=None,
+    placements=None,
+    flashaccel_policy=None,
+    physical_layout=None,
+    prefetch_enabled=True,
 ):
     layouts = layouts or {}
     placements = placements or {}
@@ -69,11 +87,49 @@ def plan_program(
         if not (spec.read_only and spec.external and spec.tier == A.MemorySpace.HBF):
             raise ValueError(f"tile-major experiment requires read-only HBF weights: {name}")
         layout.validate(tuple(root.value(d) for d in spec.shape))
-    prefetch = None
-    if residency is not None:
-        from compile.opt.prefetch import Residency, optimize
+    partition = None
+    if flashaccel_policy is not None and physical_layout is not None:
+        partition = partition_flow(flow, flashaccel_policy, physical_layout)
+        flow = partition.flow
 
+    prefetch = None
+    if flashaccel_policy is not None:
+        if prefetch_enabled and physical_layout is not None:
+            residency = Residency(
+                physical_layout.stacks,
+                physical_layout.dies_per_stack,
+                physical_layout.planes_per_die,
+                physical_layout.planes_per_command_group,
+                physical_layout.page_bytes,
+                physical_layout.sram_bytes_per_plane,
+                physical_layout.base_die_sram_bytes_per_stack,
+                buffer_count=flashaccel_policy.buffer_count,
+                streaming=True,
+                address_mapping_policy=physical_layout.address_mapping_policy,
+            )
+            prefetch = optimize(
+                flow,
+                residency,
+                layouts,
+                partition.origin_launches if partition is not None else None,
+            )
+        else:
+            root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
+            bases = (
+                physical_layout.bases(flow.tensors, root)
+                if physical_layout is not None
+                else None
+            )
+            prefetch = PrefetchPlan(
+                flow,
+                (),
+                None,
+                bases,
+                partition.origin_launches if partition is not None else None,
+            )
+    elif residency is not None:
         prefetch = optimize(flow, Residency(**residency), layouts)
+    if prefetch is not None:
         flow = prefetch.flow
     arch = lower_flow(flow)
     root = bound_resolver(arch.static, Resolver(EMPTY, {})).materialize_constants()
@@ -97,14 +153,27 @@ def plan_program(
     return parse_file(source), regions, replace(arch, regions=tuple(regions)), prefetch, tuple(tensors)
 
 
-def run_streaming_interface(args, params, source_program, regions, arch, prefetch, tensors,
-                            layouts, residency, raw_layouts, placements):
+def run_streaming_interface(
+    args,
+    params,
+    source_program,
+    regions,
+    arch,
+    prefetch,
+    tensors,
+    layouts,
+    residency,
+    raw_layouts,
+    placements,
+    flashaccel=False,
+):
     plan = make_program_plan(source_program, arch, regions, tensors, prefetch)
     producer = ExecutionIRProducer(
         arch, plan,
         {"prefetch_config": prefetch.streaming if prefetch is not None else None,
          "prefetch_bases": prefetch.bases if prefetch is not None else None,
-         "layouts": layouts},
+         "layouts": layouts,
+         "prefetch_windows": not flashaccel},
     )
     args.out.mkdir(parents=True, exist_ok=True)
     source_paths = sorted([*Path("frontend/src").rglob("*.py"), *args.lib.glob("*ir"),
@@ -129,12 +198,16 @@ def run_streaming_interface(args, params, source_program, regions, arch, prefetc
     }
     (args.out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     start = perf_counter()
+    python_before = resource.getrusage(resource.RUSAGE_SELF)
+    children_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     log = (args.out / "simulation.log").open("w")
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     command = [str(args.runner), str(args.architecture), "--memory-config", str(args.memory),
                "--stream-fd", str(child.fileno()), "--max-frame", str(args.max_frame)]
     if args.max_cycles:
         command += ["--max-cycles", str(args.max_cycles)]
+    if args.verify_memory_reads:
+        command += ["--verify-memory-reads"]
     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                pass_fds=(child.fileno(),))
     child.close()
@@ -167,8 +240,29 @@ def run_streaming_interface(args, params, source_program, regions, arch, prefetc
     finally:
         parent.close()
         log.close()
+    python_after = resource.getrusage(resource.RUSAGE_SELF)
+    children_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    python_cpu_seconds = (
+        python_after.ru_utime
+        + python_after.ru_stime
+        - python_before.ru_utime
+        - python_before.ru_stime
+    )
+    cpp_cpu_seconds = (
+        children_after.ru_utime
+        + children_after.ru_stime
+        - children_before.ru_utime
+        - children_before.ru_stime
+    )
+    python_peak_rss_kib = int(python_after.ru_maxrss)
+    cpp_peak_rss_kib = int(children_after.ru_maxrss)
     outcome = {"version": "stream-v2", "batch": params.get("B"), "program": plan.symbol,
                "returncode": returncode, "elapsed_seconds": perf_counter() - start,
+               "python_cpu_seconds": python_cpu_seconds,
+               "cpp_cpu_seconds": cpp_cpu_seconds,
+               "python_peak_rss_kib": python_peak_rss_kib,
+               "cpp_peak_rss_kib": cpp_peak_rss_kib,
+               "peak_rss_kib": max(python_peak_rss_kib, cpp_peak_rss_kib),
                "kernels": [], "errors": failures,
                "transport": "unix socketpair framed JSON InstructionBatch"}
     if returncode:
@@ -176,6 +270,28 @@ def run_streaming_interface(args, params, source_program, regions, arch, prefetc
     timing_line = next(line for line in (args.out / "simulation.log").read_text().splitlines()
                        if line.startswith("Program timing JSON: "))
     outcome["timing"] = json.loads(timing_line.split(": ", 1)[1])
+    outcome["data_check"] = outcome["timing"].get(
+        "data_check",
+        {
+            "checked_reads": 0,
+            "checked_bytes": 0,
+            "mismatched_bytes": 0,
+            "logical_read_digest": "",
+            "shadow_payload_mode": "disabled",
+            "partition_oracle_pass": False,
+        },
+    )
+    outcome["prefetch_stats"] = outcome["timing"].get(
+        "prefetch_stats",
+        {
+            "queued": 0,
+            "admitted": 0,
+            "completed": 0,
+            "resident_read_bytes": 0,
+            "fallback_read_bytes": 0,
+            "canceled": 0,
+        },
+    )
     (args.out / "result.json").write_text(json.dumps(outcome, indent=2) + "\n")
     print(json.dumps({"version": "stream-v2", "batch": params.get("B"),
                       "program": plan.symbol, "returncode": returncode,
@@ -191,12 +307,15 @@ def main():
     parser.add_argument("--architecture", type=Path, required=True)
     parser.add_argument("--memory", type=Path, required=True)
     parser.add_argument("--prefetch-config", type=Path)
+    parser.add_argument("--flashaccel-config", type=Path)
+    parser.add_argument("--prefetch", choices=("on", "off"))
     parser.add_argument("--tensor-layouts", type=Path)
     parser.add_argument("--tensor-placements", type=Path)
     parser.add_argument("--focus-launch")
     parser.add_argument("--focus-expert", type=int)
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--max-frame", type=int, default=1 << 20)
+    parser.add_argument("--verify-memory-reads", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if not 0 < args.max_frame <= 0xFFFFFFFF:
@@ -206,12 +325,27 @@ def main():
     raw_layouts = json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
     placements = json.loads(args.tensor_placements.read_text()) if args.tensor_placements else {}
     layout_objects = {name: A.TileMajorLayout(**layout) for name, layout in raw_layouts.items()}
+    flashaccel_policy = (
+        PartitionPolicy.from_json(args.flashaccel_config)
+        if args.flashaccel_config
+        else None
+    )
+    physical_layout = (
+        PhysicalLayout.from_memory_yaml(args.memory)
+        if flashaccel_policy
+        else None
+    )
     source_program, regions, arch, prefetch, tensors = plan_program(
         args.source, args.lib, params, residency, layout_objects, args.focus_launch,
-        args.focus_expert, placements,
+        args.focus_expert,
+        placements,
+        flashaccel_policy,
+        physical_layout,
+        args.prefetch != "off" and memory_topology(args.memory) != "FullHBM",
     )
     run_streaming_interface(args, params, source_program, regions, arch, prefetch, tensors,
-                            layout_objects, residency, raw_layouts, placements)
+                            layout_objects, residency, raw_layouts, placements,
+                            flashaccel=flashaccel_policy is not None)
 
 
 if __name__ == "__main__":

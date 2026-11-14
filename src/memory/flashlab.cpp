@@ -72,7 +72,12 @@ public:
         std::vector<MemResponse> out;
         while(!pending_.empty() && pending_.top().ps<=clock_.ticks_at(now)) {
             auto r=pending_.top().r; pending_.pop();
-            out.push_back({r.request_id,r.global_addr,r.tier,true,r.size_bytes,r.operation}); ++stats_.completed_requests;
+            out.push_back({r.request_id, r.global_addr, r.tier, true,
+                           r.size_bytes, r.operation, 0,
+                           r.operation == MemoryOperation::Read
+                               ? r.shadow_digest
+                               : 0});
+            ++stats_.completed_requests;
         }
         return out;
     }

@@ -1,0 +1,12 @@
+{
+  "partition_policy": "n_slab_fit_double_buffer",
+  "buffer_count": 2,
+  "gemm_tiling": {
+    "bm": 16,
+    "bn": 64,
+    "bk": 16,
+    "stages": 2,
+    "split": 1
+  },
+  "prefetch_granularity": "hyperpage_coalesced"
+}

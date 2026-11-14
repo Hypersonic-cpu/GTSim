@@ -23,6 +23,7 @@ class Residency:
     eligible_tensors: tuple[str, ...] | None = None
     buffer_count: int = 1
     streaming: bool = False
+    address_mapping_policy: str = "megapage_round_robin"
 
     def __post_init__(self):
         if (
@@ -40,6 +41,7 @@ class Residency:
             or self.page_bytes % self.line_bytes
             or min(self.plane_bytes, self.stack_bytes) < 0
             or not (self.plane_bytes or self.stack_bytes)
+            or self.address_mapping_policy not in ("megapage_round_robin", "linear_page")
         ):
             raise ValueError("invalid residency geometry/capacity")
 
@@ -48,7 +50,14 @@ class Residency:
         return self.page_bytes * self.planes_per_group
 
     def location(self, page):
+        if self.address_mapping_policy == "linear_page":
+            per_stack = self.dies_per_stack * self.planes_per_die
+            stack, local = divmod(page, per_stack)
+            return stack % self.stacks, local
         group, lane = divmod(page, self.planes_per_group)
+        group %= self.stacks * self.dies_per_stack * (
+            self.planes_per_die // self.planes_per_group
+        )
         stack = group % self.stacks
         die_group = group // self.stacks
         die = die_group % self.dies_per_stack
@@ -130,6 +139,7 @@ class PrefetchPlan:
     queue: tuple[Reservation, ...]
     streaming: Residency | None = None
     bases: dict[str, int] | None = None
+    origin_launches: dict[str, tuple[str, ...]] | None = None
 
 def scope(region, root):
     arguments = {a.id: root.value(a.expression) for a in region.static.arguments}
@@ -334,7 +344,7 @@ def spans(pages, sizes, config):
     return tuple(result)
 
 
-def optimize(flow, config, layouts=None):
+def optimize(flow, config, layouts=None, origin_launches=None):
     layouts = layouts or {}
     root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
     shapes = {t.id: tuple(root.value(d) for d in t.shape) for t in flow.tensors}
@@ -388,13 +398,40 @@ def optimize(flow, config, layouts=None):
             continue
         loads = eligible_loads(region, eligible)
         gate = len(regions) if trace_dependent(region, loads, flow.static) else 0
-        parts = (
-            [(region, frozenset())]
-            if config.streaming
-            else split_region(
+        if config.streaming:
+            # FlashAccel keeps partition decisions in the preceding pass, but
+            # still needs compact page ranges for QueuePrefetch.  Do not split
+            # the FlowIR region here; just collect its actual copy footprint.
+            pages = set()
+            for _, tensor, row, col, height, width in access_tiles(
+                region, resolver, loads
+            ):
+                if tensor not in eligible:
+                    continue
+                if layout := layouts.get(tensor):
+                    pages.update(
+                        (tensor, page)
+                        for page in layout.pages(shapes[tensor][1], row, col,
+                                                 height, width)
+                    )
+                    continue
+                size = widths[tensor]
+                cols = shapes[tensor][1]
+                for current_row in range(row, row + height):
+                    begin = (current_row * cols + col) * size
+                    end = begin + width * size
+                    pages.update(
+                        (tensor, page)
+                        for page in range(
+                            begin // config.page_bytes,
+                            (end - 1) // config.page_bytes + 1,
+                        )
+                    )
+            parts = [(region, frozenset(pages))]
+        else:
+            parts = split_region(
                 region, resolver, shapes, widths, loads, bases, budget, layouts
             )
-        )
         for part, pages in parts:
             regions.append(replace(part, after=after))
             uses.append(spans(pages, sizes, config))
@@ -433,4 +470,6 @@ def optimize(flow, config, layouts=None):
         tuple(queue),
         config if config.streaming else None,
         bases if config.streaming else None,
+        origin_launches
+        or {region.symbol: (region.symbol,) for region in regions},
     )

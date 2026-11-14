@@ -23,8 +23,17 @@ TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTi
     case MemoryTier::HBM:
         return allocate_contiguous_tensor;
     case MemoryTier::HBF:
-        if (!config.address_layout.enabled ||
-            config.topology == MemoryTopology::FullHBM)
+        // The FlashAccel control uses the same HBF-tagged source program for
+        // every memory profile.  A FullHBM run is the explicit no-HBF
+        // control: keep the source tag for the frontend, but place the
+        // allocation in the only active device segment.
+        if (config.topology == MemoryTopology::FullHBM) {
+            return [](TensorRegistry& r, TensorMetadata t) {
+                t.initial_memory_tier = MemoryTier::HBM;
+                allocate_contiguous_tensor(r, std::move(t));
+            };
+        }
+        if (!config.address_layout.enabled)
             throw std::invalid_argument("HBF program tensors require an active HBF segment");
         if (config.hbf.backend == HBFBackend::BankPlane ||
             config.hbf.controller.geometry == HBFGeometryProfile::GroupedPlanes)

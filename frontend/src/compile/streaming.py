@@ -112,11 +112,21 @@ def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
         raise ValueError("streaming execution supports exactly one stream")
     stream = streams[0]
     region_indices = {region.symbol: i for i, region in enumerate(regions)}
+    origin_launches = getattr(prefetch, "origin_launches", None) or {}
+
+    def children(launch_id):
+        return tuple(
+            child
+            for child in origin_launches.get(launch_id, (launch_id,))
+            if child in region_indices
+        )
+
     source_commands = tuple(getattr(source_program, "commands", ()))
     command_launches = tuple(
-        command.target
+        child
         for command in source_commands
-        if command.kind == A.CommandKind.LAUNCH and command.target in region_indices
+        if command.kind == A.CommandKind.LAUNCH
+        for child in children(command.target)
     )
     launch_ids = command_launches or tuple(region.symbol for region in regions)
     if set(launch_ids) != set(region_indices) or len(launch_ids) != len(region_indices):
@@ -135,8 +145,10 @@ def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
     commands = []
     for command in source_commands:
         if command.kind == A.CommandKind.LAUNCH:
-            if command.target in region_indices:
-                commands.append({"kind": "LaunchKernel", "target": command.target})
+            commands.extend(
+                {"kind": "LaunchKernel", "target": child}
+                for child in children(command.target)
+            )
         elif command.kind == A.CommandKind.SYNCHRONIZE:
             if command.target and command.target != stream:
                 raise ValueError("cross-stream synchronize is unsupported")
@@ -403,6 +415,8 @@ class ExecutionIRProducer:
             self._active_launch = None
 
     def _prefetch_windows(self, loads, ctas, tensors):
+        if not self.options.get("prefetch_windows", True):
+            return ()
         config = self.options.get("prefetch_config")
         bases = self.options.get("prefetch_bases")
         if config is None or bases is None:

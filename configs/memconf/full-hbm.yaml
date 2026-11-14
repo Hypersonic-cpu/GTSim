@@ -16,6 +16,16 @@ hbf:
   write_bw_GBps: 0
   read_latency_cycles: 7920
   write_latency_cycles: 148500
+  address_mapping_policy: megapage_round_robin
+  controller:
+    geometry: grouped_planes
+    stacks: 4
+    dies_per_stack: 8
+    planes_per_die: 96
+    planes_per_command_group: 32
+    page_bytes: 4096
+    sram_bytes_per_plane: 8192
+    base_die_sram_bytes_per_stack: 2097152
 
 d2dlink:
   gpu_to_hbm:
