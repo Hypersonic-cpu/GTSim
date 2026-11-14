@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <charconv>
 #include <set>
+#include <unordered_set>
 
 namespace GTSim::ExecutionIR {
 
@@ -195,7 +196,7 @@ void StreamingProgramRunner::receive_program_manifest() {
     }
     if (launches_.empty() || commands_.empty())
         throw std::invalid_argument("empty streaming program manifest");
-    std::set<std::uint64_t> sequences;
+    std::unordered_set<std::uint64_t> sequences;
     for (const auto& [id, launch] : launches_) {
         if (!sequences.insert(launch.sequence).second)
             throw std::invalid_argument("duplicate launch sequence");
@@ -210,8 +211,8 @@ void StreamingProgramRunner::receive_program_manifest() {
 }
 
 void StreamingProgramRunner::validate_commands() const {
-    std::set<std::string> submitted, active_aliases, started_prefetches,
-        recorded;
+    std::unordered_set<std::string> submitted, active_aliases,
+        started_prefetches, recorded;
     bool has_launch = false;
     for (const auto& command : commands_) {
         if (command.kind == "LaunchKernel") {
@@ -234,7 +235,8 @@ void StreamingProgramRunner::validate_commands() const {
         } else if (command.kind == "Release") {
             if (!has_launch || !active_aliases.erase(command.target))
                 throw std::invalid_argument(
-                    "release requires an active prefetch and an initialized stream");
+                    "release requires an active prefetch and an initialized "
+                    "stream");
         } else if (command.kind == "RecordEvent") {
             if (command.target.empty() ||
                 !recorded.insert(command.target).second)
@@ -498,8 +500,7 @@ void StreamingProgramRunner::execute_command(const CommandDef& command) {
 ProgramTiming StreamingProgramRunner::run() {
     try {
         receive_program_manifest();
-        for (const auto& command : commands_)
-            execute_command(command);
+        for (const auto& command : commands_) execute_command(command);
         const auto end = transport_.receive();
         require_type(end, "ProgramEnd");
         synchronize_memory();

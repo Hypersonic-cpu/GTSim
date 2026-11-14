@@ -20,8 +20,10 @@ public:
         int stacks{}, dies_per_stack{}, planes_per_die{}, page_bytes{};
         std::uint64_t sram_bytes_per_plane{}, base_die_sram_bytes_per_stack{};
     };
-    ReadSramAllocator(Config config, std::function<MemoryLocation(std::uint64_t)> locate)
-        : config_(config), locate_(std::move(locate)) {}
+    ReadSramAllocator(Config config,
+                      std::function<MemoryLocation(std::uint64_t)> locate)
+        : config_(config),
+          locate_(std::move(locate)) {}
 
     std::optional<Reservation> reserve(std::uint64_t address,
                                        std::uint64_t bytes,
@@ -31,8 +33,11 @@ public:
         if (count <= 0 || index < 0 || index >= count ||
             (count_ && count != count_))
             throw std::invalid_argument("invalid SRAM buffer partition");
-        count_ = count;
-        auto& slot = slots_[index];
+        if (!count_) {
+            count_ = count;
+            slots_.resize(static_cast<std::size_t>(count_));
+        }
+        auto& slot = slots_.at(static_cast<std::size_t>(index));
         if (buffer && slot.owner && *slot.owner != buffer->epoch)
             return std::nullopt;
         if (slot.planes.empty()) {
@@ -40,8 +45,18 @@ public:
                                config_.planes_per_die);
             slot.stacks.resize(config_.stacks);
         }
-        auto planes = slot.planes;
-        auto stacks = slot.stacks;
+        if (plane_delta_.size() != slot.planes.size())
+            plane_delta_.assign(slot.planes.size(), 0);
+        if (stack_delta_.size() != slot.stacks.size())
+            stack_delta_.assign(slot.stacks.size(), 0);
+        touched_planes_.clear();
+        touched_stacks_.clear();
+        const auto clear_delta = [this]() {
+            for (const auto plane : touched_planes_) plane_delta_[plane] = 0;
+            for (const auto stack : touched_stacks_) stack_delta_[stack] = 0;
+            touched_planes_.clear();
+            touched_stacks_.clear();
+        };
         const auto plane_pages =
             config_.sram_bytes_per_plane / config_.page_bytes;
         const auto stack_limit = config_.base_die_sram_bytes_per_stack / count;
@@ -49,7 +64,9 @@ public:
         for (auto page = address / config_.page_bytes * config_.page_bytes;
              page < address + bytes;) {
             const auto a = locate_(page);
-            const auto plane = (a.stack * config_.dies_per_stack + a.die) * config_.planes_per_die + a.plane;
+            const auto plane = (a.stack * config_.dies_per_stack + a.die) *
+                                   config_.planes_per_die +
+                               a.plane;
             const auto size = static_cast<std::uint64_t>(config_.page_bytes);
             // Allocate whole pages; rotate remainder pages across plane IDs
             // so a one-page plane is not split into unusable half-pages.
@@ -57,19 +74,32 @@ public:
                 static_cast<std::uint64_t>((index + count - plane % count) %
                                            count) < plane_pages % count;
             const auto plane_limit = (plane_pages / count + extra) * size;
-            if (size <= plane_limit - planes[plane]) {
-                planes[plane] += size;
+            const auto plane_used = slot.planes[plane] + plane_delta_[plane];
+            if (plane_used <= plane_limit && size <= plane_limit - plane_used) {
+                if (plane_delta_[plane] == 0) touched_planes_.push_back(plane);
+                plane_delta_[plane] += size;
                 reservation.pages.push_back({plane, true});
-            } else if (size <= stack_limit - stacks[a.stack]) {
-                stacks[a.stack] += size;
+            } else {
+                const auto stack_used =
+                    slot.stacks[a.stack] + stack_delta_[a.stack];
+                if (stack_used > stack_limit ||
+                    size > stack_limit - stack_used) {
+                    clear_delta();
+                    return std::nullopt;
+                }
+                if (stack_delta_[a.stack] == 0)
+                    touched_stacks_.push_back(a.stack);
+                stack_delta_[a.stack] += size;
                 reservation.pages.push_back({a.stack, false});
-            } else
-                return std::nullopt;
+            }
             if (address + bytes - page <= size) break;
             page += size;
         }
-        slot.planes = std::move(planes);
-        slot.stacks = std::move(stacks);
+        for (const auto plane : touched_planes_)
+            slot.planes[plane] += plane_delta_[plane];
+        for (const auto stack : touched_stacks_)
+            slot.stacks[stack] += stack_delta_[stack];
+        clear_delta();
         if (buffer) slot.owner = buffer->epoch;
         ++slot.live;
         slot.bytes += reservation.pages.size() * config_.page_bytes;
@@ -92,7 +122,8 @@ public:
         std::map<std::string, std::uint64_t> result;
         if (count_ <= 1) return result;
         result.emplace("buffer_count", count_);
-        for (const auto& [index, slot] : slots_) {
+        for (std::size_t index = 0; index < slots_.size(); ++index) {
+            const auto& slot = slots_[index];
             const auto prefix = "buffer_" + std::to_string(index);
             result.emplace(prefix + "_reserved_bytes", slot.bytes);
             result.emplace(prefix + "_peak_reserved_bytes", slot.peak);
@@ -112,6 +143,8 @@ private:
     Config config_;
     std::function<MemoryLocation(std::uint64_t)> locate_;
     int count_{};
-    std::map<int, Slot> slots_;
+    std::vector<Slot> slots_;
+    std::vector<std::uint64_t> plane_delta_, stack_delta_;
+    std::vector<int> touched_planes_, touched_stacks_;
 };
 } // namespace GTSim

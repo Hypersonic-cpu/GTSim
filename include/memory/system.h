@@ -20,8 +20,8 @@ public:
         const double start_cycle =
             std::max(static_cast<double>(now), next_forward_cycle_);
         const double finish_cycle = start_cycle + serialization;
-        request_queue_.push_back({request, arrival_cycle(
-                                               finish_cycle + latency_cycles_)});
+        request_queue_.push_back(
+            {request, arrival_cycle(finish_cycle + latency_cycles_)});
         next_forward_cycle_ = finish_cycle;
         statistics_.forward_bytes += static_cast<std::uint64_t>(transfer_bytes);
         statistics_.forward_busy_cycles += serialization;
@@ -32,42 +32,54 @@ public:
         if (response_queue_.size() >= queue_capacity_) {
             return false;
         }
-        const int transfer_bytes = response.size_bytes > 0
-                                       ? response.size_bytes
-                                       : kMemoryControlBytes;
+        const int transfer_bytes =
+            response.size_bytes > 0 ? response.size_bytes : kMemoryControlBytes;
         const double serialization = serialization_cycles(transfer_bytes);
         const double start_cycle =
             std::max(static_cast<double>(now), next_reverse_cycle_);
         const double finish_cycle = start_cycle + serialization;
-        response_queue_.push_back({response, arrival_cycle(
-                                                 finish_cycle + latency_cycles_)});
+        response_queue_.push_back(
+            {response, arrival_cycle(finish_cycle + latency_cycles_)});
         next_reverse_cycle_ = finish_cycle;
         statistics_.reverse_bytes += static_cast<std::uint64_t>(transfer_bytes);
         statistics_.reverse_busy_cycles += serialization;
         return true;
     }
 
-    std::vector<MemRequest> step_requests(int now) {
-        std::vector<MemRequest> ready;
-        while (!request_queue_.empty() && request_queue_.front().ready_cycle <= now) {
+    void step_requests(int now, std::vector<MemRequest>& ready) {
+        ready.clear();
+        while (!request_queue_.empty() &&
+               request_queue_.front().ready_cycle <= now) {
             ready.push_back(request_queue_.front().value);
             request_queue_.pop_front();
         }
+    }
+
+    std::vector<MemRequest> step_requests(int now) {
+        std::vector<MemRequest> ready;
+        step_requests(now, ready);
         return ready;
+    }
+
+    void step_responses(int now, std::vector<MemResponse>& ready) {
+        ready.clear();
+        while (!response_queue_.empty() &&
+               response_queue_.front().ready_cycle <= now) {
+            ready.push_back(response_queue_.front().value);
+            response_queue_.pop_front();
+        }
     }
 
     std::vector<MemResponse> step_responses(int now) {
         std::vector<MemResponse> ready;
-        while (!response_queue_.empty() && response_queue_.front().ready_cycle <= now) {
-            ready.push_back(response_queue_.front().value);
-            response_queue_.pop_front();
-        }
+        step_responses(now, ready);
         return ready;
     }
 
     D2DLinkStatistics statistics(int elapsed_cycles) const {
         D2DLinkStatistics result = statistics_;
-        const double duration = static_cast<double>(std::max(1, elapsed_cycles));
+        const double duration =
+            static_cast<double>(std::max(1, elapsed_cycles));
         result.forward_utilization = std::min(
             1.0, static_cast<double>(result.forward_busy_cycles) / duration);
         result.reverse_utilization = std::min(
@@ -76,8 +88,7 @@ public:
     }
 
 private:
-    template <typename T>
-    struct Transit {
+    template <typename T> struct Transit {
         T value;
         int ready_cycle;
     };
@@ -104,13 +115,15 @@ private:
 // D2DLink instances are shared by the routes that physically traverse them.
 class MemorySystem {
 public:
-    MemorySystem(int cache_size_bytes, int line_size_bytes, int hit_latency_cycles,
-                 int l2_bandwidth_bytes_per_cycle,
+    MemorySystem(int cache_size_bytes, int line_size_bytes,
+                 int hit_latency_cycles, int l2_bandwidth_bytes_per_cycle,
                  int l2_write_bandwidth_bytes_per_cycle, int l2_queue_depth,
                  bool bypass_cache, const MemorySystemConfig& memory_config,
                  double core_frequency_mhz, const TensorRegistry& tensors);
 
-    L2Cache* l2() const { return l2_.get(); }
+    L2Cache* l2() const {
+        return l2_.get();
+    }
 
     std::vector<int> step(int current_cycle) {
         last_step_cycle_ = current_cycle;
@@ -144,9 +157,15 @@ public:
         return completed;
     }
 
-    std::uint64_t background_cycles() const { return background_cycles_; }
-    std::uint64_t prefetch_capacity_stalls() const { return prefetch_capacity_stalls_; }
-    std::uint64_t prefetch_canceled() const { return prefetch_canceled_; }
+    std::uint64_t background_cycles() const {
+        return background_cycles_;
+    }
+    std::uint64_t prefetch_capacity_stalls() const {
+        return prefetch_capacity_stalls_;
+    }
+    std::uint64_t prefetch_canceled() const {
+        return prefetch_canceled_;
+    }
 
     struct ReadAlias {
         MemoryTier tier;
@@ -155,14 +174,17 @@ public:
         std::optional<PrefetchBuffer> buffer;
     };
 
-    ReadAlias prefetch_range(int tensor_id, std::uint64_t offset, std::uint64_t bytes) const {
+    ReadAlias prefetch_range(int tensor_id, std::uint64_t offset,
+                             std::uint64_t bytes) const {
         const auto& tensor = tensors_.at(tensor_id);
         const auto size = tensor.byte_size();
-        const auto line_size = static_cast<std::uint64_t>(l2_->get_line_size_bytes());
-        if (!tensor.preloaded || !tensor.read_only || !bytes ||
-            offset > size || bytes > size - offset ||
-            offset % line_size || bytes % line_size)
-            throw std::invalid_argument("prefetch range must cover aligned lines of a preloaded read-only tensor");
+        const auto line_size =
+            static_cast<std::uint64_t>(l2_->get_line_size_bytes());
+        if (!tensor.preloaded || !tensor.read_only || !bytes || offset > size ||
+            bytes > size - offset || offset % line_size || bytes % line_size)
+            throw std::invalid_argument(
+                "prefetch range must cover aligned lines of a preloaded "
+                "read-only tensor");
         const auto tier = tensor.initial_memory_tier;
         const auto address = tensor.global_base_address + offset;
         return {tier, 0, address, bytes, 0, std::nullopt};
@@ -195,8 +217,10 @@ public:
     }
 
     bool prefetch_ready(const ReadAlias& alias) const {
-        const auto& current = alias.queue_id ? queued_prefetches_.at(alias.queue_id) : alias;
-        return current.token && device(current.tier).prefetch_ready(current.token);
+        const auto& current =
+            alias.queue_id ? queued_prefetches_.at(alias.queue_id) : alias;
+        return current.token &&
+               device(current.tier).prefetch_ready(current.token);
     }
 
     void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
@@ -204,8 +228,10 @@ public:
             throw std::logic_error("release requires foreground retirement");
         if (alias.queue_id) {
             const auto queued = queued_prefetches_.at(alias.queue_id);
-            if (queued.token) device(queued.tier).release_prefetch(queued.token);
-            else ++prefetch_canceled_;
+            if (queued.token)
+                device(queued.tier).release_prefetch(queued.token);
+            else
+                ++prefetch_canceled_;
             queued_prefetches_.erase(alias.queue_id);
         } else {
             device(alias.tier).release_prefetch(alias.token);
@@ -213,22 +239,33 @@ public:
     }
 
     void bind_read_aliases(std::vector<ReadAlias> aliases) {
-        if (!foreground_idle()) throw std::logic_error("cannot change active read aliases");
-        std::sort(aliases.begin(), aliases.end(), [](const auto& a, const auto& b) {
-            return a.address < b.address;
-        });
+        if (!foreground_idle())
+            throw std::logic_error("cannot change active read aliases");
+        std::sort(
+            aliases.begin(), aliases.end(),
+            [](const auto& a, const auto& b) { return a.address < b.address; });
         for (std::size_t i = 1; i < aliases.size(); ++i)
-            if (aliases[i - 1].address + aliases[i - 1].bytes > aliases[i].address)
+            if (aliases[i - 1].address + aliases[i - 1].bytes >
+                aliases[i].address)
                 throw std::invalid_argument("overlapping read aliases");
         read_aliases_ = std::move(aliases);
     }
 
-    void bind_node_read_aliases(const std::vector<int>& nodes,
+    void
+    bind_node_read_aliases(const std::vector<int>& nodes,
                                std::shared_ptr<std::vector<ReadAlias>> aliases) {
-        for (const auto node : nodes) node_read_aliases_[node] = aliases;
+        for (const auto node : nodes) {
+            if (node < 0) continue;
+            if (static_cast<std::size_t>(node) >= node_read_aliases_.size())
+                node_read_aliases_.resize(static_cast<std::size_t>(node) + 1);
+            node_read_aliases_[static_cast<std::size_t>(node)] = aliases;
+        }
     }
     void unbind_node_read_aliases(const std::vector<int>& nodes) {
-        for (const auto node : nodes) node_read_aliases_.erase(node);
+        for (const auto node : nodes)
+            if (node >= 0 &&
+                static_cast<std::size_t>(node) < node_read_aliases_.size())
+                node_read_aliases_[static_cast<std::size_t>(node)].reset();
     }
 
     std::size_t pending_background_requests() const {
@@ -273,7 +310,9 @@ public:
         std::map<MemoryTier, TierCounterSnapshot> result;
         const auto snapshot = [&](MemoryTier tier, const MemoryBackend* device,
                                   const TierMemoryStatistics& traffic) {
-            result.emplace(tier, TierCounterSnapshot{traffic.read_bytes, traffic.write_bytes,
+            result.emplace(
+                tier, TierCounterSnapshot{
+                          traffic.read_bytes, traffic.write_bytes,
                                                     device ? device->device_counters() : DeviceCounters{},
                                                     traffic.read_completions, traffic.read_latency_cycles,
                                                     traffic.unadmitted_alias_read_bytes});
@@ -287,7 +326,8 @@ public:
         MemorySystemStatistics result;
         result.hbm = hbm_statistics_;
         result.hbf = hbf_statistics_;
-        const int elapsed_cycles = std::max(1, std::max(current_cycle, last_step_cycle_) + 1);
+        const int elapsed_cycles =
+            std::max(1, std::max(current_cycle, last_step_cycle_) + 1);
         if (gpu_to_hbm_) {
             result.gpu_to_hbm = gpu_to_hbm_->statistics(elapsed_cycles);
             result.has_gpu_to_hbm = true;
@@ -327,12 +367,15 @@ private:
     std::deque<MemResponse> pending_hbm_response_;
     std::deque<MemResponse> pending_hbf_response_;
     std::deque<MemResponse> pending_hbm_to_hbf_response_;
+    std::vector<MemRequest> link_request_scratch_;
+    std::vector<MemResponse> link_response_scratch_;
     std::unordered_map<std::uint64_t, RequestRoute> request_routes_;
     std::vector<ReadAlias> read_aliases_;
-    std::unordered_map<int, std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
+    std::vector<std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
     std::deque<std::uint64_t> prefetch_queue_;
     std::unordered_map<std::uint64_t, ReadAlias> queued_prefetches_;
-    std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{}, prefetch_canceled_{};
+    std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{},
+        prefetch_canceled_{};
     std::uint64_t next_queue_id_{1}, blocked_head_{}, blocked_epoch_{};
 
     void admit_prefetch_queue() {
@@ -363,15 +406,15 @@ private:
 
     MemoryBackend& device(MemoryTier tier) const {
         auto* selected = tier == MemoryTier::HBM ? hbm_.get() : hbf_.get();
-        if (!selected) throw std::invalid_argument("no active device for requested tier");
+        if (!selected)
+            throw std::invalid_argument("no active device for requested tier");
         return *selected;
     }
     TierMemoryStatistics hbm_statistics_{};
     TierMemoryStatistics hbf_statistics_{};
 
     void build_full_hbm(double core_frequency_mhz) {
-        hbm_ = make_hbm_backend(memory_config_.hbm,
-                                 core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm, core_frequency_mhz);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
                                                  core_frequency_mhz);
     }
@@ -384,8 +427,7 @@ private:
     }
 
     void build_co_located(double core_frequency_mhz) {
-        hbm_ = make_hbm_backend(memory_config_.hbm,
-                                 core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm, core_frequency_mhz);
         hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
                                 tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
@@ -395,8 +437,7 @@ private:
     }
 
     void build_cascaded(double core_frequency_mhz) {
-        hbm_ = make_hbm_backend(memory_config_.hbm,
-                                 core_frequency_mhz);
+        hbm_ = make_hbm_backend(memory_config_.hbm, core_frequency_mhz);
         hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
                                 tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
@@ -432,49 +473,67 @@ private:
     }
 
     void route_request(MemRequest request, int current_cycle) {
-        tensors_.validate_access(request.global_addr, request.size_bytes, request.tier,
+        tensors_.validate_access(request.global_addr, request.size_bytes,
+                                 request.tier,
                                  request.operation != MemoryOperation::Read);
         const MemoryTier tier = effective_tier(request.tier);
         if (request.operation == MemoryOperation::Read) {
-            const auto bound = node_read_aliases_.find(request.routing.consumer_node);
-            const auto& aliases = bound == node_read_aliases_.end() ? read_aliases_ : *bound->second;
-            auto found = std::upper_bound(aliases.begin(), aliases.end(), request.global_addr,
-                [](std::uint64_t address, const ReadAlias& alias) { return address < alias.address; });
+            const auto consumer = request.routing.consumer_node;
+            const auto* bound =
+                consumer >= 0 && static_cast<std::size_t>(consumer) <
+                                     node_read_aliases_.size()
+                    ? node_read_aliases_[static_cast<std::size_t>(consumer)]
+                          .get()
+                    : nullptr;
+            const auto& aliases = bound ? *bound : read_aliases_;
+            auto found = std::upper_bound(
+                aliases.begin(), aliases.end(), request.global_addr,
+                [](std::uint64_t address, const ReadAlias& alias) {
+                    return address < alias.address;
+                });
             if (found != aliases.begin()) {
                 const auto& alias = *std::prev(found);
-                if (alias.tier == tier && request.global_addr >= alias.address &&
+                if (alias.tier == tier &&
+                    request.global_addr >= alias.address &&
                     request.global_addr - alias.address < alias.bytes &&
                     static_cast<std::uint64_t>(request.size_bytes) <=
                         alias.bytes - (request.global_addr - alias.address)) {
-                    request.read_alias = alias.queue_id
-                        ? queued_prefetches_.at(alias.queue_id).token : alias.token;
+                    request.read_alias =
+                        alias.queue_id
+                            ? queued_prefetches_.at(alias.queue_id).token
+                            : alias.token;
                     if (!request.read_alias)
-                        statistics_for(tier).unadmitted_alias_read_bytes += request.size_bytes;
+                        statistics_for(tier).unadmitted_alias_read_bytes +=
+                            request.size_bytes;
                 }
             }
         }
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id, RequestRoute{tier, current_cycle});
         if (!inserted) {
-            throw std::logic_error("duplicate memory request id in MemorySystem");
+            throw std::logic_error(
+                "duplicate memory request id in MemorySystem");
         }
         TierMemoryStatistics& stats = statistics_for(tier);
         ++stats.request_count;
         if (request.operation == MemoryOperation::Read) {
             ++stats.read_requests;
-            stats.read_bytes += static_cast<std::uint64_t>(
-                std::max(1, request.size_bytes));
+            stats.read_bytes +=
+                static_cast<std::uint64_t>(std::max(1, request.size_bytes));
         } else {
             ++stats.write_requests;
-            stats.write_bytes += static_cast<std::uint64_t>(
-                std::max(1, request.size_bytes));
+            stats.write_bytes +=
+                static_cast<std::uint64_t>(std::max(1, request.size_bytes));
         }
 
         switch (memory_config_.topology) {
             case MemoryTopology::FullHBM:
             case MemoryTopology::CoLocated:
-                if (tier == MemoryTier::HBM) pending_to_hbm_.push_back(request);
-                else pending_to_hbf_.push_back(request);
+                if (tier == MemoryTier::HBM) {
+                    pending_to_hbm_.push_back(request);
+                } else {
+                    pending_to_hbf_.push_back(request);
+                }
                 break;
             case MemoryTopology::FullHBF:
                 pending_to_hbf_.push_back(request);
@@ -532,7 +591,8 @@ private:
         for (const auto& request : requests) {
             const auto route = request_routes_.find(request.request_id);
             if (route == request_routes_.end()) {
-                throw std::logic_error("memory request lost its route metadata");
+                throw std::logic_error(
+                    "memory request lost its route metadata");
             }
             if (memory_config_.topology == MemoryTopology::Cascaded &&
                 route->second.tier == MemoryTier::HBF) {
@@ -550,26 +610,26 @@ private:
     void advance_forward_links(int current_cycle) {
         switch (memory_config_.topology) {
             case MemoryTopology::FullHBM:
-                route_first_hop_arrivals(
-                    gpu_to_hbm_->step_requests(current_cycle));
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
                 break;
             case MemoryTopology::FullHBF:
-                route_first_hop_arrivals(
-                    gpu_to_hbf_->step_requests(current_cycle));
+            gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
                 break;
             case MemoryTopology::CoLocated:
-                route_first_hop_arrivals(
-                    gpu_to_hbm_->step_requests(current_cycle));
-                route_first_hop_arrivals(
-                    gpu_to_hbf_->step_requests(current_cycle));
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
                 break;
             case MemoryTopology::Cascaded:
-                route_first_hop_arrivals(
-                    gpu_to_hbm_->step_requests(current_cycle));
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
                 launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
                                 current_cycle);
-                for (const auto& request :
-                     hbm_to_hbf_->step_requests(current_cycle)) {
+            hbm_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            for (const auto& request : link_request_scratch_) {
                     pending_hbf_device_.push_back(request);
                 }
                 break;
@@ -633,8 +693,8 @@ private:
                                  current_cycle);
                 break;
             case MemoryTopology::Cascaded:
-                launch_responses(hbm_to_hbf_.get(),
-                                 pending_hbm_to_hbf_response_, current_cycle);
+            launch_responses(hbm_to_hbf_.get(), pending_hbm_to_hbf_response_,
+                             current_cycle);
                 launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
                                  current_cycle);
                 break;
@@ -645,7 +705,8 @@ private:
         if (!hbm_to_hbf_) {
             return;
         }
-        for (const auto& response : hbm_to_hbf_->step_responses(current_cycle)) {
+        hbm_to_hbf_->step_responses(current_cycle, link_response_scratch_);
+        for (const auto& response : link_response_scratch_) {
             pending_hbm_response_.push_back(response);
         }
         launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
@@ -653,35 +714,15 @@ private:
     }
 
     void advance_gpu_return_links(int current_cycle) {
-        std::vector<MemResponse> responses;
-        switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-                responses = gpu_to_hbm_->step_responses(current_cycle);
-                break;
-            case MemoryTopology::FullHBF:
-                responses = gpu_to_hbf_->step_responses(current_cycle);
-                break;
-            case MemoryTopology::CoLocated: {
-                auto hbm_responses = gpu_to_hbm_->step_responses(current_cycle);
-                auto hbf_responses = gpu_to_hbf_->step_responses(current_cycle);
-                responses.reserve(hbm_responses.size() + hbf_responses.size());
-                responses.insert(responses.end(), hbm_responses.begin(),
-                                 hbm_responses.end());
-                responses.insert(responses.end(), hbf_responses.begin(),
-                                 hbf_responses.end());
-                break;
-            }
-            case MemoryTopology::Cascaded:
-                responses = gpu_to_hbm_->step_responses(current_cycle);
-                break;
-        }
-
+        const auto retire = [&](const std::vector<MemResponse>& responses) {
         for (const auto& response : responses) {
             const auto route = request_routes_.find(response.request_id);
             if (route == request_routes_.end()) {
-                throw std::logic_error("completed response has no request route");
+                    throw std::logic_error(
+                        "completed response has no request route");
             }
-            TierMemoryStatistics& stats = statistics_for(route->second.tier);
+                TierMemoryStatistics& stats =
+                    statistics_for(route->second.tier);
             ++stats.completed_requests;
             if (response.operation == MemoryOperation::Read) {
                 ++stats.read_completions;
@@ -693,8 +734,28 @@ private:
             request_routes_.erase(route);
             l2_->handle_response(response, current_cycle);
         }
+        };
+        switch (memory_config_.topology) {
+        case MemoryTopology::FullHBM:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::FullHBF:
+            gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::CoLocated:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::Cascaded:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        }
     }
 };
 
-
-}
+} // namespace GTSim

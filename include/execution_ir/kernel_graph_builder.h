@@ -3,11 +3,12 @@
 #include "execution_ir/kernel_graph.h"
 #include "simulator.h"
 
-#include <map>
 #include <memory>
-#include <set>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <unordered_map>
+#include <cstdint>
 #include <vector>
 
 namespace GTSim::ExecutionIR {
@@ -53,20 +54,24 @@ private:
     const SimulatorConfig& config_;
     KernelHeader header_;
     std::unique_ptr<DAG> dag_;
-    std::map<int, int> tensor_ids_;
-    std::map<int, int> cta_sms_;
-    std::map<int, int> cta_warps_;
-    std::map<int, int> warp_bases_;
+    std::vector<int> tensor_ids_;
+    std::vector<int> cta_sms_;
+    std::vector<int> cta_warps_;
+    std::vector<int> warp_bases_;
     std::vector<int> sm_next_subpartition_;
     int next_warp_id_{};
     std::vector<PrefetchWindow> prefetch_windows_;
-    std::set<int> read_allocations_, write_allocations_;
-    std::map<int, std::uint64_t> output_areas_;
-    std::set<int> prefetch_consumers_;
+    std::vector<std::uint8_t> read_allocations_, write_allocations_;
+    std::vector<std::uint64_t> output_areas_;
+    std::vector<std::uint8_t> prefetch_consumers_;
 
     void require_started() const;
     static DataType parse_dtype(const std::string& value);
-    static const std::map<std::string, std::string>& supported_ops();
+    static const std::unordered_map<std::string_view, std::string_view>&
+    supported_ops();
+    bool bound_tensor(int local_id) const;
+    int global_tensor_id(int local_id) const;
+    void clear_bindings() noexcept;
 };
 
 } // namespace GTSim::ExecutionIR
