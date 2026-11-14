@@ -30,7 +30,17 @@ private:
                     ConsumerPredicate consumer_predicate,
                     std::uint64_t& next_epoch, int cycle) {
         (void)op_count;
-        const std::map<int, int> ids(bindings.begin(), bindings.end());
+        std::vector<int> ids;
+        ids.reserve(bindings.size());
+        for (const auto& [local_id, registry_id] : bindings) {
+            if (local_id < 0) {
+                throw std::invalid_argument("negative local tensor id");
+            }
+            if (static_cast<std::size_t>(local_id) >= ids.size()) {
+                ids.resize(static_cast<std::size_t>(local_id) + 1, -1);
+            }
+            ids[static_cast<std::size_t>(local_id)] = registry_id;
+        }
         if (plans.empty())
             throw std::invalid_argument("empty streaming window plan");
         count_ = plans.front().buffer.count;
@@ -52,7 +62,7 @@ private:
             std::vector<std::pair<PrefetchRange, MemorySystem::ReadAlias>>
                 ranges;
             for (auto range : plan.ranges) {
-                range.tensor = ids.at(range.tensor);
+                range.tensor = ids.at(static_cast<std::size_t>(range.tensor));
                 ranges.push_back(
                     {range, memory_.prefetch_range(range.tensor, range.offset,
                                                    range.bytes)});

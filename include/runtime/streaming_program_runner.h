@@ -4,7 +4,7 @@
 #include "runtime/program_timing.h"
 #include "runtime/stream_protocol.h"
 
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,11 +49,11 @@ private:
     GPU* gpu_{};
     MemorySystem* memory_{};
     L2Cache* l2_{};
-    std::map<std::string, LaunchDef> launches_;
+    std::unordered_map<std::string, LaunchDef> launches_;
     std::vector<CommandDef> commands_;
-    std::map<std::string, PrefetchDef> prefetch_regions_;
-    std::map<std::string, MemorySystem::ReadAlias> aliases_;
-    std::map<std::string, int> events_;
+    std::unordered_map<std::string, PrefetchDef> prefetch_regions_;
+    std::unordered_map<std::string, MemorySystem::ReadAlias> aliases_;
+    std::unordered_map<std::string, int> events_;
     struct StreamState {
         std::uint64_t completed_launches{};
         std::int64_t last_completion_cycle{};

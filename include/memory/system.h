@@ -331,7 +331,7 @@ private:
     std::vector<ReadAlias> read_aliases_;
     std::unordered_map<int, std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
     std::deque<std::uint64_t> prefetch_queue_;
-    std::map<std::uint64_t, ReadAlias> queued_prefetches_;
+    std::unordered_map<std::uint64_t, ReadAlias> queued_prefetches_;
     std::uint64_t background_cycles_{}, prefetch_capacity_stalls_{}, prefetch_canceled_{};
     std::uint64_t next_queue_id_{1}, blocked_head_{}, blocked_epoch_{};
 
