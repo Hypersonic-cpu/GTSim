@@ -14,8 +14,9 @@ or GPU timing source was modified.
 - Streaming manifest membership/sequence checks use unordered sets while
   ordered placement policy state remains ordered.
 - MemorySystem reuses D2D request/response scratch buffers and uses dense node
-  to read-alias bindings. D2D link output-parameter APIs preserve the old
-  value-returning wrappers for callers that need them.
+  to read-alias bindings; completion and route metadata use direct `.at()`
+  lookups for established request IDs. D2D link output-parameter APIs preserve
+  the old value-returning wrappers for callers that need them.
 - EventLab reuses stack/channel admission scratch and uses direct `.at()` lookup
   for native completion IDs; request batching and admission order are unchanged.
 - HBF read-SRAM slots use a vector and transactional per-request deltas instead
