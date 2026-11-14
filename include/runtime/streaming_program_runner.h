@@ -46,7 +46,6 @@ private:
     int launch_overhead_cycles_{};
     TensorRegistry registry_;
     std::unique_ptr<Simulator> simulator_;
-    GPU* gpu_{};
     MemorySystem* memory_{};
     L2Cache* l2_{};
     std::unordered_map<std::string, LaunchDef> launches_;
@@ -60,7 +59,6 @@ private:
     } stream_state_;
     ProgramTiming timing_;
     std::uint64_t next_prefetch_epoch_{};
-    bool manifest_ready_{};
 
     void receive_program_manifest();
     void validate_commands() const;
@@ -68,7 +66,6 @@ private:
     void execute_launch(const LaunchDef& launch);
     void start_prefetch(const CommandDef& command);
     void synchronize_memory();
-    void send_error(const std::exception& error) noexcept;
 };
 
 } // namespace GTSim::ExecutionIR

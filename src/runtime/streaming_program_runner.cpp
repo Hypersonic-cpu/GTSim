@@ -68,10 +68,6 @@ DataType parse_dtype(const std::string& value) {
     throw std::invalid_argument("unsupported program dtype " + value);
 }
 
-MemoryTier parse_tier(const std::string& value) {
-    return parse_memory_tier(value);
-}
-
 void require_type(const Message& message, std::string_view expected) {
     if (message.type != expected)
         throw std::invalid_argument("expected stream message " +
@@ -90,15 +86,6 @@ StreamingProgramRunner::StreamingProgramRunner(SimulatorConfig config,
       registry_(config_.memory.address_layout) {
     if (max_cycles_ <= 0)
         throw std::invalid_argument("max_cycles must be positive");
-}
-
-void StreamingProgramRunner::send_error(const std::exception& error) noexcept {
-    try {
-        transport_.send_json(make_typed_json(
-            "Error", "{\"code\":\"execution_error\",\"message\":" +
-                         json_quote(error.what()) + "}"));
-    } catch (...) {
-    }
 }
 
 void StreamingProgramRunner::receive_program_manifest() {
@@ -126,7 +113,7 @@ void StreamingProgramRunner::receive_program_manifest() {
                 wire.strides[0] != wire.shape[1])
                 throw std::invalid_argument("invalid stream TensorDef");
             const auto dtype = parse_dtype(wire.dtype);
-            const auto tier = parse_tier(wire.tier);
+            const auto tier = parse_memory_tier(wire.tier);
             auto policy = placement_policies.find(tier);
             if (policy == placement_policies.end())
                 policy =
@@ -204,10 +191,9 @@ void StreamingProgramRunner::receive_program_manifest() {
     }
     validate_commands();
     simulator_ = std::make_unique<Simulator>(config_, registry_);
-    gpu_ = simulator_->simulated_gpu;
-    memory_ = gpu_->memory_system.get();
-    l2_ = gpu_->l2;
-    manifest_ready_ = true;
+    auto* gpu = simulator_->simulated_gpu;
+    memory_ = gpu->memory_system.get();
+    l2_ = gpu->l2;
 }
 
 void StreamingProgramRunner::validate_commands() const {
@@ -521,7 +507,12 @@ ProgramTiming StreamingProgramRunner::run() {
                                std::to_string(timing_.total_cycles) + "}"));
         return timing_;
     } catch (const std::exception& error) {
-        send_error(error);
+        try {
+            transport_.send_json(make_typed_json(
+                "Error", "{\"code\":\"execution_error\",\"message\":" +
+                             json_quote(error.what()) + "}"));
+        } catch (...) {
+        }
         throw;
     }
 }
