@@ -192,13 +192,19 @@ void test_d2d_link_payload_and_full_duplex() {
                  MemoryOperation::Write},
                 0),
             "D2D reverse direction should accept the write acknowledgment");
-    require(link.step_requests(15).empty(),
+    std::vector<MemRequest> requests;
+    std::vector<MemResponse> responses;
+    link.step_requests(15, requests);
+    require(requests.empty(),
             "a 16-byte read command should consume forward-link bandwidth");
-    require(link.step_requests(16).size() == 1,
+    link.step_requests(16, requests);
+    require(requests.size() == 1,
             "read command should finish after 16 byte-cycles");
-    require(link.step_responses(128).size() == 1,
+    link.step_responses(128, responses);
+    require(responses.size() == 1,
             "reverse read data should progress independently of forward writes");
-    require(link.step_responses(144).size() == 1,
+    link.step_responses(144, responses);
+    require(responses.size() == 1,
             "write acknowledgment should use only control bytes");
     const auto stats = link.statistics(200);
     require(stats.forward_bytes == kMemoryControlBytes + 128 &&

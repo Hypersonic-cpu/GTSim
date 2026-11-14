@@ -61,7 +61,7 @@ private:
     std::vector<int> sm_next_subpartition_;
     int next_warp_id_{};
     std::vector<PrefetchWindow> prefetch_windows_;
-    std::vector<std::uint8_t> read_allocations_, write_allocations_;
+    std::vector<std::uint8_t> allocation_modes_;
     std::vector<std::uint64_t> output_areas_;
     std::vector<std::uint8_t> prefetch_consumers_;
 

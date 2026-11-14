@@ -1,5 +1,8 @@
 #pragma once
 #include "memory/cache.h"
+
+#include <cassert>
+
 namespace GTSim {
 class D2DLink {
 public:
@@ -55,12 +58,6 @@ public:
         }
     }
 
-    std::vector<MemRequest> step_requests(int now) {
-        std::vector<MemRequest> ready;
-        step_requests(now, ready);
-        return ready;
-    }
-
     void step_responses(int now, std::vector<MemResponse>& ready) {
         ready.clear();
         while (!response_queue_.empty() &&
@@ -68,12 +65,6 @@ public:
             ready.push_back(response_queue_.front().value);
             response_queue_.pop_front();
         }
-    }
-
-    std::vector<MemResponse> step_responses(int now) {
-        std::vector<MemResponse> ready;
-        step_responses(now, ready);
-        return ready;
     }
 
     D2DLinkStatistics statistics(int elapsed_cycles) const {
@@ -251,21 +242,24 @@ public:
         read_aliases_ = std::move(aliases);
     }
 
-    void
-    bind_node_read_aliases(const std::vector<int>& nodes,
-                               std::shared_ptr<std::vector<ReadAlias>> aliases) {
+    void prepare_node_read_aliases(std::size_t node_count) {
+        node_read_aliases_.assign(node_count, {});
+    }
+    void bind_node_read_aliases(
+        const std::vector<int>& nodes,
+        std::shared_ptr<std::vector<ReadAlias>> aliases) {
         for (const auto node : nodes) {
-            if (node < 0) continue;
-            if (static_cast<std::size_t>(node) >= node_read_aliases_.size())
-                node_read_aliases_.resize(static_cast<std::size_t>(node) + 1);
+            assert(node >= 0 &&
+                   static_cast<std::size_t>(node) < node_read_aliases_.size());
             node_read_aliases_[static_cast<std::size_t>(node)] = aliases;
         }
     }
     void unbind_node_read_aliases(const std::vector<int>& nodes) {
-        for (const auto node : nodes)
-            if (node >= 0 &&
-                static_cast<std::size_t>(node) < node_read_aliases_.size())
-                node_read_aliases_[static_cast<std::size_t>(node)].reset();
+        for (const auto node : nodes) {
+            assert(node >= 0 &&
+                   static_cast<std::size_t>(node) < node_read_aliases_.size());
+            node_read_aliases_[static_cast<std::size_t>(node)].reset();
+        }
     }
 
     std::size_t pending_background_requests() const {
@@ -473,9 +467,6 @@ private:
     }
 
     void route_request(MemRequest request, int current_cycle) {
-        tensors_.validate_access(request.global_addr, request.size_bytes,
-                                 request.tier,
-                                 request.operation != MemoryOperation::Read);
         const MemoryTier tier = effective_tier(request.tier);
         if (request.operation == MemoryOperation::Read) {
             const auto consumer = request.routing.consumer_node;

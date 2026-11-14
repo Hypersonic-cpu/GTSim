@@ -4,7 +4,9 @@
 #include "kernel_prefetch_session.h"
 
 #include <algorithm>
+#include <cassert>
 #include <charconv>
+#include <experimental/scope>
 #include <set>
 #include <unordered_set>
 
@@ -248,16 +250,15 @@ void StreamingProgramRunner::validate_commands() const {
 }
 
 void StreamingProgramRunner::start_prefetch(const CommandDef& command) {
-    if (!memory_) throw std::logic_error("prefetch before ProgramReady");
-    const auto it = prefetch_regions_.find(command.target);
-    if (it == prefetch_regions_.end())
-        throw std::invalid_argument("unknown prefetch region " +
-                                    command.target);
-    const auto& region = it->second;
+    assert(memory_);
+    const auto& region = prefetch_regions_.at(command.target);
     if (command.kind == "QueuePrefetch") {
-        aliases_.emplace(command.target, memory_->enqueue_prefetch(
-                                             region.tensor, region.offset,
-                                             region.bytes, region.buffer));
+        const auto inserted = aliases_.emplace(
+            command.target,
+            memory_->enqueue_prefetch(region.tensor, region.offset,
+                                      region.bytes, region.buffer)).second;
+        assert(inserted);
+        (void)inserted;
         return;
     }
     const auto alias = memory_->reserve_prefetch(region.tensor, region.offset,
@@ -265,7 +266,9 @@ void StreamingProgramRunner::start_prefetch(const CommandDef& command) {
     if (!alias.token)
         throw std::runtime_error("prefetch residency capacity exhausted");
     memory_->start_prefetch(alias);
-    aliases_.emplace(command.target, alias);
+    const auto inserted = aliases_.emplace(command.target, alias).second;
+    assert(inserted);
+    (void)inserted;
 }
 
 void StreamingProgramRunner::synchronize_memory() {
@@ -278,10 +281,8 @@ void StreamingProgramRunner::synchronize_memory() {
 }
 
 void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
-    if (!simulator_ || simulator_->dag)
-        throw std::logic_error("kernel graph overlap in streaming runner");
-    if (launch.sequence != stream_state_.completed_launches)
-        throw std::logic_error("kernel launch sequence is not ready");
+    assert(simulator_ && !simulator_->dag);
+    assert(launch.sequence == stream_state_.completed_launches);
     timing_.state_history.at(launch.id).push_back("QUEUED");
     transport_.send_json(make_typed_json(
         "RequestKernel", "{\"launch_id\":" + json_quote(launch.id) +
@@ -310,176 +311,154 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
         header.tensor_bindings.emplace_back(binding[0], binding[1]);
     KernelGraphBuilder builder(registry_, config_);
     builder.begin(std::move(header));
-    try {
-        while (true) {
-            const auto message = transport_.receive();
-            if (message.type == "CTA") {
-                builder.add_cta(decode_message<CTA>(message));
-            } else if (message.type == "InstructionBatch") {
-                const auto batch =
-                    decode_message<InstructionBatchWire>(message);
-                if (batch.instructions.empty() ||
-                    batch.instructions.size() > 512)
-                    throw std::invalid_argument(
-                        "invalid instruction batch size");
-                for (const auto& instruction : batch.instructions)
-                    builder.add_instruction(instruction);
-            } else if (message.type == "PrefetchWindow") {
-                builder.add_prefetch_window(
-                    decode_message<PrefetchWindow>(message));
-            } else if (message.type == "KernelEnd") {
-                const auto end = decode_message<KernelEndWire>(message);
-                KernelEnd contract{end.op_count, end.cta_count, end.outputs,
-                                   end.partial_outputs};
-                auto built = builder.finish(contract);
-                std::vector<MemorySystem::ReadAlias> bindings;
-                for (const auto& name : launch.read_aliases) {
-                    const auto it = aliases_.find(name);
-                    if (it == aliases_.end())
-                        throw std::invalid_argument(
-                            "launch binds inactive read alias");
-                    bindings.push_back(it->second);
-                }
-                memory_->bind_read_aliases(std::move(bindings));
+    [[maybe_unused]] auto cleanup = std::experimental::scope_exit([&] {
+        builder.abort();
+        simulator_->node_completion_observer = {};
+        if (simulator_->dag) simulator_->detach_graph();
+    });
+    while (true) {
+        const auto message = transport_.receive();
+        if (message.type == "CTA") {
+            builder.add_cta(decode_message<CTA>(message));
+        } else if (message.type == "InstructionBatch") {
+            const auto batch = decode_message<InstructionBatchWire>(message);
+            assert(!batch.instructions.empty() &&
+                   batch.instructions.size() <= 512);
+            for (const auto& instruction : batch.instructions)
+                builder.add_instruction(instruction);
+        } else if (message.type == "PrefetchWindow") {
+            builder.add_prefetch_window(
+                decode_message<PrefetchWindow>(message));
+        } else if (message.type == "KernelEnd") {
+            const auto end = decode_message<KernelEndWire>(message);
+            KernelEnd contract{end.op_count, end.cta_count, end.outputs,
+                               end.partial_outputs};
+            auto built = builder.finish(contract);
+            std::vector<MemorySystem::ReadAlias> bindings;
+            for (const auto& name : launch.read_aliases) {
+                bindings.push_back(aliases_.at(name));
+            }
+            memory_->bind_read_aliases(std::move(bindings));
+            memory_->prepare_node_read_aliases(built.dag->nodes.size());
 
-                std::unique_ptr<KernelPrefetchSession> panel;
-                if (!built.prefetch_windows.empty()) {
-                    panel = std::make_unique<KernelPrefetchSession>(
-                        *memory_, built.prefetch_windows,
-                        built.dag->nodes.size(), launch.bindings,
-                        next_prefetch_epoch_, simulator_->cycle);
-                }
-                KernelTiming launch_timing;
-                launch_timing.id = launch.id;
-                launch_timing.state = "RUNNING";
-                timing_.state_history.at(launch.id).push_back("RUNNING");
-                launch_timing.launch_cycle = simulator_->cycle;
-                const auto traffic_before = memory_->tier_counters();
-                launch_timing.background_at_launch =
-                    memory_->pending_background_requests();
-                for (int i = 0; i < launch_overhead_cycles_; ++i) {
-                    if (simulator_->cycle >= max_cycles_)
-                        throw std::runtime_error("launch overhead timeout");
-                    memory_->step(++simulator_->cycle);
-                }
-                launch_timing.start_cycle = simulator_->cycle;
-                launch_timing.l2_lines_before = l2_->resident_line_count();
-                const auto background_before = memory_->background_cycles();
-                simulator_->attach_graph(*built.dag);
-                if (panel)
-                    simulator_->node_completion_observer =
-                        [&](int node, int now) { panel->complete(node, now); };
-                if (!simulator_->run_active_graph(max_cycles_, false))
-                    throw std::runtime_error("kernel execution timeout");
-                simulator_->node_completion_observer = {};
-                if (panel) launch_timing.prefetch_windows = panel->finish();
-                launch_timing.l2_lines_after = l2_->resident_line_count();
-                launch_timing.device_complete_cycle = simulator_->cycle;
-                simulator_->verify_retired();
-                KernelExecutionSession::detach(*simulator_);
-                built.dag.reset();
-                launch_timing.complete_cycle =
-                    std::max(simulator_->cycle, simulator_->memory_drain_cycle);
-                launch_timing.background_compute_cycles =
-                    simulator_->background_cycles_at_device_complete -
-                    background_before;
-                launch_timing.device_cycles =
-                    launch_timing.device_complete_cycle -
-                    launch_timing.start_cycle;
-                for (const auto& [tier, after] : memory_->tier_counters()) {
-                    const auto& before = traffic_before.at(tier);
-                    auto& delta = launch_timing.memory[memory_tier_name(tier)];
-                    delta.read_bytes = after.read_bytes - before.read_bytes;
-                    delta.write_bytes = after.write_bytes - before.write_bytes;
-                    delta.read_completions =
-                        after.read_completions - before.read_completions;
-                    delta.read_latency_cycles =
-                        after.read_latency_cycles - before.read_latency_cycles;
-                    delta.unadmitted_alias_read_bytes =
-                        after.unadmitted_alias_read_bytes -
-                        before.unadmitted_alias_read_bytes;
-                    delta.gauges = after.device.gauges;
-                    for (const auto& [name, value] : after.device.cumulative)
-                        delta.counters.emplace(
-                            name, value - before.device.cumulative.at(name));
-                    for (std::size_t unit = 0;
-                         unit < after.device.unit_busy_ticks.size(); ++unit) {
-                        const auto ticks =
-                            after.device.unit_busy_ticks[unit] -
-                            before.device.unit_busy_ticks.at(unit);
-                        if (ticks) {
-                            delta.active_units.push_back(unit);
-                            delta.unit_busy_ticks.emplace(unit, ticks);
-                        }
+            std::unique_ptr<KernelPrefetchSession> panel;
+            if (!built.prefetch_windows.empty()) {
+                panel = std::make_unique<KernelPrefetchSession>(
+                    *memory_, built.prefetch_windows, built.dag->nodes.size(),
+                    launch.bindings, next_prefetch_epoch_, simulator_->cycle);
+            }
+            KernelTiming launch_timing;
+            launch_timing.id = launch.id;
+            launch_timing.state = "RUNNING";
+            timing_.state_history.at(launch.id).push_back("RUNNING");
+            launch_timing.launch_cycle = simulator_->cycle;
+            const auto traffic_before = memory_->tier_counters();
+            launch_timing.background_at_launch =
+                memory_->pending_background_requests();
+            for (int i = 0; i < launch_overhead_cycles_; ++i) {
+                if (simulator_->cycle >= max_cycles_)
+                    throw std::runtime_error("launch overhead timeout");
+                memory_->step(++simulator_->cycle);
+            }
+            launch_timing.start_cycle = simulator_->cycle;
+            launch_timing.l2_lines_before = l2_->resident_line_count();
+            const auto background_before = memory_->background_cycles();
+            simulator_->attach_graph(*built.dag);
+            if (panel)
+                simulator_->node_completion_observer = [&](int node, int now) {
+                    panel->complete(node, now);
+                };
+            if (!simulator_->run_active_graph(max_cycles_, false))
+                throw std::runtime_error("kernel execution timeout");
+            simulator_->node_completion_observer = {};
+            if (panel) launch_timing.prefetch_windows = panel->finish();
+            launch_timing.l2_lines_after = l2_->resident_line_count();
+            launch_timing.device_complete_cycle = simulator_->cycle;
+            simulator_->verify_retired();
+            KernelExecutionSession::detach(*simulator_);
+            built.dag.reset();
+            launch_timing.complete_cycle =
+                std::max(simulator_->cycle, simulator_->memory_drain_cycle);
+            launch_timing.background_compute_cycles =
+                simulator_->background_cycles_at_device_complete -
+                background_before;
+            launch_timing.device_cycles =
+                launch_timing.device_complete_cycle - launch_timing.start_cycle;
+            for (const auto& [tier, after] : memory_->tier_counters()) {
+                const auto& before = traffic_before.at(tier);
+                auto& delta = launch_timing.memory[memory_tier_name(tier)];
+                delta.read_bytes = after.read_bytes - before.read_bytes;
+                delta.write_bytes = after.write_bytes - before.write_bytes;
+                delta.read_completions =
+                    after.read_completions - before.read_completions;
+                delta.read_latency_cycles =
+                    after.read_latency_cycles - before.read_latency_cycles;
+                delta.unadmitted_alias_read_bytes =
+                    after.unadmitted_alias_read_bytes -
+                    before.unadmitted_alias_read_bytes;
+                delta.gauges = after.device.gauges;
+                for (const auto& [name, value] : after.device.cumulative)
+                    delta.counters.emplace(
+                        name, value - before.device.cumulative.at(name));
+                for (std::size_t unit = 0;
+                     unit < after.device.unit_busy_ticks.size(); ++unit) {
+                    const auto ticks = after.device.unit_busy_ticks[unit] -
+                                       before.device.unit_busy_ticks.at(unit);
+                    if (ticks) {
+                        delta.active_units.push_back(unit);
+                        delta.unit_busy_ticks.emplace(unit, ticks);
                     }
                 }
-                launch_timing.background_at_completion =
-                    memory_->pending_background_requests();
-                launch_timing.state = "COMPLETED";
-                timing_.state_history.at(launch.id).push_back("COMPLETED");
-                timing_.per_kernel.push_back(launch_timing);
-                simulator_->cycle = launch_timing.complete_cycle;
-                timing_.total_cycles = simulator_->cycle;
-                ++stream_state_.completed_launches;
-                stream_state_.last_completion_cycle =
-                    launch_timing.complete_cycle;
-                transport_.send_json(make_typed_json(
-                    "KernelDone",
-                    "{\"launch_id\":" + json_quote(launch.id) +
-                        ",\"stream_id\":" + json_quote(stream_id_) +
-                        ",\"complete_cycle\":" +
-                        std::to_string(launch_timing.complete_cycle) +
-                        ",\"device_complete_cycle\":" +
-                        std::to_string(launch_timing.device_complete_cycle) +
-                        "}"));
-                return;
-            } else {
-                throw std::invalid_argument("unexpected kernel message " +
-                                            message.type);
             }
+            launch_timing.background_at_completion =
+                memory_->pending_background_requests();
+            launch_timing.state = "COMPLETED";
+            timing_.state_history.at(launch.id).push_back("COMPLETED");
+            timing_.per_kernel.push_back(launch_timing);
+            simulator_->cycle = launch_timing.complete_cycle;
+            timing_.total_cycles = simulator_->cycle;
+            ++stream_state_.completed_launches;
+            stream_state_.last_completion_cycle = launch_timing.complete_cycle;
+            transport_.send_json(make_typed_json(
+                "KernelDone",
+                "{\"launch_id\":" + json_quote(launch.id) + ",\"stream_id\":" +
+                    json_quote(stream_id_) + ",\"complete_cycle\":" +
+                    std::to_string(launch_timing.complete_cycle) +
+                    ",\"device_complete_cycle\":" +
+                    std::to_string(launch_timing.device_complete_cycle) + "}"));
+            return;
+        } else {
+            throw std::invalid_argument("unexpected kernel message " +
+                                        message.type);
         }
-    } catch (...) {
-        builder.abort();
-        if (simulator_->dag) {
-            simulator_->node_completion_observer = {};
-            simulator_->detach_graph();
-        }
-        throw;
     }
 }
 
 void StreamingProgramRunner::execute_command(const CommandDef& command) {
     if (command.kind == "LaunchKernel") {
-        const auto it = launches_.find(command.target);
-        if (it == launches_.end())
-            throw std::invalid_argument("unknown kernel launch");
-        execute_launch(it->second);
+        execute_launch(launches_.at(command.target));
     } else if (command.kind == "Prefetch" || command.kind == "QueuePrefetch") {
         start_prefetch(command);
     } else if (command.kind == "Release") {
-        const auto it = aliases_.find(command.target);
-        if (it == aliases_.end())
-            throw std::invalid_argument("release inactive alias");
-        memory_->release_prefetch(it->second);
-        aliases_.erase(it);
+        const auto alias = aliases_.at(command.target);
+        memory_->release_prefetch(alias);
+        aliases_.erase(command.target);
         timing_.prefetch_release_cycles.emplace(command.target,
                                                 simulator_->cycle);
     } else if (command.kind == "StreamSynchronize") {
-        if (!command.target.empty() && command.target != stream_id_)
-            throw std::invalid_argument("synchronize targets another stream");
         synchronize_memory();
     } else if (command.kind == "RecordEvent") {
-        if (command.target.empty() || events_.contains(command.target))
-            throw std::invalid_argument("empty/duplicate event");
-        events_[command.target] = timing_.total_cycles;
+        const auto inserted =
+            events_.emplace(command.target, timing_.total_cycles).second;
+        assert(inserted);
+        (void)inserted;
         timing_.events[command.target] = timing_.total_cycles;
     } else if (command.kind == "WaitEvent") {
-        const auto it = events_.find(command.target);
-        if (it == events_.end() || it->second > timing_.total_cycles)
-            throw std::invalid_argument("wait before record or unknown event");
+        const auto event_cycle = events_.at(command.target);
+        assert(event_cycle <= timing_.total_cycles);
+        (void)event_cycle;
     } else {
-        throw std::invalid_argument("unsupported stream command " +
-                                    command.kind);
+        assert(false && "unsupported stream command");
     }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "memory_backend.h"
+#include <cassert>
 #include <functional>
 
 namespace GTSim {
@@ -30,25 +31,27 @@ public:
                                        std::optional<PrefetchBuffer> buffer) {
         const int count = buffer ? buffer->count : 1;
         const int index = buffer ? buffer->slot : 0;
-        if (count <= 0 || index < 0 || index >= count ||
-            (count_ && count != count_))
-            throw std::invalid_argument("invalid SRAM buffer partition");
         if (!count_) {
+            if (count <= 0 || index < 0 || index >= count)
+                throw std::invalid_argument("invalid SRAM buffer partition");
             count_ = count;
             slots_.resize(static_cast<std::size_t>(count_));
+            const auto plane_count = static_cast<std::size_t>(
+                config_.stacks * config_.dies_per_stack *
+                config_.planes_per_die);
+            for (auto& slot : slots_) {
+                slot.planes.resize(plane_count);
+                slot.stacks.resize(static_cast<std::size_t>(config_.stacks));
+            }
+            plane_delta_.resize(plane_count);
+            stack_delta_.resize(static_cast<std::size_t>(config_.stacks));
+        } else {
+            assert(count == count_);
+            assert(index >= 0 && index < count_);
         }
-        auto& slot = slots_.at(static_cast<std::size_t>(index));
+        auto& slot = slots_[static_cast<std::size_t>(index)];
         if (buffer && slot.owner && *slot.owner != buffer->epoch)
             return std::nullopt;
-        if (slot.planes.empty()) {
-            slot.planes.resize(config_.stacks * config_.dies_per_stack *
-                               config_.planes_per_die);
-            slot.stacks.resize(config_.stacks);
-        }
-        if (plane_delta_.size() != slot.planes.size())
-            plane_delta_.assign(slot.planes.size(), 0);
-        if (stack_delta_.size() != slot.stacks.size())
-            stack_delta_.assign(slot.stacks.size(), 0);
         touched_planes_.clear();
         touched_stacks_.clear();
         const auto clear_delta = [this]() {

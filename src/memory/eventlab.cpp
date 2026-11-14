@@ -1,6 +1,7 @@
 #include "memory/base.h"
 #include "memory/clock.h"
 #include <hbf_eventlab/runtime/simulation_session.hpp>
+#include <cassert>
 #include <unordered_map>
 #include <unordered_set>
 namespace GTSim {
@@ -126,8 +127,7 @@ public:
         per_channel_.resize(channels_);
     }
     bool try_submit(const MemRequest& r, int now) override {
-        if (r.size_bytes <= 0 || r.global_addr < base_)
-            throw std::invalid_argument("invalid EventLab range");
+        assert(r.size_bytes > 0 && r.global_addr >= base_);
         if (pending_.size() + ready_.size() >=
             static_cast<std::size_t>(capacity_)) {
             ++stats_.admission_retries;
@@ -135,8 +135,8 @@ public:
         }
         const auto at = offset_ + clock_.first_edge_at_or_after(now);
         const auto address = r.global_addr - base_;
-        if (static_cast<std::uint64_t>(r.size_bytes) > UINT64_MAX - address)
-            throw std::invalid_argument("EventLab range overflow");
+        assert(static_cast<std::uint64_t>(r.size_bytes) <=
+               UINT64_MAX - address);
         for (auto& batch : batches_) batch.clear();
         std::fill(per_channel_.begin(), per_channel_.end(), 0);
         auto cursor = address / 64 * 64;

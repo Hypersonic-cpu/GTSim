@@ -1,9 +1,11 @@
 #include "memory/base.h"
 #include "memory/sram.h"
+#include <cassert>
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <deque>
 #include <tuple>
 namespace GTSim {
 namespace {
@@ -38,21 +40,13 @@ public:
                 "native backend does not support SRAM transfer paths");
     }
     bool try_submit(const MemRequest& request, int now) override {
+        assert(request.request_id < background_id_base);
         if (request.read_path != MemoryReadPath::Host)
             throw std::invalid_argument(
                 "explicit SRAM paths require a managed read alias");
-        if (pending_.contains(request.request_id))
-            throw std::logic_error("duplicate SRAM request");
-        if (background_.contains(request.request_id)) return false;
         auto routed = request;
         if (request.read_alias) {
             const auto& region = regions_.at(request.read_alias);
-            if (region.released || request.operation != MemoryOperation::Read ||
-                request.global_addr < region.address ||
-                request.global_addr - region.address >= region.bytes ||
-                static_cast<std::uint64_t>(request.size_bytes) >
-                    region.bytes - (request.global_addr - region.address))
-                throw std::invalid_argument("invalid SRAM alias");
             bool ready = true;
             const auto last = (request.global_addr + request.size_bytes - 1) /
                               config_.page_bytes;
@@ -70,7 +64,9 @@ public:
                  ? resident_read_bytes_
                  : fallback_read_bytes_) += request.size_bytes;
         }
-        pending_.emplace(request.request_id, request);
+        const auto inserted = pending_.emplace(request.request_id, request).second;
+        assert(inserted);
+        (void)inserted;
         return true;
     }
     std::vector<MemResponse> step(int now) override {
@@ -154,6 +150,9 @@ public:
         if (region.started || region.released)
             throw std::invalid_argument("invalid prefetch start");
         region.started = true;
+        const auto position = std::lower_bound(
+            active_regions_.begin(), active_regions_.end(), token);
+        active_regions_.insert(position, token);
         ++started_fills_;
         ++active_fills_;
         peak_active_fills_ = std::max(peak_active_fills_, active_fills_);
@@ -241,8 +240,15 @@ private:
     };
 
     void submit_background(int time) {
-        for (auto& [token, region] : regions_) {
-            while (region.started && region.submitted < region.bytes) {
+        while (!active_regions_.empty()) {
+            const auto token = active_regions_.front();
+            const auto found = regions_.find(token);
+            if (found == regions_.end()) {
+                active_regions_.pop_front();
+                continue;
+            }
+            auto& region = found->second;
+            while (region.submitted < region.bytes) {
                 const auto address =
                     interleave_ ? region.fills.at(region.next_fill).address
                                 : region.address + region.submitted;
@@ -250,27 +256,27 @@ private:
                     config_.page_bytes - address % config_.page_bytes,
                     interleave_ ? region.fills.at(region.next_fill).bytes
                                 : region.bytes - region.submitted);
-                while (pending_.contains(next_background_id_) ||
-                       background_.contains(next_background_id_))
-                    ++next_background_id_;
-                const auto id = next_background_id_;
-                if (!backend_->try_submit({id,
-                                           address,
-                                           static_cast<int>(bytes),
-                                           MemoryOperation::Read,
-                                           MemoryTier::HBF,
-                                           {},
-                                           0,
-                                           MemoryReadPath::Prefetch},
-                                          time))
-                    break;
-                ++next_background_id_;
+                assert(next_background_id_ >= background_id_base);
+                assert(next_background_id_ <
+                       std::numeric_limits<std::uint64_t>::max());
+                const auto id = next_background_id_++;
+                const MemRequest fill{id,
+                                      address,
+                                      static_cast<int>(bytes),
+                                      MemoryOperation::Read,
+                                      MemoryTier::HBF,
+                                      {},
+                                      0,
+                                      MemoryReadPath::Prefetch};
+                if (!backend_->try_submit(fill, time))
+                    return;
                 background_.emplace(id, token);
                 region.submitted += bytes;
                 ++region.next_fill;
                 ++region.outstanding;
                 prefetch_bytes_ += bytes;
             }
+            active_regions_.pop_front();
         }
     }
 
@@ -282,11 +288,19 @@ private:
         sram_.release(region.reservation);
         reserved_bytes_ -= region.reservation.pages.size() * config_.page_bytes;
         regions_.erase(token);
+        for (auto active = active_regions_.begin();
+             active != active_regions_.end(); ++active) {
+            if (*active == token) {
+                active_regions_.erase(active);
+                break;
+            }
+        }
         ++residency_epoch_;
     }
 
     ReadSramAllocator sram_;
     std::map<std::uint64_t, Region> regions_;
+    std::deque<std::uint64_t> active_regions_;
     std::unordered_map<std::uint64_t, std::uint64_t> background_;
     std::uint64_t next_token_{1}, next_background_id_{background_id_base};
     std::uint64_t residency_epoch_{};

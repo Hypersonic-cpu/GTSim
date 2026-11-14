@@ -3,6 +3,8 @@
 #include "execution_ir/kernel_graph.h"
 #include "runtime/program_timing.h"
 
+#include <cassert>
+
 namespace GTSim::ExecutionIR {
 // Kernel-local memory windows follow actual copy completion, independently of
 // operation names, workload type, or numerical tensor values.
@@ -30,17 +32,19 @@ private:
                     ConsumerPredicate consumer_predicate,
                     std::uint64_t& next_epoch, int cycle) {
         (void)op_count;
-        std::vector<int> ids;
-        ids.reserve(bindings.size());
+#ifdef NDEBUG
+        (void)consumer_predicate;
+#endif
+        std::vector<int> ids(bindings.size(), -1);
         for (const auto& [local_id, registry_id] : bindings) {
-            if (local_id < 0) {
-                throw std::invalid_argument("negative local tensor id");
-            }
-            if (static_cast<std::size_t>(local_id) >= ids.size()) {
-                ids.resize(static_cast<std::size_t>(local_id) + 1, -1);
-            }
+            assert(local_id >= 0 &&
+                   static_cast<std::size_t>(local_id) < ids.size());
+            assert(ids[static_cast<std::size_t>(local_id)] < 0);
             ids[static_cast<std::size_t>(local_id)] = registry_id;
         }
+#ifndef NDEBUG
+        for (const int id : ids) assert(id >= 0);
+#endif
         if (plans.empty())
             throw std::invalid_argument("empty streaming window plan");
         count_ = plans.front().buffer.count;
@@ -62,7 +66,9 @@ private:
             std::vector<std::pair<PrefetchRange, MemorySystem::ReadAlias>>
                 ranges;
             for (auto range : plan.ranges) {
-                range.tensor = ids.at(static_cast<std::size_t>(range.tensor));
+                assert(range.tensor >= 0 &&
+                       static_cast<std::size_t>(range.tensor) < ids.size());
+                range.tensor = ids[static_cast<std::size_t>(range.tensor)];
                 ranges.push_back(
                     {range, memory_.prefetch_range(range.tensor, range.offset,
                                                    range.bytes)});
@@ -80,10 +86,8 @@ private:
                 bytes += range.bytes;
             }
             for (int node : window.consumers) {
-                if (node < 0 ||
-                    static_cast<std::size_t>(node) >= owners_.size() ||
-                    owners_[node] != -1 || !consumer_predicate(node))
-                    throw std::invalid_argument("invalid prefetch consumer");
+                assert(node >= 0 && static_cast<std::size_t>(node) < owners_.size() &&
+                       owners_[node] == -1 && consumer_predicate(node));
                 owners_[node] = i;
             }
             memory_.bind_node_read_aliases(window.consumers, window.aliases);
