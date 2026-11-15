@@ -118,10 +118,7 @@ public:
                 const auto r = parent.request;
                 ready_.push_back({r.request_id, r.global_addr, r.tier,
                                   !parent.failed, r.size_bytes, r.operation,
-                                  parent.failed ? 1 : 0,
-                                  r.operation == MemoryOperation::Read
-                                      ? r.shadow_digest
-                                      : 0});
+                                  parent.failed ? 1 : 0});
                 pending_.erase(parent_id);
                 ++stats_.completed_requests;
         });

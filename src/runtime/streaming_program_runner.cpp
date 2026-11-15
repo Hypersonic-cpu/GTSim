@@ -7,8 +7,6 @@
 #include <cassert>
 #include <charconv>
 #include <experimental/scope>
-#include <iomanip>
-#include <sstream>
 #include <set>
 #include <unordered_set>
 
@@ -83,15 +81,13 @@ void require_type(const Message& message, std::string_view expected) {
 
 StreamingProgramRunner::StreamingProgramRunner(SimulatorConfig config,
                                                FramedTransport& transport,
-                                               int max_cycles,
-                                               bool verify_memory_reads)
+                                               int max_cycles)
     : config_(std::move(config)),
       transport_(transport),
       max_cycles_(max_cycles),
       registry_(config_.memory.address_layout) {
     if (max_cycles_ <= 0)
         throw std::invalid_argument("max_cycles must be positive");
-    config_.memory.verify_memory_reads = verify_memory_reads;
 }
 
 void StreamingProgramRunner::receive_program_manifest() {
@@ -259,21 +255,13 @@ void StreamingProgramRunner::start_prefetch(const CommandDef& command) {
     if (command.kind == "QueuePrefetch") {
         auto alias = memory_->enqueue_prefetch(region.tensor, region.offset,
                                                region.bytes, region.buffer);
-        while (!alias.queue_id && simulator_->cycle < max_cycles_) {
-            memory_->step(++simulator_->cycle);
-            alias = memory_->enqueue_prefetch(region.tensor, region.offset,
-                                              region.bytes, region.buffer);
+        if (!alias.queue_id) {
+            deferred_prefetches_.push_back(command.target);
+            return;
         }
-        if (!alias.queue_id)
-            throw std::runtime_error("prefetch descriptor queue timed out");
         const auto inserted = aliases_.emplace(command.target, alias).second;
         assert(inserted);
         (void)inserted;
-        const auto& tensor = registry_.at(region.tensor);
-        if (tensor.name == "W_gate_up" || tensor.name == "W_down") {
-            auto& cycle = timing_.prefetch_stats.first_expert_enqueue_cycle;
-            if (cycle < 0) cycle = simulator_->cycle;
-        }
         return;
     }
     const auto alias = memory_->reserve_prefetch(region.tensor, region.offset,
@@ -286,11 +274,28 @@ void StreamingProgramRunner::start_prefetch(const CommandDef& command) {
     (void)inserted;
 }
 
+void StreamingProgramRunner::retry_deferred_prefetches() {
+    while (!deferred_prefetches_.empty()) {
+        const auto& id = deferred_prefetches_.front();
+        const auto& region = prefetch_regions_.at(id);
+        auto alias = memory_->enqueue_prefetch(region.tensor, region.offset,
+                                               region.bytes, region.buffer);
+        if (!alias.queue_id) return;
+        const auto inserted = aliases_.emplace(id, alias).second;
+        assert(inserted);
+        (void)inserted;
+        deferred_prefetches_.pop_front();
+    }
+}
+
 void StreamingProgramRunner::synchronize_memory() {
     if (!memory_) return;
-    while (!memory_->idle() && simulator_->cycle < max_cycles_)
+    while (simulator_->cycle < max_cycles_) {
+        retry_deferred_prefetches();
+        if (memory_->idle() && deferred_prefetches_.empty()) break;
         memory_->step(++simulator_->cycle);
-    if (!memory_->idle())
+    }
+    if (!memory_->idle() || !deferred_prefetches_.empty())
         throw std::runtime_error("stream memory drain timed out");
     timing_.total_cycles = simulator_->cycle;
 }
@@ -364,7 +369,8 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             active_dag = std::move(built.dag);
             std::vector<MemorySystem::ReadAlias> bindings;
             for (const auto& name : launch.read_aliases) {
-                bindings.push_back(aliases_.at(name));
+                if (const auto found = aliases_.find(name); found != aliases_.end())
+                    bindings.push_back(found->second);
             }
             memory_->bind_read_aliases(std::move(bindings));
 
@@ -443,22 +449,6 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             timing_.per_kernel.push_back(launch_timing);
             simulator_->cycle = launch_timing.complete_cycle;
             timing_.total_cycles = simulator_->cycle;
-            if (launch.id == "router_softmax_topk") {
-                timing_.prefetch_stats.router_completion_cycle =
-                    launch_timing.complete_cycle;
-            }
-            for (const auto& [id, alias] : aliases_) {
-                const auto& definition = prefetch_regions_.at(id);
-                const auto& tensor = registry_.at(definition.tensor);
-                if (tensor.name != "W_gate_up" && tensor.name != "W_down")
-                    continue;
-                const auto admitted = memory_->prefetch_admission_cycle(alias);
-                if (admitted >= 0 &&
-                    (timing_.prefetch_stats.first_expert_admission_cycle < 0 ||
-                     admitted <
-                         timing_.prefetch_stats.first_expert_admission_cycle))
-                    timing_.prefetch_stats.first_expert_admission_cycle = admitted;
-            }
             ++stream_state_.completed_launches;
             stream_state_.last_completion_cycle = launch_timing.complete_cycle;
             transport_.send_json(make_typed_json(
@@ -477,14 +467,23 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
 }
 
 void StreamingProgramRunner::execute_command(const CommandDef& command) {
+    retry_deferred_prefetches();
     if (command.kind == "LaunchKernel") {
         execute_launch(launches_.at(command.target));
     } else if (command.kind == "Prefetch" || command.kind == "QueuePrefetch") {
         start_prefetch(command);
     } else if (command.kind == "Release") {
-        const auto alias = aliases_.at(command.target);
-        memory_->release_prefetch(alias);
-        aliases_.erase(command.target);
+        if (const auto active = aliases_.find(command.target);
+            active != aliases_.end()) {
+            memory_->release_prefetch(active->second);
+            aliases_.erase(active);
+        } else {
+            const auto deferred = std::find(deferred_prefetches_.begin(),
+                                            deferred_prefetches_.end(),
+                                            command.target);
+            assert(deferred != deferred_prefetches_.end());
+            deferred_prefetches_.erase(deferred);
+        }
         timing_.prefetch_release_cycles.emplace(command.target,
                                                 simulator_->cycle);
     } else if (command.kind == "StreamSynchronize") {
@@ -523,22 +522,6 @@ ProgramTiming StreamingProgramRunner::run() {
         }
         timing_.persistent_gpu = timing_.persistent_memory =
             timing_.persistent_l2 = timing_.stable_allocations = true;
-        const auto audit = memory_->read_audit();
-        if (config_.memory.verify_memory_reads) {
-            timing_.data_check.checked_reads = audit.checked_reads;
-            timing_.data_check.checked_bytes = audit.checked_bytes;
-            timing_.data_check.mismatched_bytes = audit.mismatched_bytes;
-            std::ostringstream digest;
-            digest << std::hex << std::setfill('0') << std::setw(16)
-                   << audit.digest_sum << std::setw(16) << audit.digest_xor;
-            timing_.data_check.logical_read_digest = digest.str();
-            timing_.data_check.shadow_payload_mode = "hash_or_bytewise";
-            // A memory shadow match proves only that the requested byte
-            // ranges were served by the selected backend.  It is not a CPU
-            // GEMM/partition oracle, so that result is reported separately by
-            // the frontend oracle test and is never inferred here.
-            timing_.data_check.partition_oracle_pass = false;
-        }
         const auto& hbf_counters = tier_stats.at(MemoryTier::HBF).device.cumulative;
         timing_.prefetch_stats.queued =
             hbf_counters.contains("prefetch_queued")

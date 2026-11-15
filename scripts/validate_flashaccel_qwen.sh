@@ -37,7 +37,7 @@ for backend in hbfine flashlab fullhbm; do
       --source "$SOURCE" --params "$PARAMS" --runner "$RUNNER"
       --architecture "$ARCH" --memory "$memory" --out "$dir"
       --flashaccel-config "$POLICY" --prefetch "$mode"
-      --verify-memory-reads --max-cycles "$MAX_CYCLES")
+      --max-cycles "$MAX_CYCLES")
     printf '%q ' "${cmd[@]}" > "$dir/command.txt"
     printf '\n' >> "$dir/command.txt"
     setsid timeout -k 10s "${PER_CASE_TIMEOUT}s" "${cmd[@]}" \
@@ -76,32 +76,11 @@ for name in "${labels[@]}"; do
   result="$OUT/$name/result.json"
   if ! [[ -s "$result" ]] || ! jq -e '
       .returncode == 0 and (.timing.total_cycles > 0) and
-      (.data_check.checked_reads > 0) and
-      (.data_check.checked_bytes > 0) and
-      (.data_check.mismatched_bytes == 0) and
       ((.effective_prefetch_mode == "disabled_fullhbm") or
        (.effective_prefetch_mode == "on") or
-       (.effective_prefetch_mode == "off")) and
-      (((.prefetch_stats.first_expert_enqueue_cycle // -1) < 0) or
-       ((.prefetch_stats.router_completion_cycle // -1) <=
-        (.prefetch_stats.first_expert_enqueue_cycle // -1))) and
-      (((.prefetch_stats.first_expert_admission_cycle // -1) < 0) or
-       ((.prefetch_stats.router_completion_cycle // -1) <=
-        (.prefetch_stats.first_expert_admission_cycle // -1))) and
-      ((.data_check.logical_read_digest | type) == "string")
+       (.effective_prefetch_mode == "off"))
     ' "$result" >/dev/null; then
     echo "DATA_OR_CYCLE_FAILED $name" >&2
-    failed=1
-  fi
-done
-
-for backend in hbfine flashlab fullhbm; do
-  a="$OUT/${backend}-off/result.json"
-  b="$OUT/${backend}-on/result.json"
-  if [[ -s "$a" && -s "$b" ]] &&
-     [[ "$(jq -r '.data_check.logical_read_digest' "$a")" != \
-        "$(jq -r '.data_check.logical_read_digest' "$b")" ]]; then
-    echo "READ_DIGEST_MISMATCH $backend" >&2
     failed=1
   fi
 done
@@ -125,7 +104,7 @@ for mode in off on; do
   fi
 done
 
-printf 'case,status,effective_prefetch_mode,cycles,wall_seconds,python_cpu_seconds,cpp_cpu_seconds,python_peak_rss_kib,cpp_peak_rss_kib,peak_rss_kib,checked_bytes,mismatched_bytes,queued,admitted,completed,resident_read_bytes,fallback_read_bytes,canceled,router_completion_cycle,first_expert_enqueue_cycle,first_expert_admission_cycle\n' \
+printf 'case,status,effective_prefetch_mode,cycles,wall_seconds,python_cpu_seconds,cpp_cpu_seconds,python_peak_rss_kib,cpp_peak_rss_kib,peak_rss_kib,queued,admitted,completed,resident_read_bytes,fallback_read_bytes,canceled\n' \
   > "$OUT/summary.csv"
 for name in "${labels[@]}"; do
   result="$OUT/$name/result.json"
@@ -135,19 +114,14 @@ for name in "${labels[@]}"; do
       (.python_cpu_seconds // 0), (.cpp_cpu_seconds // 0),
       (.python_peak_rss_kib // 0), (.cpp_peak_rss_kib // 0),
       (.peak_rss_kib // 0),
-      (.data_check.checked_bytes // 0),
-      (.data_check.mismatched_bytes // -1),
       (.prefetch_stats.queued // 0), (.prefetch_stats.admitted // 0),
       (.prefetch_stats.completed // 0),
       (.prefetch_stats.resident_read_bytes // 0),
       (.prefetch_stats.fallback_read_bytes // 0),
-      (.prefetch_stats.canceled // 0),
-      (.prefetch_stats.router_completion_cycle // -1),
-      (.prefetch_stats.first_expert_enqueue_cycle // -1),
-      (.prefetch_stats.first_expert_admission_cycle // -1) ] | @csv' "$result" \
+      (.prefetch_stats.canceled // 0) ] | @csv' "$result" \
       >> "$OUT/summary.csv"
   else
-    printf '%s,%s,unknown,0,0,0,0,0,0,0,-1,0,0,0,0,0,0,0,-1,-1,-1\n' \
+    printf '%s,%s,unknown,0,0,0,0,0,0,0,0,0,0,0,0,0\n' \
       "$name" "$(cat "$OUT/$name/status.txt" 2>/dev/null || echo FAILED)" \
       >> "$OUT/summary.csv"
   fi

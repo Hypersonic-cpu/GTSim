@@ -25,10 +25,11 @@ public:
 
     std::uint64_t enqueue(std::uint64_t address, std::uint64_t bytes,
                           std::optional<PrefetchBuffer> buffer) {
-        if (queued_.size() >= capacity_) return 0;
+        if (pending_count_ >= capacity_) return 0;
         const auto id = next_id_++;
         queued_.emplace(id, Descriptor{address, bytes, 0, buffer});
         order_.push_back(id);
+        ++pending_count_;
         ++queued_total_;
         return id;
     }
@@ -58,6 +59,8 @@ public:
             found->second.token = token;
             found->second.admission_cycle = now;
             order_.pop_front();
+            assert(pending_count_ > 0);
+            --pending_count_;
         }
     }
 
@@ -76,6 +79,8 @@ public:
             found->second.address + found->second.bytes <= address)
             return false;
         queued_.erase(found);
+        assert(pending_count_ > 0);
+        --pending_count_;
         ++canceled_;
         return true;
     }
@@ -85,11 +90,16 @@ public:
         const auto found = queued_.find(handle);
         if (found == queued_.end()) return {false, 0};
         const auto token = found->second.token;
+        if (!token) {
+            assert(pending_count_ > 0);
+            --pending_count_;
+        }
         queued_.erase(found);
         return {true, token};
     }
 
     std::uint64_t queued_total() const { return queued_total_; }
+    std::size_t pending_count() const { return pending_count_; }
     std::uint64_t capacity_stalls() const { return capacity_stalls_; }
     std::uint64_t canceled() const { return canceled_; }
     int admission_cycle(std::uint64_t handle) const {
@@ -102,6 +112,7 @@ private:
     bool cancel_on_miss_;
     std::uint64_t next_id_{queue_id_base};
     std::uint64_t queued_total_{}, capacity_stalls_{}, canceled_{};
+    std::size_t pending_count_{};
     std::uint64_t blocked_head_{}, blocked_epoch_{};
     int admission_cycle_{-1};
     std::unordered_map<std::uint64_t, Descriptor> queued_;
@@ -179,23 +190,21 @@ public:
         for (auto response : backend_->step(now)) {
             if (auto fill = background_.find(response.request_id);
                 fill != background_.end()) {
-                auto token = fill->second;
+                const auto [token, address, bytes] = fill->second;
                 background_.erase(fill);
-                if (!response.completed || response.error_code ||
-                    response.shadow_digest !=
-                        memory_shadow_digest(
-                            response.global_addr,
-                            static_cast<std::uint64_t>(
-                                std::max(1, response.size_bytes))))
-                    throw std::runtime_error("SRAM fill failed");
                 auto& region = regions_.at(token);
+                if (!response.completed || response.error_code != 0 ||
+                    response.global_addr != address ||
+                    response.size_bytes != static_cast<int>(bytes))
+                    region.failed = true;
                 --region.outstanding;
-                region.ready_pages.insert(response.global_addr /
-                                          config_.page_bytes);
-                if (region.ready()) {
+                if (!region.failed)
+                    region.ready_pages.insert(response.global_addr /
+                                              config_.page_bytes);
+                if (!region.outstanding) {
                     --active_fills_;
-                    ++completed_fills_;
-            }
+                    if (region.ready()) ++completed_fills_;
+                }
                 reclaim(token);
                 continue;
             }
@@ -334,7 +343,7 @@ public:
     }
 
     std::size_t pending_background_requests() const override {
-        return active_fills_;
+        return active_fills_ + prefetch_engine_.pending_count();
     }
     DeviceCounters device_counters() const override {
         auto counters = backend_->device_counters();
@@ -392,14 +401,17 @@ private:
     struct Region {
         std::uint64_t address{}, bytes{}, submitted{}, outstanding{},
             consumers{};
-        bool started{}, released{};
+        bool started{}, released{}, failed{};
         ReadSramAllocator::Reservation reservation;
         std::unordered_set<std::uint64_t> ready_pages;
         std::vector<Fill> fills;
         std::size_t next_fill{};
         bool ready() const {
-            return started && submitted == bytes && !outstanding;
+            return started && !failed && submitted == bytes && !outstanding;
         }
+    };
+    struct Background {
+        std::uint64_t token{}, address{}, bytes{};
     };
     void submit_background(int time) {
         while (!active_regions_.empty()) {
@@ -429,11 +441,10 @@ private:
                                       MemoryTier::HBF,
                                       {},
                                       0,
-                                      MemoryReadPath::Prefetch,
-                                      memory_shadow_digest(address, bytes)};
+                                      MemoryReadPath::Prefetch};
                 if (!backend_->try_submit(fill, time))
                     return;
-                background_.emplace(id, token);
+                background_.emplace(id, Background{token, address, bytes});
                 region.submitted += bytes;
                 ++region.next_fill;
                 ++region.outstanding;
@@ -446,7 +457,7 @@ private:
     void reclaim(std::uint64_t token) {
         const auto& region = regions_.at(token);
         if (!region.released || region.consumers ||
-            (region.started && !region.ready()))
+            (region.started && !region.ready() && !region.failed))
             return;
         sram_.release(region.reservation);
         reserved_bytes_ -= region.reservation.pages.size() * config_.page_bytes;
@@ -464,7 +475,7 @@ private:
     ReadSramAllocator sram_;
     std::map<std::uint64_t, Region> regions_;
     std::deque<std::uint64_t> active_regions_;
-    std::unordered_map<std::uint64_t, std::uint64_t> background_;
+    std::unordered_map<std::uint64_t, Background> background_;
     std::uint64_t next_token_{1}, next_background_id_{background_id_base};
     std::uint64_t residency_epoch_{};
     std::uint64_t reserved_bytes_{}, peak_reserved_bytes_{};

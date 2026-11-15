@@ -5,6 +5,7 @@
 #include "runtime/stream_protocol.h"
 
 #include <unordered_map>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -15,8 +16,7 @@ namespace GTSim::ExecutionIR {
 class StreamingProgramRunner {
 public:
     StreamingProgramRunner(SimulatorConfig config, FramedTransport& transport,
-                           int max_cycles = 100000000,
-                           bool verify_memory_reads = false);
+                           int max_cycles = 100000000);
 
     ProgramTiming run();
 
@@ -53,6 +53,7 @@ private:
     std::vector<CommandDef> commands_;
     std::unordered_map<std::string, PrefetchDef> prefetch_regions_;
     std::unordered_map<std::string, MemorySystem::ReadAlias> aliases_;
+    std::deque<std::string> deferred_prefetches_;
     std::unordered_map<std::string, int> events_;
     struct StreamState {
         std::uint64_t completed_launches{};
@@ -66,6 +67,7 @@ private:
     void execute_command(const CommandDef& command);
     void execute_launch(const LaunchDef& launch);
     void start_prefetch(const CommandDef& command);
+    void retry_deferred_prefetches();
     void synchronize_memory();
 };
 

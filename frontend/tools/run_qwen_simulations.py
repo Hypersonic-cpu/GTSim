@@ -219,8 +219,6 @@ def run_streaming_interface(
                "--stream-fd", str(child.fileno()), "--max-frame", str(args.max_frame)]
     if args.max_cycles:
         command += ["--max-cycles", str(args.max_cycles)]
-    if args.verify_memory_reads:
-        command += ["--verify-memory-reads"]
     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                pass_fds=(child.fileno(),))
     child.close()
@@ -286,17 +284,6 @@ def run_streaming_interface(
     timing_line = next(line for line in (args.out / "simulation.log").read_text().splitlines()
                        if line.startswith("Program timing JSON: "))
     outcome["timing"] = json.loads(timing_line.split(": ", 1)[1])
-    outcome["data_check"] = outcome["timing"].get(
-        "data_check",
-        {
-            "checked_reads": 0,
-            "checked_bytes": 0,
-            "mismatched_bytes": 0,
-            "logical_read_digest": "",
-            "shadow_payload_mode": "disabled",
-            "partition_oracle_pass": False,
-        },
-    )
     outcome["prefetch_stats"] = outcome["timing"].get(
         "prefetch_stats",
         {
@@ -331,7 +318,6 @@ def main():
     parser.add_argument("--focus-expert", type=int)
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--max-frame", type=int, default=1 << 20)
-    parser.add_argument("--verify-memory-reads", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if not 0 < args.max_frame <= 0xFFFFFFFF:

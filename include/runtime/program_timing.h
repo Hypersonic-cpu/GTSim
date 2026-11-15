@@ -32,19 +32,9 @@ struct KernelTiming {
     std::uint64_t background_compute_cycles{};
 };
 
-struct DataCheck {
-    std::uint64_t checked_reads{}, checked_bytes{}, mismatched_bytes{};
-    std::string logical_read_digest;
-    std::string shadow_payload_mode{"disabled"};
-    bool partition_oracle_pass{};
-};
-
 struct PrefetchStats {
     std::uint64_t queued{}, admitted{}, completed{}, resident_read_bytes{},
         fallback_read_bytes{}, canceled{};
-    int router_completion_cycle{-1};
-    int first_expert_enqueue_cycle{-1};
-    int first_expert_admission_cycle{-1};
 };
 
 struct ProgramTiming {
@@ -61,7 +51,6 @@ struct ProgramTiming {
     std::map<std::string, int> prefetch_release_cycles;
     bool persistent_gpu{}, persistent_memory{}, persistent_l2{},
         stable_allocations{};
-    DataCheck data_check;
     PrefetchStats prefetch_stats;
 };
 

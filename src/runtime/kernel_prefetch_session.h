@@ -109,7 +109,8 @@ public:
         memory_.unbind_node_read_aliases(window.consumers);
         if (window.active) {
             for (const auto& alias : *window.aliases)
-                memory_.release_prefetch(alias, false);
+                if (alias.queue_id || alias.token)
+                    memory_.release_prefetch(alias, false);
             window.active = false;
             traces_[index].release_request_cycle = cycle;
             advance(index + count_, cycle);

@@ -82,7 +82,6 @@ struct MemorySystemConfig {
     D2DLinkConfig hbm_to_hbf{1500.0, 10, 65536};
     MemoryAddressLayout address_layout{};
     TensorPlacementProfile placement{TensorPlacementProfile::AllHBM};
-    bool verify_memory_reads{false};
 };
 
 inline double bytes_per_cycle_from_GBps(double bandwidth_GBps,

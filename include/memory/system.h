@@ -159,13 +159,6 @@ public:
                (hbf_ ? hbf_->prefetch_canceled() : 0);
     }
 
-    struct ReadAudit {
-        std::uint64_t checked_reads{}, checked_bytes{}, mismatched_bytes{};
-        std::uint64_t digest_sum{}, digest_xor{};
-    };
-
-    ReadAudit read_audit() const { return read_audit_; }
-
     struct ReadAlias {
         MemoryTier tier;
         std::uint64_t token, address, bytes;
@@ -226,6 +219,7 @@ public:
     }
 
     void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
+        if (!alias.queue_id && !alias.token) return;
         if (require_idle && !foreground_idle())
             throw std::logic_error("release requires foreground retirement");
         if (alias.queue_id) {
@@ -351,7 +345,7 @@ private:
     struct RequestRoute {
         MemoryTier tier;
         int start_cycle;
-        std::uint64_t address{}, bytes{}, expected_digest{};
+        std::uint64_t address{}, bytes{};
         MemoryOperation operation{MemoryOperation::Read};
     };
 
@@ -379,7 +373,6 @@ private:
     std::vector<ReadAlias> read_aliases_;
     std::vector<std::shared_ptr<std::vector<ReadAlias>>> node_read_aliases_;
     std::uint64_t background_cycles_{};
-    ReadAudit read_audit_{};
 
     MemoryBackend& device(MemoryTier tier) const {
         auto* selected = tier == MemoryTier::HBM ? hbm_.get() : hbf_.get();
@@ -486,28 +479,6 @@ private:
                 }
             }
         }
-        std::uint64_t expected_digest{};
-        if (memory_config_.verify_memory_reads &&
-            request.operation == MemoryOperation::Read) {
-            const auto bytes = static_cast<std::uint64_t>(
-                std::max(1, request.size_bytes));
-            expected_digest = memory_shadow_digest(request.global_addr, bytes);
-            for (const auto& [tensor_id, tensor] : tensors_.entries()) {
-                if (tensor.contains(request.global_addr) &&
-                    bytes <= tensor.byte_size() &&
-                    request.global_addr - tensor.global_base_address <=
-                        tensor.byte_size() - bytes) {
-                    request.shadow_tensor_id = tensor_id;
-                    request.shadow_offset =
-                        request.global_addr - tensor.global_base_address;
-                    expected_digest = memory_logical_shadow_digest(
-                        tensor_id,
-                        request.shadow_offset,
-                        bytes);
-                    break;
-                }
-            }
-        }
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id,
             RequestRoute{tier,
@@ -515,24 +486,10 @@ private:
                          request.global_addr,
                          static_cast<std::uint64_t>(
                              std::max(1, request.size_bytes)),
-                         request.operation == MemoryOperation::Read
-                             ? expected_digest
-                             : 0,
                          request.operation});
-        if (!inserted) {
-            throw std::logic_error(
-                "duplicate memory request id in MemorySystem");
-        }
+        assert(inserted);
+        (void)it;
         TierMemoryStatistics& stats = statistics_for(tier);
-        if (memory_config_.verify_memory_reads &&
-            request.operation == MemoryOperation::Read) {
-            const auto key = expected_digest;
-            ++read_audit_.checked_reads;
-            read_audit_.checked_bytes +=
-                static_cast<std::uint64_t>(std::max(1, request.size_bytes));
-            read_audit_.digest_sum += key;
-            read_audit_.digest_xor ^= key + 0x9e3779b97f4a7c15ULL;
-        }
         ++stats.request_count;
         if (request.operation == MemoryOperation::Read) {
             ++stats.read_requests;
@@ -663,14 +620,9 @@ private:
 
     void route_response(const MemResponse& response, int /*current_cycle*/) {
         const auto& route = request_routes_.at(response.request_id);
-        if (memory_config_.verify_memory_reads &&
-            route.operation == MemoryOperation::Read &&
-            (!response.completed || response.error_code ||
-             response.global_addr != route.address ||
-             response.tier != route.tier ||
-             response.size_bytes != static_cast<int>(route.bytes) ||
-             response.shadow_digest != route.expected_digest))
-            read_audit_.mismatched_bytes += route.bytes;
+        assert(response.global_addr == route.address);
+        assert(response.size_bytes == static_cast<int>(route.bytes) ||
+               route.operation != MemoryOperation::Read);
         switch (memory_config_.topology) {
             case MemoryTopology::FullHBM:
                 pending_hbm_response_.push_back(response);

@@ -116,6 +116,24 @@ int main() {
     queued->release_prefetch(first_queued);
     queued->release_prefetch(second_queued);
 
+    // Admission consumes a pending FIFO slot immediately; the active handle
+    // remains resolvable until its explicit release.
+    auto capacity_one = config;
+    capacity_one.prefetch_engine.queue_capacity = 1;
+    auto one = make_hbf_backend(capacity_one, 1980, 0);
+    one->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
+    const auto admitted = one->enqueue_prefetch(0, 4096);
+    require(admitted != 0 && one->enqueue_prefetch(4096, 4096) == 0,
+            "pending descriptor capacity was not enforced");
+    one->advance_prefetch(0);
+    require(one->prefetch_alias(admitted) != 0,
+            "capacity-one descriptor was not admitted");
+    const auto after_admission = one->enqueue_prefetch(4096, 4096);
+    require(after_admission != 0,
+            "admitted descriptor retained a pending FIFO slot");
+    one->release_prefetch(after_admission);
+    one->release_prefetch(admitted);
+
     auto shared = make_hbf_backend(config, 1980, 0);
     shared->preload_region(0, hbfine::capacity_bytes_per_stack(c), true);
     auto address = hbfine::decode_address(0, 0, c);
