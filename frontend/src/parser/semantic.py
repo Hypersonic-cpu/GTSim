@@ -242,6 +242,7 @@ def region(text):
         name,
         tuple(A.IndexExpr(expression=x.strip()) for x in split_balanced(offsets)),
         tuple(scalar(n.lstrip("%")) for n in shape.split("x")),
+        None,
     )
 
 

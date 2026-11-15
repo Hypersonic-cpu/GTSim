@@ -7,6 +7,5 @@
     "bk": 16,
     "stages": 2,
     "split": 1
-  },
-  "prefetch_granularity": "hyperpage_coalesced"
+  }
 }

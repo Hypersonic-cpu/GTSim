@@ -96,6 +96,10 @@ class SymbolicRegion:
     tensor: str
     offsets: tuple[IndexExpr, ...]
     shape: tuple[int | str, ...]
+    # A partition is a logical view into the parent allocation.  The view's
+    # second extent may be smaller than the parent row, but its TMA address
+    # arithmetic must continue to use the parent's physical row stride.
+    parent_row_stride: IndexExpr | None
 
 
 @dataclass(frozen=True)

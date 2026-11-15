@@ -129,12 +129,11 @@ hbf:
 {
   "partition_policy": "n_slab_fit_double_buffer",
   "buffer_count": 2,
-  "gemm_tiling": {"bm": 64, "bn": 128, "bk": 64, "stages": 2, "split": 1},
-  "prefetch_granularity": "hyperpage_coalesced"
+  "gemm_tiling": {"bm": 16, "bn": 64, "bk": 16, "stages": 2, "split": 1}
 }
 ```
 
-不要新增多个同义的 `enable_megaplane` 标志。物理 `planes_per_command_group = 1` 即关闭 MegaPlane；保留 `geometry=grouped_planes` 使映射退化一致。`address_mapping_policy` 与 M 是两个正交参数：**改变 M 不等于选择新的静态布局策略**。本轮只需 `megapage_round_robin` 与朴素 `linear_page` 两种明确 Policy，默认采用论文的 Round Robin。
+不要新增多个同义的 `enable_megaplane` 标志。物理 `planes_per_command_group = 1` 即关闭 MegaPlane；保留 `geometry=grouped_planes` 使映射退化一致。`address_mapping_policy` 与 M 是两个正交参数：**改变 M 不等于选择新的静态布局策略**。当前 HBFine、SRAM allocator 和 Frontend 只实现 `megapage_round_robin`，因此其他地址策略必须被拒绝，而不能作为无效配置接受。Prefetch 请求按实际物理 Page 范围生成，MegaPlane 由 Backend 对同一命令组的 Page 请求合并；它与固定 GEMM tiling 解耦。
 
 ### 3.2 Placement Policy 必须与使用顺序吻合
 
@@ -274,7 +273,7 @@ Canceled                             +--------------------+--> Released
     "mismatched_bytes": 0,
     "logical_read_digest": "hex-digest",
     "shadow_payload_mode": "hash_or_bytewise",
-    "partition_oracle_pass": true
+    "partition_oracle_pass": false
   },
   "prefetch_stats": {
     "queued": 0,
@@ -289,13 +288,13 @@ Canceled                             +--------------------+--> Released
 
 上面数字**只是 Schema 示例，不是预计结果**。必须从实际执行读取并校验，不能写死。`logical_read_digest` 是逻辑需求的**多重集合**摘要（无视发射时间/物理地址的顺序差异），可在 on/off 和四种 Memory 模式之间对比；Payload/Shadow 校验则负责证明 HBF 与 SRAM 实际数据来源一致。若不实现 Shadow Payload，必须明确标记 **DATA_NOT_VERIFIED**，不得声称“读数据通过”。
 
-**实施门槛**：先使 **HBFine 4F1M** 在 `prefetch=off` 和 `prefetch=on` 下都满足 `mismatched_bytes=0`、实际检查字节数大于 0、Partition Oracle 通过、逻辑需求摘要一致；`prefetch=on` 必须至少一次成功 Fill 和 SRAM Hit（否则不能证明 Prefetch Engine 已工作）。然后再处理 EventLab/FlashLab。最后 FullHBM 作为数值/逻辑读基准。
+**实施门槛**：先使 **HBFine 4F1M** 在 `prefetch=off` 和 `prefetch=on` 下都满足 `mismatched_bytes=0`、实际检查字节数大于 0、独立逻辑需求摘要一致；`prefetch=on` 必须至少一次成功 Fill 和 SRAM Hit（否则不能证明 Prefetch Engine 已工作）。`partition_oracle_pass` 不从内存 Digest 推断，必须由独立 CPU GEMM/覆盖测试报告。EventLab 不在本轮验证矩阵内；最后 FullHBM 作为数值/逻辑读基准。
 
 ## 8. Qwen3-30B-A3B：统一的并发验证方案
 
 - Workload：`frontend/asm/qwen3/flash-accel/one_block.progir`；参数 `frontend/asm/qwen3/b1_ctx512.json`（B=1, E=128, TopK=8, S=4），固定 `ROUTE_IDS`；不要换成只测一个 Expert 的 `--focus-launch`。
 - Hardware：4 HBF + 1 Naive HBM 的 `configs/memconf/4F1M_grouped_planes.yaml`；派生 HBFine/EventLab/FlashLab 仅更换 Backend 类型，保持**相同 geometry、SRAM、address policy**。FullHBM 为 `configs/memconf/full-hbm.yaml` + Naive HBM。不要使用 Ramulator2 做本次 HBM 基准。
-- 每个 Backend 进行 `prefetch=on/off` 两组。FullHBM 的 `on` 明确无 HBF Prefetch（应等于 `off`），这是程序开关的空操作自检，不是预取收益测试。总共 8 个 Case。
+- HBFine、FlashLab 和 FullHBM 各进行 `prefetch=on/off` 两组。FullHBM 的 `on` 明确记录为 `disabled_fullhbm`（应等于 `off`），这是程序开关的空操作自检，不是预取收益测试。总共 6 个 Case；EventLab 暂不运行。
 - `on/off` 必须使用**同一计算 Partition、GEMM Tiling、Tensor 物理 Placement（同一 Backend 内）**，只有 Prefetch Engine 的启用状态不同；否则不能对比 Prefetch 的效果。
 - **总体墙钟时间上限 30 分钟**，启动全部 Case 的独立进程并发执行，未结束的进程在 Deadline 被标记 `TIMEOUT/SUSPECT_LOOP`。禁止只人工逐条运行命令。若单机并发导致内存不足，记录并采用受控 `MAX_PARALLEL` 重新执行，但不能删除失败记录，也不能默默改模型规模。
 - 记录每组 `Cycles`、`Wall`、Python/C++ 单独 CPU Time、Python/C++ 各自 Peak RSS、同时峰值 RSS、Prefetch counters、Data Check，输出简单 Markdown/CSV。

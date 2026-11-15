@@ -218,9 +218,9 @@ private:
             completed_.push_back({request.request_id, request.global_addr, request.tier, true,
                                   request.operation == MemoryOperation::Read ? request.size_bytes : 16,
                                   request.operation, 0,
-                                  request.operation == MemoryOperation::Read
-                                      ? request.shadow_digest
-                                      : 0});
+                                      request.operation == MemoryOperation::Read
+                                          ? memory_response_shadow_digest(request)
+                                          : 0});
             parents_.erase(burst.parent_id);
             ++stats_.completed_requests;
         }

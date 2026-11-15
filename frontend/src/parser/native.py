@@ -124,7 +124,7 @@ def step(node):
     )
     region = (
         A.SymbolicRegion(
-            name, tuple(map(A.IndexExpr, split_balanced(offsets))), seq(shape)
+            name, tuple(map(A.IndexExpr, split_balanced(offsets))), seq(shape), None
         )
         if name
         else None

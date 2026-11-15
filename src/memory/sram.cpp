@@ -9,6 +9,105 @@
 #include <tuple>
 namespace GTSim {
 namespace {
+// One SRAM-side FIFO owns queued descriptor handles and admission.  The
+// backend below supplies only reservation and fill callbacks.
+class HardwarePrefetchEngine {
+public:
+    static constexpr std::uint64_t queue_id_base = std::uint64_t{1} << 62;
+    struct Descriptor {
+        std::uint64_t address{}, bytes{}, token{};
+        std::optional<PrefetchBuffer> buffer;
+        int admission_cycle{-1};
+    };
+
+    HardwarePrefetchEngine(std::size_t capacity, bool cancel_on_miss)
+        : capacity_(capacity), cancel_on_miss_(cancel_on_miss) {}
+
+    std::uint64_t enqueue(std::uint64_t address, std::uint64_t bytes,
+                          std::optional<PrefetchBuffer> buffer) {
+        if (queued_.size() >= capacity_) return 0;
+        const auto id = next_id_++;
+        queued_.emplace(id, Descriptor{address, bytes, 0, buffer});
+        order_.push_back(id);
+        ++queued_total_;
+        return id;
+    }
+
+    template <class Reserve, class Start>
+    void advance(int now, std::uint64_t residency_epoch, Reserve reserve,
+                 Start start) {
+        if (admission_cycle_ == now) return;
+        admission_cycle_ = now;
+        while (!order_.empty()) {
+            const auto id = order_.front();
+            const auto found = queued_.find(id);
+            if (found == queued_.end()) {
+                order_.pop_front();
+                continue;
+            }
+            if (blocked_head_ == id && blocked_epoch_ == residency_epoch)
+                return;
+            const auto token = reserve(found->second);
+            if (!token) {
+                ++capacity_stalls_;
+                blocked_head_ = id;
+                blocked_epoch_ = residency_epoch;
+                return;
+            }
+            start(token);
+            found->second.token = token;
+            found->second.admission_cycle = now;
+            order_.pop_front();
+        }
+    }
+
+    std::uint64_t alias(std::uint64_t handle) const {
+        if (handle < queue_id_base) return handle;
+        const auto found = queued_.find(handle);
+        return found == queued_.end() ? 0 : found->second.token;
+    }
+
+    bool cancel(std::uint64_t handle, std::uint64_t address,
+                std::uint64_t bytes) {
+        if (!cancel_on_miss_ || handle < queue_id_base) return false;
+        const auto found = queued_.find(handle);
+        if (found == queued_.end() || found->second.token ||
+            address + bytes <= found->second.address ||
+            found->second.address + found->second.bytes <= address)
+            return false;
+        queued_.erase(found);
+        ++canceled_;
+        return true;
+    }
+
+    std::pair<bool, std::uint64_t> release(std::uint64_t handle) {
+        if (handle < queue_id_base) return {false, handle};
+        const auto found = queued_.find(handle);
+        if (found == queued_.end()) return {false, 0};
+        const auto token = found->second.token;
+        queued_.erase(found);
+        return {true, token};
+    }
+
+    std::uint64_t queued_total() const { return queued_total_; }
+    std::uint64_t capacity_stalls() const { return capacity_stalls_; }
+    std::uint64_t canceled() const { return canceled_; }
+    int admission_cycle(std::uint64_t handle) const {
+        const auto found = queued_.find(handle);
+        return found == queued_.end() ? -1 : found->second.admission_cycle;
+    }
+
+private:
+    std::size_t capacity_;
+    bool cancel_on_miss_;
+    std::uint64_t next_id_{queue_id_base};
+    std::uint64_t queued_total_{}, capacity_stalls_{}, canceled_{};
+    std::uint64_t blocked_head_{}, blocked_epoch_{};
+    int admission_cycle_{-1};
+    std::unordered_map<std::uint64_t, Descriptor> queued_;
+    std::deque<std::uint64_t> order_;
+};
+
 class SramBackend final : public MemoryBackend {
 public:
     SramBackend(std::unique_ptr<MemoryBackend> backend, const HBFConfig& config,
@@ -22,9 +121,9 @@ public:
           config.controller.base_die_sram_bytes_per_stack},
           enabled_(config.controller.enable_read_sram &&
                    config.prefetch_engine.enabled),
-          cancel_on_miss_(config.prefetch_engine.cancel_queued_on_demand_miss),
-          queue_capacity_(static_cast<std::size_t>(
-              std::max(1, config.prefetch_engine.queue_capacity))),
+          prefetch_engine_(static_cast<std::size_t>(
+                               std::max(1, config.prefetch_engine.queue_capacity)),
+                           config.prefetch_engine.cancel_queued_on_demand_miss),
           base_(base),
           interleave_(config.prefetch_hyperpage_order),
           lanes_(config.controller.planes_per_command_group),
@@ -162,59 +261,30 @@ public:
             address > std::numeric_limits<std::uint64_t>::max() - bytes)
             throw std::invalid_argument(
                 "queued prefetch requires enabled SRAM and an aligned range");
-        if (queued_.size() >= queue_capacity_)
-            throw std::runtime_error("prefetch descriptor queue is full");
         backend_->locate(address + bytes - 1);
-        const auto id = next_queue_id_++;
-        queued_.emplace(id, Queued{address, bytes, 0, buffer});
-        queue_order_.push_back(id);
-        ++queued_total_;
-        return id;
+        return prefetch_engine_.enqueue(address, bytes, buffer);
     }
 
     void advance_prefetch(int now) override {
-        if (admission_cycle_ == now) return;
-        admission_cycle_ = now;
-        while (!queue_order_.empty()) {
-            const auto id = queue_order_.front();
-            auto found = queued_.find(id);
-            if (found == queued_.end()) {
-                queue_order_.pop_front();
-                continue;
-            }
-            if (blocked_head_ == id && blocked_epoch_ == residency_epoch_)
-                return;
-            const auto token = reserve_prefetch(found->second.address,
-                                                found->second.bytes,
-                                                found->second.buffer);
-            if (!token) {
-                ++capacity_stalls_;
-                blocked_head_ = id;
-                blocked_epoch_ = residency_epoch_;
-                return;
-            }
-            start_prefetch(token);
-            found->second.token = token;
-            queue_order_.pop_front();
-        }
+        prefetch_engine_.advance(
+            now, residency_epoch_,
+            [this](const HardwarePrefetchEngine::Descriptor& descriptor) {
+                return reserve_prefetch(descriptor.address, descriptor.bytes,
+                                        descriptor.buffer);
+            },
+            [this](std::uint64_t token) { start_prefetch(token); });
     }
 
     std::uint64_t prefetch_alias(std::uint64_t handle) const override {
-        if (handle < queue_id_base) return handle;
-        const auto found = queued_.find(handle);
-        return found == queued_.end() ? 0 : found->second.token;
+        return prefetch_engine_.alias(handle);
+    }
+    int prefetch_admission_cycle(std::uint64_t handle) const override {
+        return prefetch_engine_.admission_cycle(handle);
     }
 
     void on_demand_miss(std::uint64_t handle, std::uint64_t address,
                         std::uint64_t bytes) override {
-        if (!cancel_on_miss_ || handle < queue_id_base) return;
-        const auto found = queued_.find(handle);
-        if (found == queued_.end() || found->second.token ||
-            address + bytes <= found->second.address ||
-            found->second.address + found->second.bytes <= address)
-            return;
-        queued_.erase(found);
-        ++canceled_;
+        prefetch_engine_.cancel(handle, address, bytes);
     }
 
     void start_prefetch(std::uint64_t token) override {
@@ -231,25 +301,19 @@ public:
     }
 
     bool prefetch_ready(std::uint64_t token) const override {
-        if (token >= queue_id_base) {
-            const auto found = queued_.find(token);
-            return found != queued_.end() && found->second.token &&
-                   prefetch_ready(found->second.token);
+        if (token >= HardwarePrefetchEngine::queue_id_base) {
+            const auto admitted = prefetch_engine_.alias(token);
+            return admitted && prefetch_ready(admitted);
         }
         const auto& region = regions_.at(token);
         return region.ready() && !region.released;
     }
 
     void release_prefetch(std::uint64_t token) override {
-        if (token >= queue_id_base) {
-            const auto found = queued_.find(token);
-            if (found == queued_.end()) return;
-            if (!found->second.token) {
-                queued_.erase(found);
-                return;
-            }
-            token = found->second.token;
-            queued_.erase(found);
+        if (token >= HardwarePrefetchEngine::queue_id_base) {
+            const auto [owned, admitted] = prefetch_engine_.release(token);
+            if (!owned || !admitted) return;
+            token = admitted;
         }
         auto& region = regions_.at(token);
         if (region.released)
@@ -263,9 +327,11 @@ public:
     }
 
     std::uint64_t prefetch_capacity_stalls() const override {
-        return capacity_stalls_;
+        return prefetch_engine_.capacity_stalls();
     }
-    std::uint64_t prefetch_canceled() const override { return canceled_; }
+    std::uint64_t prefetch_canceled() const override {
+        return prefetch_engine_.canceled();
+    }
 
     std::size_t pending_background_requests() const override {
         return active_fills_;
@@ -274,10 +340,12 @@ public:
         auto counters = backend_->device_counters();
         if (enabled_) {
             counters.cumulative["prefetch_bytes"] = prefetch_bytes_;
-            counters.cumulative["prefetch_queued"] = queued_total_;
+            counters.cumulative["prefetch_queued"] =
+                prefetch_engine_.queued_total();
             counters.cumulative["prefetch_started"] = started_fills_;
             counters.cumulative["prefetch_completed"] = completed_fills_;
-            counters.cumulative["prefetch_canceled"] = canceled_;
+            counters.cumulative["prefetch_canceled"] =
+                prefetch_engine_.canceled();
             counters.cumulative["resident_read_bytes"] = resident_read_bytes_;
             counters.cumulative["fallback_read_bytes"] = fallback_read_bytes_;
             counters.gauges["sram_reserved_bytes"] = reserved_bytes_;
@@ -313,12 +381,10 @@ private:
     std::unique_ptr<MemoryBackend> backend_;
     ReadSramAllocator::Config config_;
     bool enabled_;
-    bool cancel_on_miss_;
-    std::size_t queue_capacity_;
+    HardwarePrefetchEngine prefetch_engine_;
     std::uint64_t base_;
     bool interleave_;
     std::uint64_t lanes_, groups_;
-    static constexpr std::uint64_t queue_id_base = std::uint64_t{1} << 62;
     static constexpr std::uint64_t background_id_base = std::uint64_t{1} << 63;
     struct Fill {
         std::uint64_t address, bytes;
@@ -335,11 +401,6 @@ private:
             return started && submitted == bytes && !outstanding;
         }
     };
-    struct Queued {
-        std::uint64_t address{}, bytes{}, token{};
-        std::optional<PrefetchBuffer> buffer;
-    };
-
     void submit_background(int time) {
         while (!active_regions_.empty()) {
             const auto token = active_regions_.front();
@@ -404,20 +465,14 @@ private:
     std::map<std::uint64_t, Region> regions_;
     std::deque<std::uint64_t> active_regions_;
     std::unordered_map<std::uint64_t, std::uint64_t> background_;
-    std::unordered_map<std::uint64_t, Queued> queued_;
-    std::deque<std::uint64_t> queue_order_;
-    std::uint64_t next_token_{1}, next_queue_id_{queue_id_base},
-        next_background_id_{background_id_base};
+    std::uint64_t next_token_{1}, next_background_id_{background_id_base};
     std::uint64_t residency_epoch_{};
     std::uint64_t reserved_bytes_{}, peak_reserved_bytes_{};
     std::uint64_t started_fills_{}, completed_fills_{}, active_fills_{},
         peak_active_fills_{};
     std::uint64_t prefetch_bytes_{}, resident_read_bytes_{},
-        fallback_read_bytes_{}, queued_total_{};
+        fallback_read_bytes_{};
     std::unordered_map<std::uint64_t, MemRequest> pending_;
-    int admission_cycle_{-1};
-    std::uint64_t blocked_head_{}, blocked_epoch_{}, capacity_stalls_{},
-        canceled_{};
 };
 } // namespace
 std::unique_ptr<MemoryBackend>

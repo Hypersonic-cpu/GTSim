@@ -8,6 +8,8 @@ def index(expression):
 
 
 def dimension(value):
+    if isinstance(value, A.IndexExpr):
+        return value
     return index("%" + value if isinstance(value, str) else value)
 
 
@@ -16,7 +18,12 @@ def loop(name, extent):
 
 
 def region(source, row, column, shape):
-    return A.SymbolicRegion(source.tensor, (index(row), index(column)), shape)
+    return A.SymbolicRegion(
+        source.tensor,
+        (index(row), index(column)),
+        shape,
+        source.parent_row_stride,
+    )
 
 
 def _select(op, flow, operand_positions):
@@ -48,7 +55,8 @@ def _select(op, flow, operand_positions):
                 ),
                 op.results[0].dtype,
                 dimension(
-                    next(t for t in flow.tensors if t.id == source.tensor).shape[1]
+                    source.parent_row_stride
+                    or next(t for t in flow.tensors if t.id == source.tensor).shape[1]
                 ),
                 op.dependencies,
                 (),
@@ -129,7 +137,7 @@ def _select(op, flow, operand_positions):
                 (loop("chunk", f"ceildiv({bn},{mn})"),),
                 region(op.region, r, f"({c}) + %chunk*{mn}", (bm, mn)),
                 op.cast,
-                dimension(tensor.shape[1]),
+                dimension(op.region.parent_row_stride or tensor.shape[1]),
                 final,
                 (0,),
                 (),

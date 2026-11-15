@@ -177,7 +177,7 @@ private:
         return {request.request_id, request.global_addr, request.tier, true,
                 response_bytes, request.operation, 0,
                 request.operation == MemoryOperation::Read
-                    ? request.shadow_digest
+                    ? memory_response_shadow_digest(request)
                     : 0};
     }
 };
@@ -265,7 +265,10 @@ private:
                                        ? std::max(1, request.size_bytes)
                                        : kMemoryControlBytes;
         return {request.request_id, request.global_addr, request.tier, true,
-                response_bytes, request.operation};
+                response_bytes, request.operation, 0,
+                request.operation == MemoryOperation::Read
+                    ? memory_response_shadow_digest(request)
+                    : 0};
     }
 
     static void service_queue(std::deque<Request>& requests,

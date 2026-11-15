@@ -112,10 +112,8 @@ class PhysicalLayout:
         if page < 0:
             raise ValueError("negative physical page")
         lanes = self.planes_per_command_group
-        if self.address_mapping_policy == "linear_page":
-            per_stack = self.dies_per_stack * self.planes_per_die
-            stack, local = divmod(page, per_stack)
-            return stack % self.stacks, local
+        if self.address_mapping_policy != "megapage_round_robin":
+            raise ValueError("only megapage_round_robin is implemented by HBF backends")
         if lanes <= 0 or self.planes_per_die % lanes:
             raise ValueError("invalid grouped-plane geometry")
         group, lane = divmod(page, lanes)
@@ -223,14 +221,16 @@ def _element_bytes(tensor):
     return 2 if tensor.dtype in (A.DataType.BF16, A.DataType.FP16) else 4
 
 
-def _weight_rows(region, resolver, tensor):
+def _weight_rows(region, resolver, tensor, revealed_ids=None):
     k = _argument(resolver, region, "K")
     if k is None:
         return [(0, resolver.value(tensor.shape[0]))]
-    ids = _argument(resolver, region, "IDS")
-    if ids is None:
-        return [(0, k)]
-    return [(int(expert) * k, k) for expert in sorted(set(ids))]
+    # Expert IDs are unknown until the router kernel completes.  The
+    # conservative pre-reveal footprint is the complete parent tensor.  A
+    # trace-derived list may be supplied only by the post-router child pass.
+    if revealed_ids is None:
+        return [(0, resolver.value(tensor.shape[0]))]
+    return [(int(expert) * k, k) for expert in sorted(set(revealed_ids))]
 
 
 def _gemm_weight(region, global_tensors):
@@ -251,68 +251,103 @@ def _gemm_weight(region, global_tensors):
     return candidates[0]
 
 
-def _shift(region, names, offset):
-    if not offset:
+def _shift(region, names, offset, parent_row_stride):
+    if region.tensor not in names:
         return region
     offsets = list(region.offsets)
     if len(offsets) < 2:
         return region
-    offsets[1] = A.IndexExpr(f"({offsets[1].expression})+{offset}")
-    return replace(region, offsets=tuple(offsets)) if region.tensor in names else region
+    if offset:
+        offsets[1] = A.IndexExpr(f"({offsets[1].expression})+{offset}")
+    # The child shape is a logical view.  Keep the physical row stride of the
+    # parent tensor for both TMA loads and stores.
+    return replace(
+        region,
+        offsets=tuple(offsets),
+        parent_row_stride=region.parent_row_stride or A.IndexExpr(str(parent_row_stride)),
+    )
 
 
-def _partition_region(region, tensor, resolver, layout, policy, bases):
+def _partition_region(
+    region, tensor, resolver, layout, policy, bases, global_tensors,
+    revealed_ids=None,
+):
     n = _argument(resolver, region, "N")
     if n is None:
         return (region,), (), False
     shape = tuple(resolver.value(d) for d in tensor.shape)
-    rows, cols = shape
-    if n != cols:
-        cols = n
+    rows, parent_cols = shape
+    if n > parent_cols:
+        raise ValueError(f"{region.symbol}: GEMM N exceeds parent weight width")
     k = _argument(resolver, region, "K") or rows
-    row_ranges = _weight_rows(region, resolver, tensor)
+    row_ranges = _weight_rows(region, resolver, tensor, revealed_ids)
     element_bytes = _element_bytes(tensor)
     base_page = bases[tensor.id] // layout.page_bytes
-    def fits(width):
-        for row, height in row_ranges:
-            pages = {
-                (tensor.id, base_page + page)
-                for page in layout.pages_for_rows(
-                    rows, cols, element_bytes, row, 0, height, width
-                )
-            }
-            # Reuse the same capacity arithmetic as the SRAM allocator for
-            # each Expert view.  Grouped GEMM visits these views independently.
-            plane_limit = layout.sram_bytes_per_plane // policy.buffer_count
-            stack_limit = layout.base_die_sram_bytes_per_stack // policy.buffer_count
+    def footprint(col, width):
+        # All Expert rows which can be live in this N-slab share one SRAM
+        # reservation.  Capacity is therefore checked against their union,
+        # not one expert at a time.
+        return {
+            (tensor.id, base_page + page)
+            for row, height in row_ranges
+            for page in layout.pages_for_rows(
+                rows, parent_cols, element_bytes, row, col, height, width
+            )
+        }
+
+    def fits(col, width):
+        pages = footprint(col, width)
+        plane_pages = layout.sram_bytes_per_plane // layout.page_bytes
+        stack_limit = layout.base_die_sram_bytes_per_stack // policy.buffer_count
+        # ReadSramAllocator assigns whole pages to the plane first, using the
+        # selected double-buffer slot's round-robin remainder, then spills to
+        # the base die.  Check every slot: a reservation is legal only if the
+        # same N-slab can be admitted in either slot selected by the epoch.
+        for slot in range(policy.buffer_count):
             plane_used, stack_used = {}, {}
             for _, page in pages:
                 stack, plane = layout.location(page)
-                key = (stack, plane)
-                plane_used[key] = plane_used.get(key, 0) + layout.page_bytes
-            for (stack, _), value in plane_used.items():
-                stack_used[stack] = stack_used.get(stack, 0) + max(
-                    0, value - plane_limit
+                physical_plane = (
+                    stack * layout.dies_per_stack * layout.planes_per_die + plane
                 )
-            if any(value > stack_limit for value in stack_used.values()):
+                extra = int(
+                    (slot + policy.buffer_count - physical_plane % policy.buffer_count)
+                    % policy.buffer_count
+                    < plane_pages % policy.buffer_count
+                )
+                plane_limit = plane_pages // policy.buffer_count + extra
+                key = (stack, physical_plane)
+                plane_used[key] = plane_used.get(key, 0) + 1
+                if plane_used[key] > plane_limit:
+                    stack_used[stack] = stack_used.get(stack, 0) + 1
+            if any(
+                value > stack_limit // layout.page_bytes
+                for value in stack_used.values()
+            ):
                 return False
         return True
 
     if n <= policy.bn:
-        if not fits(n):
+        if not fits(0, n):
             raise ValueError(f"{region.symbol}: one GEMM BN does not fit SRAM slot")
         return (region,), (), False
 
-    max_width = 0
-    for width in range(policy.bn, n + 1, policy.bn):
-        if fits(width):
-            max_width = width
-    if not max_width:
-        raise ValueError(f"{region.symbol}: one GEMM BN does not fit SRAM slot")
     widths = []
     offset = 0
     while offset < n:
-        width = min(max_width, n - offset)
+        remaining = n - offset
+        width = min(policy.bn, remaining)
+        if not fits(offset, width):
+            raise ValueError(f"{region.symbol}: one GEMM BN does not fit SRAM slot")
+        # Keep the paper's greedy largest-fitting N slab, but test the actual
+        # physical column offset and the full Expert page union for every
+        # candidate.  The final tail is allowed only when its own footprint
+        # fits; no K-split or tiling search is introduced.
+        candidate = width
+        for probe in range(policy.bn, remaining + 1, policy.bn):
+            if fits(offset, probe):
+                candidate = probe
+        width = candidate
         widths.append((offset, width))
         offset += width
 
@@ -323,6 +358,11 @@ def _partition_region(region, tensor, resolver, layout, policy, bases):
         if op.region is not None
         and op.kind in (A.OpKind.MATRIX, A.OpKind.STORE)
         and op.region.tensor not in weight_names
+    }
+    row_strides = {
+        name: resolver.value(spec.shape[1])
+        for name, spec in global_tensors.items()
+        if name in weight_names | output_names
     }
     children, views = [], []
     for index, (col, width) in enumerate(widths):
@@ -337,7 +377,12 @@ def _partition_region(region, tensor, resolver, layout, policy, bases):
             replace(
                 op,
                 region=(
-                    _shift(op.region, weight_names | output_names, col)
+                    _shift(
+                        op.region,
+                        weight_names | output_names,
+                        col,
+                        row_strides.get(op.region.tensor, parent_cols),
+                    )
                     if op.region is not None
                     else None
                 ),
@@ -354,10 +399,65 @@ def _partition_region(region, tensor, resolver, layout, policy, bases):
         for row, height in row_ranges:
             views.append(
                 TensorPartitionView(
-                    tensor.id, row, col, height, width, cols
+                    tensor.id, row, col, height, width, parent_cols
                 )
             )
     return tuple(children), tuple(views), True
+
+
+def _split_selected_experts(region, resolver):
+    """Expose one B=1 direct expert at a time for real SRAM reuse.
+
+    The grouped/direct Qwen B=1 schedule carries one assignment per routed
+    expert.  Keeping all expert rows in one reservation would make the
+    double-buffer capacity check intentionally fail; splitting the existing
+    legal assignment list gives each child a real QueuePrefetch/Release
+    lifetime.  No routing prediction is introduced: the list is still only a
+    trace used when the router result is revealed by the runtime barrier.
+    """
+    if not region.symbol.startswith("expert_gemm"):
+        return ((region, None),)
+    if not _argument(resolver, region, "__program_guard"):
+        return ((region, None),)
+    ids = _argument(resolver, region, "IDS")
+    amap = _argument(resolver, region, "A_MAP")
+    cmap = _argument(resolver, region, "C_MAP")
+    if not ids or amap is None or cmap is None:
+        return ((region, None),)
+    groups = []
+    for index, expert in enumerate(ids):
+        group = next((item for item in groups if item[0] == expert), None)
+        if group is None:
+            group = [expert, []]
+            groups.append(group)
+        group[1].append(index)
+    if len(groups) <= 1:
+        return ((region, tuple(ids)),)
+    children = []
+    for expert, indices in groups:
+        values = {
+            "M": len(indices),
+            "IDS": [ids[index] for index in indices],
+            "A_MAP": [amap[index] for index in indices],
+            "C_MAP": [cmap[index] for index in indices],
+        }
+        arguments = tuple(
+            replace(item, expression=repr(values[item.id]))
+            if item.id in values
+            else item
+            for item in region.static.arguments
+        )
+        children.append(
+            (
+                replace(
+                    region,
+                    symbol=f"{region.symbol}__expert{expert}",
+                    static=replace(region.static, arguments=arguments),
+                ),
+                tuple(ids[index] for index in indices),
+            )
+        )
+    return tuple(children)
 
 
 def partition_flow(flow, policy: PartitionPolicy, layout: PhysicalLayout):
@@ -376,9 +476,26 @@ def partition_flow(flow, policy: PartitionPolicy, layout: PhysicalLayout):
             transformed.append(region)
             continue
         resolver = _region_resolver(region, root)
-        children, child_views, changed = _partition_region(
-            region, weight, resolver, layout, policy, bases
-        )
+        if _argument(resolver, region, "__program_guard") is False:
+            transformed.append(region)
+            continue
+        expert_regions = _split_selected_experts(region, resolver)
+        children, child_views, changed = [], [], False
+        for expert_region, revealed_ids in expert_regions:
+            expert_resolver = _region_resolver(expert_region, root)
+            parts, expert_views, expert_changed = _partition_region(
+                expert_region,
+                weight,
+                expert_resolver,
+                layout,
+                policy,
+                bases,
+                global_tensors,
+                revealed_ids,
+            )
+            children.extend(parts)
+            child_views.extend(expert_views)
+            changed |= expert_changed or expert_region is not region
         if not changed:
             transformed.append(region)
             continue

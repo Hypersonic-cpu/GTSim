@@ -2,6 +2,8 @@
 #include "memory/clock.h"
 #include <physical/simulation_session.hpp>
 #include <queue>
+#include <deque>
+#include <unordered_map>
 namespace GTSim {
 namespace {
 namespace f=hbfsim::physical;
@@ -13,7 +15,9 @@ class FlashLab final : public MemoryBackend {
     int capacity_;
     std::unique_ptr<f::SimulationSession> session_;
     struct Completion { double ps; MemRequest r; bool operator<(const Completion& b) const { return ps>b.ps; } };
+    struct Staged { MemRequest request; double arrival_ns; };
     std::priority_queue<Completion> pending_;
+    std::deque<Staged> staged_;
     MemoryBackendStatistics stats_;
 public:
     FlashLab(const HBFConfig& c,double frequency,std::uint64_t base):clock_(frequency,1),base_(base),capacity_(c.queue_capacity) {
@@ -52,36 +56,74 @@ public:
     }
     bool try_submit(const MemRequest& r,int now) override {
         if(r.size_bytes<=0 || r.global_addr<base_ || r.operation!=MemoryOperation::Read) throw std::invalid_argument("FlashLab static image requires valid reads");
-        if(pending_.size()>=static_cast<std::size_t>(capacity_)) { ++stats_.admission_retries; return false; }
+        if(pending_.size() + staged_.size() >=
+           static_cast<std::size_t>(capacity_)) {
+            ++stats_.admission_retries;
+            return false;
+        }
         const double at=clock_.first_edge_at_or_after(now)/1000.0;
-        if(at<origin_) throw std::logic_error("FlashLab arrival precedes frontier");
-        initialize();
-        f::SimulationTransaction t;
-        t.id=std::to_string(++sequence_); t.target=f::SimulationTarget::HbfStatic;
-        t.addr=r.global_addr-base_; t.bytes=r.size_bytes; t.issue_ns=at-origin_;
-        t.read_data_path=r.read_path==MemoryReadPath::Prefetch?f::ReadDataPath::Prefetch:
-            r.read_path==MemoryReadPath::Resident?f::ReadDataPath::Resident:f::ReadDataPath::Host;
-        f::SimulationBatchOptions options; options.frontier=std::vector<std::string>{};
-        auto result=session_->run_batch(t.id,{t},options);
-        origin_=result.blocking_finish_ns;
-        if(result.completions.size()!=1 || result.completions[0].finish_ns<at) throw std::runtime_error("invalid FlashLab completion");
-        pending_.push({result.completions[0].finish_ns*1000,r}); ++stats_.accepted_requests;
+        staged_.push_back({r, at});
+        ++stats_.accepted_requests;
         return true;
     }
     std::vector<MemResponse> step(int now) override {
+        if (!staged_.empty()) {
+            initialize();
+            const double at = clock_.first_edge_at_or_after(now) / 1000.0;
+            std::vector<f::SimulationTransaction> transactions;
+            std::vector<MemRequest> requests;
+            while (!staged_.empty() && staged_.front().arrival_ns <= at) {
+                const auto staged = staged_.front();
+                staged_.pop_front();
+                f::SimulationTransaction transaction;
+                transaction.id = std::to_string(++sequence_);
+                transaction.target = f::SimulationTarget::HbfStatic;
+                transaction.addr = staged.request.global_addr - base_;
+                transaction.bytes = staged.request.size_bytes;
+                transaction.issue_ns =
+                    std::max(0.0, staged.arrival_ns - origin_);
+                transaction.read_data_path =
+                    staged.request.read_path == MemoryReadPath::Prefetch
+                        ? f::ReadDataPath::Prefetch
+                    : staged.request.read_path == MemoryReadPath::Resident
+                        ? f::ReadDataPath::Resident
+                        : f::ReadDataPath::Host;
+                transactions.push_back(std::move(transaction));
+                requests.push_back(staged.request);
+            }
+            if (!transactions.empty()) {
+                f::SimulationBatchOptions options;
+                options.frontier = std::vector<std::string>{};
+                const auto result =
+                    session_->run_batch("gtsim-" + std::to_string(sequence_),
+                                        transactions, options);
+                origin_ = result.blocking_finish_ns;
+                if (result.completions.size() != requests.size())
+                    throw std::runtime_error("invalid FlashLab completion batch");
+                std::unordered_map<std::string, MemRequest> by_id;
+                for (std::size_t i = 0; i < transactions.size(); ++i)
+                    by_id.emplace(transactions[i].id, requests[i]);
+                for (const auto& completion : result.completions) {
+                    const auto request = by_id.at(completion.id);
+                    pending_.push({completion.finish_ns * 1000.0, request});
+                }
+            }
+        }
         std::vector<MemResponse> out;
         while(!pending_.empty() && pending_.top().ps<=clock_.ticks_at(now)) {
             auto r=pending_.top().r; pending_.pop();
             out.push_back({r.request_id, r.global_addr, r.tier, true,
                            r.size_bytes, r.operation, 0,
                            r.operation == MemoryOperation::Read
-                               ? r.shadow_digest
+                               ? memory_response_shadow_digest(r)
                                : 0});
             ++stats_.completed_requests;
         }
         return out;
     }
-    std::size_t pending_requests() const override { return pending_.size(); }
+    std::size_t pending_requests() const override {
+        return pending_.size() + staged_.size();
+    }
     bool supports_sram_paths() const override { return true; }
     MemoryLocation locate(std::uint64_t address) const override {
         if(address<base_ || address-base_>=raw_bytes_) throw std::invalid_argument("FlashLab SRAM address outside device");

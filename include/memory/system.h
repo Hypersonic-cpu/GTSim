@@ -118,8 +118,6 @@ public:
 
     std::vector<int> step(int current_cycle) {
         last_step_cycle_ = current_cycle;
-        if (hbm_) hbm_->advance_prefetch(current_cycle);
-        if (hbf_) hbf_->advance_prefetch(current_cycle);
         std::vector<int> completed = l2_->step(current_cycle);
         collect_l2_requests(current_cycle);
         launch_pending_requests(current_cycle);
@@ -220,6 +218,11 @@ public:
         if (alias.queue_id)
             return device(alias.tier).prefetch_ready(alias.queue_id);
         return alias.token && device(alias.tier).prefetch_ready(alias.token);
+    }
+
+    int prefetch_admission_cycle(const ReadAlias& alias) const {
+        const auto handle = alias.queue_id ? alias.queue_id : alias.token;
+        return device(alias.tier).prefetch_admission_cycle(handle);
     }
 
     void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
@@ -489,17 +492,18 @@ private:
             const auto bytes = static_cast<std::uint64_t>(
                 std::max(1, request.size_bytes));
             expected_digest = memory_shadow_digest(request.global_addr, bytes);
-            request.shadow_digest = expected_digest;
             for (const auto& [tensor_id, tensor] : tensors_.entries()) {
                 if (tensor.contains(request.global_addr) &&
                     bytes <= tensor.byte_size() &&
                     request.global_addr - tensor.global_base_address <=
                         tensor.byte_size() - bytes) {
+                    request.shadow_tensor_id = tensor_id;
+                    request.shadow_offset =
+                        request.global_addr - tensor.global_base_address;
                     expected_digest = memory_logical_shadow_digest(
                         tensor_id,
-                        request.global_addr - tensor.global_base_address,
+                        request.shadow_offset,
                         bytes);
-                    request.shadow_digest = expected_digest;
                     break;
                 }
             }
@@ -662,6 +666,8 @@ private:
         if (memory_config_.verify_memory_reads &&
             route.operation == MemoryOperation::Read &&
             (!response.completed || response.error_code ||
+             response.global_addr != route.address ||
+             response.tier != route.tier ||
              response.size_bytes != static_cast<int>(route.bytes) ||
              response.shadow_digest != route.expected_digest))
             read_audit_.mismatched_bytes += route.bytes;

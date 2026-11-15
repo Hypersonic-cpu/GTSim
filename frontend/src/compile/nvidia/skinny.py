@@ -44,7 +44,8 @@ def select_skinny(op, flow, positions):
                 box,
                 dtype,
                 dimension(
-                    next(t for t in flow.tensors if t.id == source.tensor).shape[1]
+                    source.parent_row_stride
+                    or next(t for t in flow.tensors if t.id == source.tensor).shape[1]
                 ),
                 op.dependencies,
                 (),
@@ -115,7 +116,10 @@ def select_skinny(op, flow, positions):
             op.iterations + chunks,
             box,
             op.cast,
-            dimension(next(t for t in flow.tensors if t.id == source.tensor).shape[1]),
+            dimension(
+                source.parent_row_stride
+                or next(t for t in flow.tensors if t.id == source.tensor).shape[1]
+            ),
             (),
             (0,),
             (),

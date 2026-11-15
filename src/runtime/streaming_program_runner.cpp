@@ -257,12 +257,23 @@ void StreamingProgramRunner::start_prefetch(const CommandDef& command) {
     assert(memory_);
     const auto& region = prefetch_regions_.at(command.target);
     if (command.kind == "QueuePrefetch") {
-        const auto inserted = aliases_.emplace(
-            command.target,
-            memory_->enqueue_prefetch(region.tensor, region.offset,
-                                      region.bytes, region.buffer)).second;
+        auto alias = memory_->enqueue_prefetch(region.tensor, region.offset,
+                                               region.bytes, region.buffer);
+        while (!alias.queue_id && simulator_->cycle < max_cycles_) {
+            memory_->step(++simulator_->cycle);
+            alias = memory_->enqueue_prefetch(region.tensor, region.offset,
+                                              region.bytes, region.buffer);
+        }
+        if (!alias.queue_id)
+            throw std::runtime_error("prefetch descriptor queue timed out");
+        const auto inserted = aliases_.emplace(command.target, alias).second;
         assert(inserted);
         (void)inserted;
+        const auto& tensor = registry_.at(region.tensor);
+        if (tensor.name == "W_gate_up" || tensor.name == "W_down") {
+            auto& cycle = timing_.prefetch_stats.first_expert_enqueue_cycle;
+            if (cycle < 0) cycle = simulator_->cycle;
+        }
         return;
     }
     const auto alias = memory_->reserve_prefetch(region.tensor, region.offset,
@@ -432,6 +443,22 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             timing_.per_kernel.push_back(launch_timing);
             simulator_->cycle = launch_timing.complete_cycle;
             timing_.total_cycles = simulator_->cycle;
+            if (launch.id == "router_softmax_topk") {
+                timing_.prefetch_stats.router_completion_cycle =
+                    launch_timing.complete_cycle;
+            }
+            for (const auto& [id, alias] : aliases_) {
+                const auto& definition = prefetch_regions_.at(id);
+                const auto& tensor = registry_.at(definition.tensor);
+                if (tensor.name != "W_gate_up" && tensor.name != "W_down")
+                    continue;
+                const auto admitted = memory_->prefetch_admission_cycle(alias);
+                if (admitted >= 0 &&
+                    (timing_.prefetch_stats.first_expert_admission_cycle < 0 ||
+                     admitted <
+                         timing_.prefetch_stats.first_expert_admission_cycle))
+                    timing_.prefetch_stats.first_expert_admission_cycle = admitted;
+            }
             ++stream_state_.completed_launches;
             stream_state_.last_completion_cycle = launch_timing.complete_cycle;
             transport_.send_json(make_typed_json(
@@ -506,8 +533,11 @@ ProgramTiming StreamingProgramRunner::run() {
                    << audit.digest_sum << std::setw(16) << audit.digest_xor;
             timing_.data_check.logical_read_digest = digest.str();
             timing_.data_check.shadow_payload_mode = "hash_or_bytewise";
-            timing_.data_check.partition_oracle_pass =
-                audit.mismatched_bytes == 0;
+            // A memory shadow match proves only that the requested byte
+            // ranges were served by the selected backend.  It is not a CPU
+            // GEMM/partition oracle, so that result is reported separately by
+            // the frontend oracle test and is never inferred here.
+            timing_.data_check.partition_oracle_pass = false;
         }
         const auto& hbf_counters = tier_stats.at(MemoryTier::HBF).device.cumulative;
         timing_.prefetch_stats.queued =

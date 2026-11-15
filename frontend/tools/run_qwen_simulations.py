@@ -106,6 +106,9 @@ def plan_program(
                 buffer_count=flashaccel_policy.buffer_count,
                 streaming=True,
                 address_mapping_policy=physical_layout.address_mapping_policy,
+                align_tensors_to_command_group=(
+                    physical_layout.align_tensors_to_command_group
+                ),
             )
             prefetch = optimize(
                 flow,
@@ -168,6 +171,13 @@ def run_streaming_interface(
     flashaccel=False,
 ):
     plan = make_program_plan(source_program, arch, regions, tensors, prefetch)
+    topology = memory_topology(args.memory)
+    requested_prefetch_mode = args.prefetch or "default"
+    effective_prefetch_mode = (
+        "disabled_fullhbm" if topology == "FullHBM"
+        else ("on" if prefetch is not None and prefetch.streaming is not None
+              else "off")
+    )
     producer = ExecutionIRProducer(
         arch, plan,
         {"prefetch_config": prefetch.streaming if prefetch is not None else None,
@@ -182,6 +192,9 @@ def run_streaming_interface(
         "version": "stream-v2",
         "params": params,
         "residency": residency,
+        "memory_topology": topology,
+        "requested_prefetch_mode": requested_prefetch_mode,
+        "effective_prefetch_mode": effective_prefetch_mode,
         "tensor_layouts": raw_layouts,
         "tensor_placements": placements,
         "focus_launch": args.focus_launch,
@@ -257,6 +270,9 @@ def run_streaming_interface(
     python_peak_rss_kib = int(python_after.ru_maxrss)
     cpp_peak_rss_kib = int(children_after.ru_maxrss)
     outcome = {"version": "stream-v2", "batch": params.get("B"), "program": plan.symbol,
+               "memory_topology": topology,
+               "requested_prefetch_mode": requested_prefetch_mode,
+               "effective_prefetch_mode": effective_prefetch_mode,
                "returncode": returncode, "elapsed_seconds": perf_counter() - start,
                "python_cpu_seconds": python_cpu_seconds,
                "cpp_cpu_seconds": cpp_cpu_seconds,

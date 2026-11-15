@@ -6,6 +6,7 @@
 #include "mem_conf.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 #include <functional>
 #include <map>
@@ -39,8 +40,15 @@ struct MemRequest {
     std::uint64_t read_alias{};
     MemoryReadPath read_path{MemoryReadPath::Host};
     // Validation-only expected digest.  Zero means that the backend should
-    // report the physical-address shadow digest instead.
+    // report the independently generated payload digest instead.  Backends
+    // must never copy this value into a response.
     std::uint64_t shadow_digest{};
+    // Validation-only logical identity.  MemorySystem fills these fields from
+    // the TensorRegistry; media backends use them to generate an independent
+    // shadow payload for a response while internal SRAM fills use -1 and the
+    // physical address instead.
+    int shadow_tensor_id{-1};
+    std::uint64_t shadow_offset{};
 };
 
 struct MemResponse {
@@ -78,6 +86,14 @@ inline std::uint64_t memory_logical_shadow_digest(int tensor_id,
                       0x9e3779b97f4a7c15ULL) ^
                      (offset + 0x517cc1b727220a95ULL);
     return memory_shadow_digest(key, bytes);
+}
+
+inline std::uint64_t memory_response_shadow_digest(const MemRequest& request) {
+    const auto bytes = static_cast<std::uint64_t>(std::max(1, request.size_bytes));
+    return request.shadow_tensor_id >= 0
+               ? memory_logical_shadow_digest(request.shadow_tensor_id,
+                                              request.shadow_offset, bytes)
+               : memory_shadow_digest(request.global_addr, bytes);
 }
 
 struct PrefetchBuffer {
@@ -133,6 +149,7 @@ public:
     virtual std::uint64_t prefetch_alias(std::uint64_t handle) const {
         return handle;
     }
+    virtual int prefetch_admission_cycle(std::uint64_t) const { return -1; }
     virtual void on_demand_miss(std::uint64_t, std::uint64_t,
                                 std::uint64_t) {}
     virtual void start_prefetch(std::uint64_t) {

@@ -178,8 +178,7 @@ inline void validate_memory_system_config(const MemorySystemConfig& config, doub
         !valid_capacity(config.hbf.queue_capacity)) {
         throw std::invalid_argument("invalid HBF memory configuration");
     }
-    if (config.hbf.address_mapping_policy != "megapage_round_robin" &&
-        config.hbf.address_mapping_policy != "linear_page") {
+    if (config.hbf.address_mapping_policy != "megapage_round_robin") {
         throw std::invalid_argument("invalid HBF address mapping policy");
     }
     if (config.hbf.prefetch_engine.queue_capacity <= 0 ||

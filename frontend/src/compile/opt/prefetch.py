@@ -41,7 +41,7 @@ class Residency:
             or self.page_bytes % self.line_bytes
             or min(self.plane_bytes, self.stack_bytes) < 0
             or not (self.plane_bytes or self.stack_bytes)
-            or self.address_mapping_policy not in ("megapage_round_robin", "linear_page")
+            or self.address_mapping_policy != "megapage_round_robin"
         ):
             raise ValueError("invalid residency geometry/capacity")
 
@@ -50,10 +50,8 @@ class Residency:
         return self.page_bytes * self.planes_per_group
 
     def location(self, page):
-        if self.address_mapping_policy == "linear_page":
-            per_stack = self.dies_per_stack * self.planes_per_die
-            stack, local = divmod(page, per_stack)
-            return stack % self.stacks, local
+        if self.address_mapping_policy != "megapage_round_robin":
+            raise ValueError("only megapage_round_robin is implemented by HBF backends")
         group, lane = divmod(page, self.planes_per_group)
         group %= self.stacks * self.dies_per_stack * (
             self.planes_per_die // self.planes_per_group
@@ -388,6 +386,7 @@ def optimize(flow, config, layouts=None, origin_launches=None):
         buffer_count=1,
     )
     regions, uses, gates, tails = [], [], [], {}
+    router_done = False
     for region in flow.regions:
         if any(name not in tails for name in region.after):
             raise ValueError(f"non-topological dependency in {region.symbol}")
@@ -397,7 +396,18 @@ def optimize(flow, config, layouts=None, origin_launches=None):
             tails[region.symbol] = after
             continue
         loads = eligible_loads(region, eligible)
-        gate = len(regions) if trace_dependent(region, loads, flow.static) else 0
+        trace_gate = trace_dependent(region, loads, flow.static)
+        if trace_gate and not router_done:
+            raise ValueError(
+                f"{region.symbol}: routing-dependent prefetch precedes router completion"
+            )
+        # QueuePrefetch is inserted at the launch index of this region.  For
+        # routing-dependent weights that index is therefore strictly after
+        # router_softmax_topk, while static weights retain their first-use
+        # order and can overlap earlier kernels.
+        gate = len(regions) if trace_gate else 0
+        if region.symbol == "router_softmax_topk":
+            router_done = True
         if config.streaming:
             # FlashAccel keeps partition decisions in the preceding pass, but
             # still needs compact page ranges for QueuePrefetch.  Do not split

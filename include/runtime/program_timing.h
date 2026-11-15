@@ -42,6 +42,9 @@ struct DataCheck {
 struct PrefetchStats {
     std::uint64_t queued{}, admitted{}, completed{}, resident_read_bytes{},
         fallback_read_bytes{}, canceled{};
+    int router_completion_cycle{-1};
+    int first_expert_enqueue_cycle{-1};
+    int first_expert_admission_cycle{-1};
 };
 
 struct ProgramTiming {

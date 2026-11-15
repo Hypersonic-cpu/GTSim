@@ -51,7 +51,7 @@ public:
                                  request.operation == MemoryOperation::Read ? request.size_bytes : 16,
                                  request.operation, static_cast<int>(completion.error),
                                  request.operation == MemoryOperation::Read
-                                     ? request.shadow_digest
+                                     ? memory_response_shadow_digest(request)
                                      : 0});
             pending_.erase(completion.request_id);
 
