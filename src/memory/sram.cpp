@@ -161,7 +161,7 @@ public:
         auto routed = request;
         if (request.read_alias) {
             const auto& region = regions_.at(request.read_alias);
-            bool ready = true;
+            bool ready = !region.failed;
             const auto last = (request.global_addr + request.size_bytes - 1) /
                               config_.page_bytes;
             for (auto page = request.global_addr / config_.page_bytes;
@@ -197,11 +197,13 @@ public:
                     response.global_addr != address ||
                     response.size_bytes != static_cast<int>(bytes))
                     region.failed = true;
+                assert(region.outstanding > 0);
                 --region.outstanding;
                 if (!region.failed)
                     region.ready_pages.insert(response.global_addr /
                                               config_.page_bytes);
-                if (!region.outstanding) {
+                if (region.fill_retired()) {
+                    assert(active_fills_ > 0);
                     --active_fills_;
                     if (region.ready()) ++completed_fills_;
                 }
@@ -409,6 +411,10 @@ private:
         bool ready() const {
             return started && !failed && submitted == bytes && !outstanding;
         }
+        bool fill_retired() const {
+            return !started ||
+                   (!outstanding && (failed || submitted == bytes));
+        }
     };
     struct Background {
         std::uint64_t token{}, address{}, bytes{};
@@ -422,6 +428,10 @@ private:
                 continue;
             }
             auto& region = found->second;
+            if (region.failed) {
+                active_regions_.pop_front();
+                continue;
+            }
             while (region.submitted < region.bytes) {
                 const auto address =
                     interleave_ ? region.fills.at(region.next_fill).address
@@ -457,7 +467,7 @@ private:
     void reclaim(std::uint64_t token) {
         const auto& region = regions_.at(token);
         if (!region.released || region.consumers ||
-            (region.started && !region.ready() && !region.failed))
+            !region.fill_retired())
             return;
         sram_.release(region.reservation);
         reserved_bytes_ -= region.reservation.pages.size() * config_.page_bytes;
