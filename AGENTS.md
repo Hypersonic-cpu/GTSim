@@ -7,6 +7,7 @@ GTSim is a C++23 tile-centric GPU simulator. `include/` contains public headers;
 You may read the paper [GPU-Tile-Sim: A Tile-Centric GPU Simulation Framework for LLM Hardware-Software Co-Design](https://arxiv.org/abs/2607.11262) if necessary for simulator algorithm confusion.
 
 ### Version Control
+
 The `AGENTS.md` should be machine-independent, describing only about this project. Absolute path should NOT be used in this file.
 Read and write machine-local agent information in `AGENTS.local.md` which is auto excluded by Git.
 

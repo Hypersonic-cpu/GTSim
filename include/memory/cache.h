@@ -27,7 +27,8 @@ public:
     int memory_queue_depth;
 
     // Read queue (for ld.sram2reg and cp.dram2sram)
-    std::vector<std::tuple<std::vector<int>, int, int>> memory_queue;  // (node_ids, bytes, complete_cycle)
+    std::vector<std::tuple<std::vector<int>, int, int>>
+        memory_queue; // (node_ids, bytes, complete_cycle)
     int memory_occupied_until;
 
     // Write queue (for st.reg2sram - separate port)
@@ -41,18 +42,24 @@ public:
     int num_loads_with_conflicts;
 
     Memory(int latency, int bandwidth, int depth)
-        : memory_latency(latency), memory_bandwidth(bandwidth),
-          memory_queue_depth(depth), memory_occupied_until(0),
-          memory_write_queue_depth(depth), memory_write_bandwidth(bandwidth),
-          memory_write_occupied_until(0), total_bank_conflict_cycles(0),
+        : memory_latency(latency),
+          memory_bandwidth(bandwidth),
+          memory_queue_depth(depth),
+          memory_occupied_until(0),
+          memory_write_queue_depth(depth),
+          memory_write_bandwidth(bandwidth),
+          memory_write_occupied_until(0),
+          total_bank_conflict_cycles(0),
           num_loads_with_conflicts(0) {}
 
     // Check if queue is full
     bool is_full(bool is_write = false) const {
         if (is_write) {
-            return memory_write_queue.size() >= static_cast<size_t>(memory_write_queue_depth);
+            return memory_write_queue.size() >=
+                   static_cast<size_t>(memory_write_queue_depth);
         } else {
-            return memory_queue.size() >= static_cast<size_t>(memory_queue_depth);
+            return memory_queue.size() >=
+                   static_cast<size_t>(memory_queue_depth);
         }
     }
 
@@ -60,14 +67,16 @@ public:
     bool enqueue(int node_id, int bytes_val, int current_cycle,
                  int bank_conflict_factor = 0, bool is_write = false) {
         if (is_write) {
-            return enqueue_write({node_id}, bytes_val, current_cycle, bank_conflict_factor);
+            return enqueue_write({node_id}, bytes_val, current_cycle,
+                                 bank_conflict_factor);
         }
         // Track bank conflict statistics (only for reads)
         if (bank_conflict_factor > 0) {
             total_bank_conflict_cycles += bank_conflict_factor;
             num_loads_with_conflicts++;
         }
-        return enqueue_read({node_id}, bytes_val, current_cycle, bank_conflict_factor);
+        return enqueue_read({node_id}, bytes_val, current_cycle,
+                            bank_conflict_factor);
     }
 
     // Process queues and return completed node IDs
@@ -77,13 +86,19 @@ public:
         // Compact in place: retain request order without allocating and copying
         // every pending request's node-ID vector on every cycle.
         const auto drain = [&](auto& queue) {
-            queue.erase(std::remove_if(queue.begin(), queue.end(), [&](const auto& entry) {
-                const auto& [node_ids, bytes_val, complete_cycle] = entry;
-                (void)bytes_val;
-                if (current_cycle < complete_cycle) return false;
-                completed.insert(completed.end(), node_ids.begin(), node_ids.end());
-                return true;
-            }), queue.end());
+            queue.erase(std::remove_if(queue.begin(), queue.end(),
+                                       [&](const auto& entry) {
+                                           const auto& [node_ids, bytes_val,
+                                                        complete_cycle] = entry;
+                                           (void)bytes_val;
+                                           if (current_cycle < complete_cycle)
+                                               return false;
+                                           completed.insert(completed.end(),
+                                                            node_ids.begin(),
+                                                            node_ids.end());
+                                           return true;
+                                       }),
+                        queue.end());
         };
         drain(memory_queue);
         drain(memory_write_queue);
@@ -105,13 +120,15 @@ private:
             T_queuing = memory_occupied_until - (current_cycle + T_frontend);
         }
 
-        int T_data = static_cast<int>(std::ceil(static_cast<double>(bytes_val) / memory_bandwidth));
+        int T_data = static_cast<int>(
+            std::ceil(static_cast<double>(bytes_val) / memory_bandwidth));
         int T_bank_conflict = bank_conflict_factor;
 
         int T_sum = T_frontend + T_queuing + T_data + T_bank_conflict;
         int complete_cycle = current_cycle + T_sum;
 
-        memory_occupied_until = current_cycle + T_frontend + T_queuing + T_data + T_bank_conflict;
+        memory_occupied_until =
+            current_cycle + T_frontend + T_queuing + T_data + T_bank_conflict;
         memory_queue.push_back({node_ids, bytes_val, complete_cycle});
 
         return true;
@@ -126,15 +143,18 @@ private:
         int T_queuing = 0;
 
         if (current_cycle + T_frontend < memory_write_occupied_until) {
-            T_queuing = memory_write_occupied_until - (current_cycle + T_frontend);
+            T_queuing =
+                memory_write_occupied_until - (current_cycle + T_frontend);
         }
 
-        int T_data = static_cast<int>(std::ceil(static_cast<double>(bytes_val) / memory_write_bandwidth));
+        int T_data = static_cast<int>(
+            std::ceil(static_cast<double>(bytes_val) / memory_write_bandwidth));
         int T_bank_conflict = bank_conflict_factor;
         int T_sum = T_frontend + T_queuing + T_data + T_bank_conflict;
         int complete_cycle = current_cycle + T_sum;
 
-        memory_write_occupied_until = current_cycle + T_frontend + T_queuing + T_data + T_bank_conflict;
+        memory_write_occupied_until =
+            current_cycle + T_frontend + T_queuing + T_data + T_bank_conflict;
         memory_write_queue.push_back({node_ids, bytes_val, complete_cycle});
 
         return true;
@@ -156,7 +176,8 @@ inline int tile_total_elements(const Tile& tile) {
     return tile.element_count();
 }
 
-inline void compute_matrix_strides(const DAGNode& node, int ndims, int* strides) {
+inline void compute_matrix_strides(const DAGNode& node, int ndims,
+                                   int* strides) {
     for (int i = 0; i < Tile::kMaxDims; ++i) {
         strides[i] = 0;
     }
@@ -207,7 +228,8 @@ inline bool has_explicit_strides(const DAGNode& node, int ndims) {
     return ndims > 0;
 }
 
-inline void compute_dim_order(const DAGNode& node, const int* strides, int ndims, int* order) {
+inline void compute_dim_order(const DAGNode& node, const int* strides,
+                              int ndims, int* order) {
     for (int i = 0; i < ndims; ++i) {
         order[i] = i;
     }
@@ -237,9 +259,9 @@ inline void compute_sram_address_params(const DAGNode& node, int& elem_bytes,
     compute_matrix_strides(node, ndims, strides);
 }
 
-inline std::uint64_t compute_sram_element_addr(const DAGNode& node, int linear_index,
-                                               int elem_bytes, const int* strides,
-                                               int ndims) {
+inline std::uint64_t compute_sram_element_addr(const DAGNode& node,
+                                               int linear_index, int elem_bytes,
+                                               const int* strides, int ndims) {
     std::uint64_t elem_index = 0;
     int remaining = linear_index;
     int order[Tile::kMaxDims];
@@ -262,7 +284,8 @@ inline int get_access_granularity_bytes(const DAGNode& node) {
     return 4;
 }
 
-inline int compute_sram_subops(const DAGNode& node, int access_granularity_bytes,
+inline int compute_sram_subops(const DAGNode& node,
+                               int access_granularity_bytes,
                                std::vector<int>* subop_bytes = nullptr,
                                std::vector<int>* subop_conflicts = nullptr) {
     constexpr int kBankWidthBytes = 4;
@@ -291,8 +314,10 @@ inline int compute_sram_subops(const DAGNode& node, int access_granularity_bytes
     compute_sram_address_params(node, elem_bytes, strides, ndims);
     int total_elements = tile_total_elements(node.tile);
 
-    int access_bytes = access_granularity_bytes > 0 ? access_granularity_bytes : 4;
-    int elems_per_thread = std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
+    int access_bytes =
+        access_granularity_bytes > 0 ? access_granularity_bytes : 4;
+    int elems_per_thread =
+        std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
     int elems_per_subop = 32 * elems_per_thread;
     int subops = (total_elements + elems_per_subop - 1) / elems_per_subop;
 
@@ -322,8 +347,8 @@ inline int compute_sram_subops(const DAGNode& node, int access_granularity_bytes
                         if (linear >= total_elements) {
                             break;
                         }
-                        std::uint64_t addr =
-                            compute_sram_element_addr(node, linear, elem_bytes, strides, ndims);
+                        std::uint64_t addr = compute_sram_element_addr(
+                            node, linear, elem_bytes, strides, ndims);
                         if (elem_bytes < kBankWidthBytes) {
                             std::uint64_t word_addr = addr / kBankWidthBytes;
                             int capacity = kBankWidthBytes / elem_bytes;
@@ -332,11 +357,14 @@ inline int compute_sram_subops(const DAGNode& node, int access_granularity_bytes
                             }
                             word_counts[word_addr] += 1;
                         } else {
-                            int words = (elem_bytes + kBankWidthBytes - 1) / kBankWidthBytes;
+                            int words = (elem_bytes + kBankWidthBytes - 1) /
+                                        kBankWidthBytes;
                             for (int w = 0; w < words; ++w) {
-                                int bank = static_cast<int>(((addr + static_cast<std::uint64_t>(w) *
-                                                             kBankWidthBytes) /
-                                                             kBankWidthBytes) % kBankCount);
+                                int bank = static_cast<int>(
+                                    ((addr + static_cast<std::uint64_t>(w) *
+                                                 kBankWidthBytes) /
+                                     kBankWidthBytes) %
+                                    kBankCount);
                                 if (bank_used[bank]) {
                                     conflicts++;
                                 } else {
@@ -354,7 +382,8 @@ inline int compute_sram_subops(const DAGNode& node, int access_granularity_bytes
     return std::max(1, subops);
 }
 
-inline int compute_sram_subop_bytes(const DAGNode& node, int access_granularity_bytes,
+inline int compute_sram_subop_bytes(const DAGNode& node,
+                                    int access_granularity_bytes,
                                     int subop_index) {
     if (subop_index < 0) {
         return 0;
@@ -367,7 +396,8 @@ inline int compute_sram_subop_bytes(const DAGNode& node, int access_granularity_
     return subop_bytes[static_cast<size_t>(subop_index)];
 }
 
-inline int compute_sram_subop_conflict(const DAGNode& node, int access_granularity_bytes,
+inline int compute_sram_subop_conflict(const DAGNode& node,
+                                       int access_granularity_bytes,
                                        int subop_index) {
     if (subop_index < 0) {
         return 0;
@@ -376,7 +406,8 @@ inline int compute_sram_subop_conflict(const DAGNode& node, int access_granulari
         return 0;
     }
     std::vector<int> subop_conflicts;
-    compute_sram_subops(node, access_granularity_bytes, nullptr, &subop_conflicts);
+    compute_sram_subops(node, access_granularity_bytes, nullptr,
+                        &subop_conflicts);
     if (subop_index >= static_cast<int>(subop_conflicts.size())) {
         return 0;
     }
@@ -385,7 +416,8 @@ inline int compute_sram_subop_conflict(const DAGNode& node, int access_granulari
 
 struct CacheLineKey {
     int matrix_id;
-    std::uint64_t line_addr;  // Tensor-relative line address retained for diagnostics.
+    std::uint64_t
+        line_addr; // Tensor-relative line address retained for diagnostics.
     std::uint64_t global_line_addr;
 
     bool operator==(const CacheLineKey& other) const {
@@ -407,26 +439,31 @@ struct L2Access {
     MemoryTier tier;
 };
 
-inline int compute_dram_subops(const DAGNode& node, int access_granularity_bytes) {
+inline int compute_dram_subops(const DAGNode& node,
+                               int access_granularity_bytes) {
     if (node.tile.empty()) {
         return 1;
     }
     int elem_bytes = node.element_size_bytes();
-    int access_bytes = access_granularity_bytes > 0 ? access_granularity_bytes : 4;
-    int elems_per_thread = std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
+    int access_bytes =
+        access_granularity_bytes > 0 ? access_granularity_bytes : 4;
+    int elems_per_thread =
+        std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
     int elems_per_subop = 32 * elems_per_thread;
     int total_elements = tile_total_elements(node.tile);
     int subops = (total_elements + elems_per_subop - 1) / elems_per_subop;
     return std::max(1, subops);
 }
 
-inline int compute_dram_subops(const DAGNode& node, int access_granularity_bytes,
-                               int elem_bytes) {
+inline int compute_dram_subops(const DAGNode& node,
+                               int access_granularity_bytes, int elem_bytes) {
     if (node.tile.empty()) {
         return 1;
     }
-    int access_bytes = access_granularity_bytes > 0 ? access_granularity_bytes : 4;
-    int elems_per_thread = std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
+    int access_bytes =
+        access_granularity_bytes > 0 ? access_granularity_bytes : 4;
+    int elems_per_thread =
+        std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
     int elems_per_subop = 32 * elems_per_thread;
     int total_elements = tile_total_elements(node.tile);
     int subops = (total_elements + elems_per_subop - 1) / elems_per_subop;
@@ -440,12 +477,13 @@ inline std::uint64_t compute_global_element_addr(const DAGNode& node,
     if (ndims <= 0 || ndims > Tile::kMaxDims ||
         static_cast<std::size_t>(ndims) != tensor.shape.size() ||
         tensor.strides.size() != tensor.shape.size()) {
-        throw std::invalid_argument("tensor rank does not match tile rank for node '" +
-                                    node.name + "'");
+        throw std::invalid_argument(
+            "tensor rank does not match tile rank for node '" + node.name +
+            "'");
     }
     if (linear_index < 0 || linear_index >= tile_total_elements(node.tile)) {
-        throw std::out_of_range("tile element index is out of range for node '" +
-                                node.name + "'");
+        throw std::out_of_range(
+            "tile element index is out of range for node '" + node.name + "'");
     }
 
     if (const auto& layout = tensor.tile_major) {
@@ -486,7 +524,8 @@ inline std::uint64_t compute_global_element_addr(const DAGNode& node,
         if (tensor_index < 0 ||
             static_cast<std::uint64_t>(tensor_index) >=
                 tensor.shape[static_cast<std::size_t>(dim_index)]) {
-            throw std::out_of_range("tile exceeds tensor bounds for node '" + node.name + "'");
+            throw std::out_of_range("tile exceeds tensor bounds for node '" +
+                                    node.name + "'");
         }
         element_offset += static_cast<std::uint64_t>(tensor_index) *
                           tensor.strides[static_cast<std::size_t>(dim_index)];
@@ -494,25 +533,28 @@ inline std::uint64_t compute_global_element_addr(const DAGNode& node,
 
     const std::uint64_t elem_bytes =
         static_cast<std::uint64_t>(bytes_per_element(tensor.dtype));
-    if (element_offset >
-        (std::numeric_limits<std::uint64_t>::max() - tensor.global_base_address) / elem_bytes) {
-        throw std::overflow_error("global tensor element address overflows uint64_t");
+    if (element_offset > (std::numeric_limits<std::uint64_t>::max() -
+                          tensor.global_base_address) /
+                             elem_bytes) {
+        throw std::overflow_error(
+            "global tensor element address overflows uint64_t");
     }
     return tensor.global_base_address + element_offset * elem_bytes;
 }
 
-inline std::vector<CacheLineKey> compute_dram_subop_lines(const DAGNode& node,
-                                                          const TensorMetadata& tensor,
-                                                          int access_granularity_bytes,
-                                                          int subop_index,
-                                                          int line_size_bytes) {
+inline std::vector<CacheLineKey>
+compute_dram_subop_lines(const DAGNode& node, const TensorMetadata& tensor,
+                         int access_granularity_bytes, int subop_index,
+                         int line_size_bytes) {
     std::vector<CacheLineKey> lines;
     if (node.tile.empty() || subop_index < 0 || line_size_bytes <= 0) {
         return lines;
     }
     const int elem_bytes = bytes_per_element(tensor.dtype);
-    int access_bytes = access_granularity_bytes > 0 ? access_granularity_bytes : 4;
-    int elems_per_thread = std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
+    int access_bytes =
+        access_granularity_bytes > 0 ? access_granularity_bytes : 4;
+    int elems_per_thread =
+        std::max(1, (access_bytes + elem_bytes - 1) / elem_bytes);
     int elems_per_subop = 32 * elems_per_thread;
     int total_elements = tile_total_elements(node.tile);
     int base_idx = subop_index * elems_per_subop;
@@ -550,14 +592,17 @@ inline std::vector<CacheLineKey> compute_dram_subop_lines(const DAGNode& node,
             if (linear >= total_elements) {
                 break;
             }
-            const std::uint64_t addr = compute_global_element_addr(node, tensor, linear);
+            const std::uint64_t addr =
+                compute_global_element_addr(node, tensor, linear);
             const std::uint64_t global_line_addr =
                 (addr / static_cast<std::uint64_t>(line_size_bytes)) *
                 static_cast<std::uint64_t>(line_size_bytes);
             if (seen.insert(global_line_addr).second) {
-                const std::uint64_t relative_addr = addr - tensor.global_base_address;
+                const std::uint64_t relative_addr =
+                    addr - tensor.global_base_address;
                 const std::uint64_t line_addr =
-                    (relative_addr / static_cast<std::uint64_t>(line_size_bytes)) *
+                    (relative_addr /
+                     static_cast<std::uint64_t>(line_size_bytes)) *
                     static_cast<std::uint64_t>(line_size_bytes);
                 lines.push_back({node.matrix_id, line_addr, global_line_addr});
             }
@@ -588,7 +633,8 @@ public:
         : line_size_bytes(line_size_bytes),
           hit_latency_cycles(hit_latency_cycles),
           l2_bandwidth_bytes_per_cycle(l2_bandwidth_bytes_per_cycle),
-          l2_write_bandwidth_bytes_per_cycle(l2_write_bandwidth_bytes_per_cycle),
+          l2_write_bandwidth_bytes_per_cycle(
+              l2_write_bandwidth_bytes_per_cycle),
           l2_queue_depth(l2_queue_depth),
           bypass_cache(bypass_cache),
           max_lines(static_cast<size_t>(cache_size_bytes / line_size_bytes)),
@@ -599,8 +645,12 @@ public:
                static_cast<size_t>(l2_queue_depth);
     }
 
-    int get_line_size_bytes() const { return line_size_bytes; }
-    std::size_t resident_line_count() const { return cache.size(); }
+    int get_line_size_bytes() const {
+        return line_size_bytes;
+    }
+    std::size_t resident_line_count() const {
+        return cache.size();
+    }
 
     int get_transaction_count(const DAGNode& node) const {
         return get_total_transaction_count(node);
@@ -623,21 +673,27 @@ public:
     }
 
     bool enqueue_transaction(const DAGNode& node, bool is_write, int index) {
-        return enqueue_transaction_key(node.id, get_transaction_key(node, index), is_write);
+        return enqueue_transaction_key(
+            node.id, get_transaction_key(node, index), is_write);
     }
 
-    bool enqueue_transaction_key(int node_id, const CacheLineKey& key, bool is_write) {
+    bool enqueue_transaction_key(int node_id, const CacheLineKey& key,
+                                 bool is_write) {
         if (!can_accept_transaction()) {
             return false;
         }
-        if (key.global_line_addr % static_cast<std::uint64_t>(line_size_bytes) != 0) {
-            throw std::invalid_argument("L2 transaction address is not cache-line aligned");
+        if (key.global_line_addr %
+                static_cast<std::uint64_t>(line_size_bytes) !=
+            0) {
+            throw std::invalid_argument(
+                "L2 transaction address is not cache-line aligned");
         }
         const auto tier = tensors.resolve_tier(key.global_line_addr);
-        tensors.validate_access(key.global_line_addr, line_size_bytes, tier, is_write);
-        const L2Access access{node_id, key, line_size_bytes,
-                              is_write ? MemoryOperation::Write : MemoryOperation::Read,
-                              tier};
+        tensors.validate_access(key.global_line_addr, line_size_bytes, tier,
+                                is_write);
+        const L2Access access{
+            node_id, key, line_size_bytes,
+            is_write ? MemoryOperation::Write : MemoryOperation::Read, tier};
         if (is_write) {
             l2_queue_write.push_back(access);
         } else {
@@ -660,15 +716,17 @@ public:
         return std::max(1, total);
     }
 
-    std::vector<CacheLineKey> get_subop_lines(const DAGNode& node, int subop_index) const {
+    std::vector<CacheLineKey> get_subop_lines(const DAGNode& node,
+                                              int subop_index) const {
         const TensorMetadata& tensor = tensors.at(node.matrix_id);
         if (node.tile.empty()) {
-            return subop_index == 0 ? std::vector<CacheLineKey>{tensor_base_key(node)}
-                                    : std::vector<CacheLineKey>{};
+            return subop_index == 0
+                       ? std::vector<CacheLineKey>{tensor_base_key(node)}
+                       : std::vector<CacheLineKey>{};
         }
-        auto lines = compute_dram_subop_lines(node, tensor,
-                                              get_access_granularity_bytes(node),
-                                              subop_index, line_size_bytes);
+        auto lines = compute_dram_subop_lines(
+            node, tensor, get_access_granularity_bytes(node), subop_index,
+            line_size_bytes);
         const int factor = get_coalesce_factor(node);
         if (factor <= 1 || lines.empty()) {
             return lines;
@@ -687,13 +745,16 @@ public:
         std::vector<int> completed;
         // Both hit and response paths append at the current cycle plus the
         // same fixed L2 latency. Completion times are therefore nondecreasing.
-        while (!completion_queue.empty() && completion_queue.front().second <= current_cycle) {
+        while (!completion_queue.empty() &&
+               completion_queue.front().second <= current_cycle) {
             completed.push_back(completion_queue.front().first);
             completion_queue.pop_front();
         }
 
-        const int total_budget_tx = l2_bandwidth_bytes_per_cycle / line_size_bytes;
-        int write_budget_tx = l2_write_bandwidth_bytes_per_cycle / line_size_bytes;
+        const int total_budget_tx =
+            l2_bandwidth_bytes_per_cycle / line_size_bytes;
+        int write_budget_tx =
+            l2_write_bandwidth_bytes_per_cycle / line_size_bytes;
         if (write_budget_tx > total_budget_tx) {
             write_budget_tx = total_budget_tx;
         }
@@ -722,7 +783,8 @@ public:
 
     bool idle() const {
         return l2_queue_read.empty() && l2_queue_write.empty() &&
-               mshr.empty() && backend_requests.empty() && completion_queue.empty();
+               mshr.empty() && backend_requests.empty() &&
+               completion_queue.empty();
     }
 
     std::vector<MemRequest> take_backend_requests() {
@@ -733,30 +795,36 @@ public:
 
     void handle_response(const MemResponse& response, int current_cycle) {
         if (!response.completed) {
-            throw std::runtime_error("memory backend failed request " + std::to_string(response.request_id) +
-                                     " with error " + std::to_string(response.error_code));
+            throw std::runtime_error("memory backend failed request " +
+                                     std::to_string(response.request_id) +
+                                     " with error " +
+                                     std::to_string(response.error_code));
         }
-        const auto request_it = backend_request_to_line.find(response.request_id);
+        const auto request_it =
+            backend_request_to_line.find(response.request_id);
         if (request_it == backend_request_to_line.end()) {
-            return;  // A writeback has no L2 waiter.
+            return; // A writeback has no L2 waiter.
         }
 
         const CacheLineKey key = request_it->second;
         if (response.global_addr != key.global_line_addr) {
-            throw std::runtime_error("memory response address does not match its request");
+            throw std::runtime_error(
+                "memory response address does not match its request");
         }
         const auto mshr_it = mshr.find(key);
         if (mshr_it == mshr.end() ||
             mshr_it->second.backend_request_id != response.request_id ||
             mshr_it->second.tier != response.tier) {
-            throw std::runtime_error("memory response does not match an active L2 MSHR");
+            throw std::runtime_error(
+                "memory response does not match an active L2 MSHR");
         }
 
         if (!bypass_cache && max_lines > 0 && mshr_it->second.any_read) {
             insert_line(key, mshr_it->second.any_write);
         }
         for (const auto& access : mshr_it->second.waiting) {
-            completion_queue.push_back({access.node_id, current_cycle + hit_latency_cycles});
+            completion_queue.push_back(
+                {access.node_id, current_cycle + hit_latency_cycles});
         }
         backend_request_to_line.erase(request_it);
         mshr.erase(mshr_it);
@@ -784,13 +852,15 @@ private:
 
     CacheLineKey tensor_base_key(const DAGNode& node) const {
         const TensorMetadata& tensor = tensors.at(node.matrix_id);
-        const std::uint64_t line_size = static_cast<std::uint64_t>(line_size_bytes);
+        const std::uint64_t line_size =
+            static_cast<std::uint64_t>(line_size_bytes);
         const std::uint64_t global_line_addr =
             (tensor.global_base_address / line_size) * line_size;
         return {node.matrix_id, 0, global_line_addr};
     }
 
-    void process_access(const L2Access& access, int current_cycle, bool cache_enabled) {
+    void process_access(const L2Access& access, int current_cycle,
+                        bool cache_enabled) {
         if (cache_enabled) {
             const auto cache_it = cache.find(access.line);
             if (cache_it != cache.end()) {
@@ -798,7 +868,8 @@ private:
                 if (access.operation == MemoryOperation::Write) {
                     cache_it->second.dirty = true;
                 }
-                completion_queue.push_back({access.node_id, current_cycle + hit_latency_cycles});
+                completion_queue.push_back(
+                    {access.node_id, current_cycle + hit_latency_cycles});
                 return;
             }
         }
@@ -825,7 +896,8 @@ private:
         MemoryRoutingHint routing;
         routing.consumer_node = access.node_id;
         backend_requests.push_back({request_id, access.line.global_line_addr,
-                                    access.size_bytes, access.operation, access.tier, routing});
+                                    access.size_bytes, access.operation,
+                                    access.tier, routing});
     }
 
     void touch_lru(const CacheLineKey& key) {
@@ -852,9 +924,10 @@ private:
             const auto victim_it = cache.find(victim);
             if (victim_it != cache.end()) {
                 if (victim_it->second.dirty) {
-                    backend_requests.push_back({next_request_id++, victim.global_line_addr,
-                                                line_size_bytes, MemoryOperation::Writeback,
-                                                tensors.resolve_tier(victim.global_line_addr)});
+                    backend_requests.push_back(
+                        {next_request_id++, victim.global_line_addr,
+                         line_size_bytes, MemoryOperation::Writeback,
+                         tensors.resolve_tier(victim.global_line_addr)});
                 }
                 cache.erase(victim_it);
             }
@@ -883,7 +956,6 @@ private:
     }
 };
 
-
 inline constexpr int kMemoryControlBytes = 16;
 
 struct TierMemoryStatistics {
@@ -894,7 +966,8 @@ struct TierMemoryStatistics {
     std::uint64_t write_bytes{};
     std::uint64_t completed_requests{};
     std::uint64_t total_latency_cycles{};
-    std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
+    std::uint64_t read_completions{}, read_latency_cycles{},
+        unadmitted_alias_read_bytes{};
 
     double average_latency_cycles() const {
         return completed_requests == 0
@@ -927,4 +1000,4 @@ struct MemorySystemStatistics {
 // HBM controller with a shared read/write data path and an additional write
 // throughput ceiling. Bandwidth is expressed in bytes per GPU core cycle.
 
-}
+} // namespace GTSim

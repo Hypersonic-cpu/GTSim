@@ -34,8 +34,8 @@ void write_all(int fd, const void* source, std::size_t bytes) {
     const auto* input = static_cast<const char*>(source);
     std::size_t offset = 0;
     while (offset < bytes) {
-        const auto result = ::send(fd, input + offset, bytes - offset,
-                                   MSG_NOSIGNAL);
+        const auto result =
+            ::send(fd, input + offset, bytes - offset, MSG_NOSIGNAL);
         if (result < 0) {
             if (errno == EINTR) continue;
             throw std::runtime_error(std::string("stream send failed: ") +
@@ -61,7 +61,8 @@ void write_length(std::array<std::uint8_t, 4>& bytes, std::uint32_t value) {
 } // namespace
 
 FramedTransport::FramedTransport(int socket_fd, std::size_t max_frame)
-    : socket_fd_(socket_fd), max_frame_(max_frame) {
+    : socket_fd_(socket_fd),
+      max_frame_(max_frame) {
     if (socket_fd_ < 0 || max_frame_ == 0 ||
         max_frame_ > std::numeric_limits<std::uint32_t>::max())
         throw std::invalid_argument("invalid stream transport configuration");
@@ -80,8 +81,8 @@ Message FramedTransport::receive() {
     std::string json(length, '\0');
     read_all(socket_fd_, json.data(), json.size());
     Envelope envelope{};
-    constexpr auto options =
-        glz::opts{.error_on_unknown_keys = false, .error_on_missing_keys = false};
+    constexpr auto options = glz::opts{.error_on_unknown_keys = false,
+                                       .error_on_missing_keys = false};
     if (auto error = glz::read<options>(envelope, json))
         throw std::invalid_argument("invalid stream JSON: " +
                                     glz::format_error(error, json));
@@ -90,11 +91,13 @@ Message FramedTransport::receive() {
     return {std::move(envelope.type), std::move(json)};
 }
 
-void FramedTransport::send(const Message& message) { send_json(message.json); }
+void FramedTransport::send(const Message& message) {
+    send_json(message.json);
+}
 
 void FramedTransport::send_json(std::string_view json) {
-    if (json.empty() || json.size() > max_frame_ || json.size() >
-                                               std::numeric_limits<std::uint32_t>::max())
+    if (json.empty() || json.size() > max_frame_ ||
+        json.size() > std::numeric_limits<std::uint32_t>::max())
         throw std::invalid_argument("stream frame exceeds configured limit");
     std::array<std::uint8_t, 4> header{};
     write_length(header, static_cast<std::uint32_t>(json.size()));
@@ -117,7 +120,8 @@ std::string json_quote(std::string_view value) {
             if (static_cast<unsigned char>(ch) < 0x20) {
                 constexpr char hex[] = "0123456789abcdef";
                 result += "\\u00";
-                result.push_back(hex[(static_cast<unsigned char>(ch) >> 4) & 0xf]);
+                result.push_back(
+                    hex[(static_cast<unsigned char>(ch) >> 4) & 0xf]);
                 result.push_back(hex[static_cast<unsigned char>(ch) & 0xf]);
             } else {
                 result.push_back(ch);

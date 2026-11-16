@@ -3,10 +3,10 @@
 namespace GTSim {
 
 // Route a completed remote access back to the originating subpartition
-static void route_completion_to_origin(int node_id, int src_sm_id,
-                                        int current_cycle,
-                                        std::vector<Subpartition*>* node_id_to_sp,
-                                        std::vector<SM*>& sms) {
+static void
+route_completion_to_origin(int node_id, int src_sm_id, int current_cycle,
+                           std::vector<Subpartition*>* node_id_to_sp,
+                           std::vector<SM*>& sms) {
     if (!node_id_to_sp || node_id < 0 ||
         node_id >= static_cast<int>(node_id_to_sp->size())) {
         return;
@@ -30,14 +30,14 @@ static bool enqueue_forward_to_destination_sram(
         return true;
     }
 
-    bool enqueued = sms[dst]->sram->enqueue(req.node_id, req.bytes, current_cycle,
-                                            req.bank_conflict, req.is_write);
+    bool enqueued = sms[dst]->sram->enqueue(
+        req.node_id, req.bytes, current_cycle, req.bank_conflict, req.is_write);
     if (!enqueued) {
         return false;
     }
 
-    NoCPendingEntry entry{req.node_id, req.src_sm_id, req.dst_sm_id,
-                          req.bytes, req.bank_conflict};
+    NoCPendingEntry entry{req.node_id, req.src_sm_id, req.dst_sm_id, req.bytes,
+                          req.bank_conflict};
     if (req.is_write) {
         pending_remote_writes.insert({req.node_id, entry});
     } else {
@@ -53,7 +53,8 @@ void GPU::step(int current_cycle) {
         if (node_id_to_sp && node_id >= 0 &&
             node_id < static_cast<int>(node_id_to_sp->size())) {
             if (auto* sp = (*node_id_to_sp)[node_id]) {
-                bool finished = sp->handle_memory_completion(node_id, current_cycle);
+                bool finished =
+                    sp->handle_memory_completion(node_id, current_cycle);
                 if (finished && node_id_to_sm &&
                     node_id < static_cast<int>(node_id_to_sm->size())) {
                     int sm_id = (*node_id_to_sm)[node_id];
@@ -71,9 +72,9 @@ void GPU::step(int current_cycle) {
         while (forward_retry_count-- > 0) {
             NoCForwardRetryEntry retry = forward_to_sram_retry_queue.front();
             forward_to_sram_retry_queue.pop_front();
-            if (!enqueue_forward_to_destination_sram(
-                    retry.req, current_cycle, sms,
-                    pending_remote_reads, pending_remote_writes)) {
+            if (!enqueue_forward_to_destination_sram(retry.req, current_cycle,
+                                                     sms, pending_remote_reads,
+                                                     pending_remote_writes)) {
                 forward_to_sram_retry_queue.push_back(retry);
             }
         }
@@ -87,8 +88,8 @@ void GPU::step(int current_cycle) {
                 // Forward complete: enqueue to target SM's SRAM.
                 // If SRAM is full, keep request and retry next cycle.
                 if (!enqueue_forward_to_destination_sram(
-                        req, current_cycle, sms,
-                        pending_remote_reads, pending_remote_writes)) {
+                        req, current_cycle, sms, pending_remote_reads,
+                        pending_remote_writes)) {
                     forward_to_sram_retry_queue.push_back({req});
                 }
             } else {
@@ -127,9 +128,9 @@ void GPU::step(int current_cycle) {
                 if (read_it != pending_remote_reads.end()) {
                     const auto& entry = read_it->second;
                     // Enqueue return: data travels from dst_sm back to src_sm
-                    if (!noc->enqueue_return(entry.node_id, entry.src_sm_id,
-                                             entry.dst_sm_id, entry.bytes,
-                                             entry.bank_conflict, current_cycle)) {
+                    if (!noc->enqueue_return(
+                            entry.node_id, entry.src_sm_id, entry.dst_sm_id,
+                            entry.bytes, entry.bank_conflict, current_cycle)) {
                         return_retry_queue.push_back({entry});
                     }
                     pending_remote_reads.erase(read_it);
@@ -142,7 +143,8 @@ void GPU::step(int current_cycle) {
                 if (write_it != pending_remote_writes.end()) {
                     const auto& entry = write_it->second;
                     route_completion_to_origin(entry.node_id, entry.src_sm_id,
-                                               current_cycle, node_id_to_sp, sms);
+                                               current_cycle, node_id_to_sp,
+                                               sms);
                     pending_remote_writes.erase(write_it);
                 }
             }

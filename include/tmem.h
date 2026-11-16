@@ -77,7 +77,8 @@ public:
         }
         if (node->warp_id >= 0 &&
             node->warp_id < static_cast<int>(next_issue_cycle.size())) {
-            next_issue_cycle[node->warp_id] = current_cycle + std::max(1, issue_interval_cycles);
+            next_issue_cycle[node->warp_id] =
+                current_cycle + std::max(1, issue_interval_cycles);
         }
 
         if (node->op_type == OpType::TCGEN05_ALLOC) {
@@ -97,7 +98,6 @@ public:
             }
             return;
         }
-
     }
 
     void on_complete(const DAGNode* node) {
@@ -239,8 +239,10 @@ private:
     std::unordered_map<int, int> cta_pair_issue_seq;
     std::unordered_map<int, int> node_pair_seq;
 
-    inline static std::unordered_map<PairKey, PairSlot, PairKeyHash> pair_pending{};
-    inline static std::unordered_map<PairKey, PairIssueState, PairKeyHash> pair_issue_pending{};
+    inline static std::unordered_map<PairKey, PairSlot, PairKeyHash>
+        pair_pending{};
+    inline static std::unordered_map<PairKey, PairIssueState, PairKeyHash>
+        pair_issue_pending{};
     inline static std::unordered_map<int, int> node_issue_grant_cycle{};
     inline static std::unordered_map<int, int> release_tokens{};
 };

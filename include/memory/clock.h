@@ -18,18 +18,21 @@ public:
         }
         const auto frequency_khz = static_cast<std::uint64_t>(
             std::llround(core_frequency_mhz * 1000.0));
-        if (!frequency_khz) throw std::invalid_argument("core frequency is too small");
+        if (!frequency_khz)
+            throw std::invalid_argument("core frequency is too small");
         denominator_ = frequency_khz * static_cast<std::uint64_t>(tick_ps);
     }
 
     std::uint64_t ticks_at(int core_cycle) const {
         if (core_cycle < 0) throw std::invalid_argument("negative core cycle");
-        return static_cast<std::uint64_t>(core_cycle) * 1000000000ULL / denominator_;
+        return static_cast<std::uint64_t>(core_cycle) * 1000000000ULL /
+               denominator_;
     }
 
     std::uint64_t first_edge_at_or_after(int core_cycle) const {
         if (core_cycle < 0) throw std::invalid_argument("negative core cycle");
-        const auto numerator = static_cast<std::uint64_t>(core_cycle) * 1000000000ULL;
+        const auto numerator =
+            static_cast<std::uint64_t>(core_cycle) * 1000000000ULL;
         return numerator / denominator_ + (numerator % denominator_ != 0);
     }
 

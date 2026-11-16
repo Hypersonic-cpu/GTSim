@@ -369,7 +369,8 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             active_dag = std::move(built.dag);
             std::vector<MemorySystem::ReadAlias> bindings;
             for (const auto& name : launch.read_aliases) {
-                if (const auto found = aliases_.find(name); found != aliases_.end())
+                if (const auto found = aliases_.find(name);
+                    found != aliases_.end())
                     bindings.push_back(found->second);
             }
             memory_->bind_read_aliases(std::move(bindings));
@@ -478,9 +479,9 @@ void StreamingProgramRunner::execute_command(const CommandDef& command) {
             memory_->release_prefetch(active->second);
             aliases_.erase(active);
         } else {
-            const auto deferred = std::find(deferred_prefetches_.begin(),
-                                            deferred_prefetches_.end(),
-                                            command.target);
+            const auto deferred =
+                std::find(deferred_prefetches_.begin(),
+                          deferred_prefetches_.end(), command.target);
             assert(deferred != deferred_prefetches_.end());
             deferred_prefetches_.erase(deferred);
         }
@@ -522,11 +523,11 @@ ProgramTiming StreamingProgramRunner::run() {
         }
         timing_.persistent_gpu = timing_.persistent_memory =
             timing_.persistent_l2 = timing_.stable_allocations = true;
-        const auto& hbf_counters = tier_stats.at(MemoryTier::HBF).device.cumulative;
-        timing_.prefetch_stats.queued =
-            hbf_counters.contains("prefetch_queued")
-                ? hbf_counters.at("prefetch_queued")
-                : 0;
+        const auto& hbf_counters =
+            tier_stats.at(MemoryTier::HBF).device.cumulative;
+        timing_.prefetch_stats.queued = hbf_counters.contains("prefetch_queued")
+                                            ? hbf_counters.at("prefetch_queued")
+                                            : 0;
         timing_.prefetch_stats.admitted =
             hbf_counters.contains("prefetch_started")
                 ? hbf_counters.at("prefetch_started")

@@ -25,41 +25,41 @@ const std::unordered_map<std::string_view, std::string_view>&
 KernelGraphBuilder::supported_ops() {
     static const std::unordered_map<std::string_view, std::string_view> values =
         {{"cp.dram2sram_tma", "LD"},
-        {"cp.sram2dram_tma", "ST"},
-        {"st.reg2sram", "ST"},
-        {"wgmma.m64n64k16", "Tensor"},
-        {"mma.sync.m16n8k16", "Tensor"},
-        {"local_max", "SIMD"},
-        {"reduce_max", "SIMD"},
-        {"merge_max", "SIMD"},
-        {"local_sum", "SIMD"},
-        {"reduce_sum", "SIMD"},
-        {"merge_sum", "SIMD"},
-        {"logsum", "SIMD"},
-        {"acc_o_scale", "SIMD"},
-        {"acc_s_cast", "SIMD"},
-        {"shfl_max", "SHFL"},
-        {"shfl_sum", "SHFL"},
-        {"scores_scale", "SFU"},
-        {"exp2", "SFU"},
-        {"acc_o_div", "SFU"},
-        {"simd.add", "SIMD"},
-        {"simd.sub", "SIMD"},
-        {"simd.mul", "SIMD"},
-        {"simd.fma", "SIMD"},
-        {"simd.max", "SIMD"},
-        {"simd.min", "SIMD"},
-        {"simd.cast", "SIMD"},
-        {"simd.fill", "SIMD"},
-        {"simd.identity", "SIMD"},
-        {"sfu.exp", "SFU"},
-        {"sfu.log", "SFU"},
-        {"sfu.sqrt", "SFU"},
-        {"sfu.rsqrt", "SFU"},
-        {"sfu.divide", "SFU"},
-        {"sfu.sin", "SFU"},
-        {"sfu.cos", "SFU"},
-        {"shfl", "SHFL"}};
+         {"cp.sram2dram_tma", "ST"},
+         {"st.reg2sram", "ST"},
+         {"wgmma.m64n64k16", "Tensor"},
+         {"mma.sync.m16n8k16", "Tensor"},
+         {"local_max", "SIMD"},
+         {"reduce_max", "SIMD"},
+         {"merge_max", "SIMD"},
+         {"local_sum", "SIMD"},
+         {"reduce_sum", "SIMD"},
+         {"merge_sum", "SIMD"},
+         {"logsum", "SIMD"},
+         {"acc_o_scale", "SIMD"},
+         {"acc_s_cast", "SIMD"},
+         {"shfl_max", "SHFL"},
+         {"shfl_sum", "SHFL"},
+         {"scores_scale", "SFU"},
+         {"exp2", "SFU"},
+         {"acc_o_div", "SFU"},
+         {"simd.add", "SIMD"},
+         {"simd.sub", "SIMD"},
+         {"simd.mul", "SIMD"},
+         {"simd.fma", "SIMD"},
+         {"simd.max", "SIMD"},
+         {"simd.min", "SIMD"},
+         {"simd.cast", "SIMD"},
+         {"simd.fill", "SIMD"},
+         {"simd.identity", "SIMD"},
+         {"sfu.exp", "SFU"},
+         {"sfu.log", "SFU"},
+         {"sfu.sqrt", "SFU"},
+         {"sfu.rsqrt", "SFU"},
+         {"sfu.divide", "SFU"},
+         {"sfu.sin", "SFU"},
+         {"sfu.cos", "SFU"},
+         {"shfl", "SHFL"}};
     return values;
 }
 
@@ -84,8 +84,7 @@ void KernelGraphBuilder::begin(KernelHeader header) {
     assert(!header.tensor_bindings.empty());
     std::vector<int> ids(header.tensor_bindings.size(), -1);
     for (const auto& [local, global] : header.tensor_bindings) {
-        assert(local >= 0 &&
-               static_cast<std::size_t>(local) < ids.size());
+        assert(local >= 0 && static_cast<std::size_t>(local) < ids.size());
         (void)global_tensors_.at(global);
         auto& bound = ids[static_cast<std::size_t>(local)];
         assert(bound < 0);
@@ -147,7 +146,8 @@ void KernelGraphBuilder::add_instruction(const Instruction& op) {
 #endif
 #ifndef NDEBUG
     const auto supported = supported_ops().find(op.op);
-    assert(supported != supported_ops().end() && supported->second == op.pipeline);
+    assert(supported != supported_ops().end() &&
+           supported->second == op.pipeline);
 #endif
     const auto dtype = parse_dtype(op.dtype);
     assert(op.tile[0] >= 0 && op.tile[1] >= 0 && op.tile[2] > 0 &&
@@ -155,8 +155,7 @@ void KernelGraphBuilder::add_instruction(const Instruction& op) {
 
 #ifndef NDEBUG
     for (const auto* list : {&op.after_issue, &op.after_complete})
-        for (const int dep : *list)
-            assert(dep >= 0 && dep < op.id);
+        for (const int dep : *list) assert(dep >= 0 && dep < op.id);
 #endif
 
     assert(op.tensor >= 0 &&
@@ -245,10 +244,11 @@ BuiltKernel KernelGraphBuilder::finish(const KernelEnd& end) {
         }
         for (const auto& range : window.ranges) {
             assert(range.tensor >= 0 &&
-                   static_cast<std::size_t>(range.tensor) < tensor_ids_.size() &&
+                   static_cast<std::size_t>(range.tensor) <
+                       tensor_ids_.size() &&
                    range.bytes != 0);
-            const auto& tensor =
-                global_tensors_.at(tensor_ids_[static_cast<std::size_t>(range.tensor)]);
+            const auto& tensor = global_tensors_.at(
+                tensor_ids_[static_cast<std::size_t>(range.tensor)]);
             assert(range.offset <= tensor.byte_size() &&
                    range.bytes <= tensor.byte_size() - range.offset);
         }

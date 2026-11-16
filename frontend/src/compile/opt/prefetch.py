@@ -53,8 +53,10 @@ class Residency:
         if self.address_mapping_policy != "megapage_round_robin":
             raise ValueError("only megapage_round_robin is implemented by HBF backends")
         group, lane = divmod(page, self.planes_per_group)
-        group %= self.stacks * self.dies_per_stack * (
-            self.planes_per_die // self.planes_per_group
+        group %= (
+            self.stacks
+            * self.dies_per_stack
+            * (self.planes_per_die // self.planes_per_group)
         )
         stack = group % self.stacks
         die_group = group // self.stacks
@@ -138,6 +140,7 @@ class PrefetchPlan:
     streaming: Residency | None = None
     bases: dict[str, int] | None = None
     origin_launches: dict[str, tuple[str, ...]] | None = None
+
 
 def scope(region, root):
     arguments = {a.id: root.value(a.expression) for a in region.static.arguments}
@@ -421,8 +424,9 @@ def optimize(flow, config, layouts=None, origin_launches=None):
                 if layout := layouts.get(tensor):
                     pages.update(
                         (tensor, page)
-                        for page in layout.pages(shapes[tensor][1], row, col,
-                                                 height, width)
+                        for page in layout.pages(
+                            shapes[tensor][1], row, col, height, width
+                        )
                     )
                     continue
                 size = widths[tensor]
@@ -480,6 +484,5 @@ def optimize(flow, config, layouts=None, origin_launches=None):
         tuple(queue),
         config if config.streaming else None,
         bases if config.streaming else None,
-        origin_launches
-        or {region.symbol: (region.symbol,) for region in regions},
+        origin_launches or {region.symbol: (region.symbol,) for region in regions},
     )

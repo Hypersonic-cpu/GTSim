@@ -98,11 +98,11 @@ public:
             auto session_ = std::make_unique<e::SimulationSession>(
                 e::resolve_configuration(cfg));
             auto limits = session_->run_limits();
-        // GTSim owns the lifetime/cycle budget. Native absolute limits would
-        // otherwise include setup time and halt an online session silently.
+            // GTSim owns the lifetime/cycle budget. Native absolute limits would
+            // otherwise include setup time and halt an online session silently.
             limits.max_tick.reset();
             limits.events.total_events = 0;
-        session_->set_run_limits(limits);
+            session_->set_run_limits(limits);
             session_->set_completion_handler([this](
                                                  const e::GlobalCompletion& c) {
                 if (setup_) {
@@ -121,8 +121,8 @@ public:
                                   parent.failed ? 1 : 0});
                 pending_.erase(parent_id);
                 ++stats_.completed_requests;
-        });
-        sessions_.push_back(std::move(session_));
+            });
+            sessions_.push_back(std::move(session_));
         }
         batches_.resize(stacks_);
         per_channel_.resize(channels_);
@@ -190,7 +190,7 @@ public:
             if (cap.limit && fragments > cap.limit - cap.resident) {
                 ++stats_.admission_retries;
                 return false;
-        }
+            }
         }
         const auto parent = next_;
         pending_.emplace(parent, Parent{r, children});
@@ -245,7 +245,7 @@ public:
             d.cumulative["external_request_bytes"] += s.external_request_bytes;
             d.cumulative["external_response_bytes"] +=
                 s.external_response_bytes;
-    }
+        }
         d.cumulative["setup_bytes"] = setup_bytes_;
         d.cumulative["setup_ps"] = offset_;
         return d;

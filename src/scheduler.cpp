@@ -28,7 +28,7 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
 
     if (node->total_transactions > 0 &&
         node->next_transaction_index >= node->total_transactions) {
-        return nullptr;  // All sub-ops already issued
+        return nullptr; // All sub-ops already issued
     }
 
     // Check if node is ready (event-driven dependency tracking)
@@ -38,7 +38,7 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
 
     // Check if node's warp is resident (O(1) flag check)
     if (!warp_is_resident[node->warp_id]) {
-        return nullptr;  // Warp's TB not resident, cannot issue
+        return nullptr; // Warp's TB not resident, cannot issue
     }
 
     if (is_tmem_op(node)) {
@@ -52,9 +52,9 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
     }
     if (is_memory_op(node) && node->setup_latency > 0) {
         int idx = memory_op_index(node);
-        if (idx >= 0 &&
-            node->warp_id >= 0 &&
-            node->warp_id < static_cast<int>(memory_next_issue_cycle[idx].size()) &&
+        if (idx >= 0 && node->warp_id >= 0 &&
+            node->warp_id <
+                static_cast<int>(memory_next_issue_cycle[idx].size()) &&
             current_cycle < memory_next_issue_cycle[idx][node->warp_id]) {
             return nullptr;
         }
@@ -62,26 +62,23 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
 
     // Check memory queue availability for ld/st operations (using enum for fast dispatch)
     switch (node->op_type) {
-        case OpType::LD_SRAM2REG:
-            if (sram->is_full(false)) {
-                return nullptr;
-            }
-            break;
-        case OpType::ST_REG2SRAM:
-            if (sram->is_full(true)) {
-                return nullptr;
-            }
-            break;
-        case OpType::LD_SRAM2REG_DSM:
-        case OpType::ST_REG2SRAM_DSM:
-            break;
-        case OpType::LD_DRAM2REG:
-        case OpType::ST_REG2DRAM:
-        case OpType::CP_DRAM2SRAM:
-        case OpType::CP_SRAM2DRAM:
-            break;
-        default:
-            break;
+    case OpType::LD_SRAM2REG:
+        if (sram->is_full(false)) {
+            return nullptr;
+        }
+        break;
+    case OpType::ST_REG2SRAM:
+        if (sram->is_full(true)) {
+            return nullptr;
+        }
+        break;
+    case OpType::LD_SRAM2REG_DSM:
+    case OpType::ST_REG2SRAM_DSM: break;
+    case OpType::LD_DRAM2REG:
+    case OpType::ST_REG2DRAM:
+    case OpType::CP_DRAM2SRAM:
+    case OpType::CP_SRAM2DRAM: break;
+    default: break;
     }
 
     // Find pipeline using O(1) hash map lookup
@@ -101,7 +98,7 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
     } else {
         auto pipe_it = pipeline_map.find(node->pipeline_type);
         if (pipe_it == pipeline_map.end()) {
-            return nullptr;  // Pipeline not found
+            return nullptr; // Pipeline not found
         }
         pipe = pipe_it->second;
     }
@@ -112,9 +109,10 @@ Pipeline* Scheduler::node_ready_and_pipe(DAGNode* node, int current_cycle,
     return pipe;
 }
 
-std::pair<DAGNode*, Pipeline*> Scheduler::try_issue_from_warp(
-    int warp_id, int current_cycle, std::vector<Pipeline*>& pipelines,
-    Memory* sram, L2Cache* l2) {
+std::pair<DAGNode*, Pipeline*>
+Scheduler::try_issue_from_warp(int warp_id, int current_cycle,
+                               std::vector<Pipeline*>& pipelines, Memory* sram,
+                               L2Cache* l2) {
 
     if (warp_id >= scheduler_warp_num) {
         return {nullptr, nullptr};
@@ -164,10 +162,12 @@ std::pair<DAGNode*, Pipeline*> Scheduler::try_issue_from_warp(
         ready_queue.pop_front();
         return {candidate_node, nullptr};
     }
-    if (is_group_issued_op(candidate_node) && node_issue_group_size(candidate_node) > 1) {
+    if (is_group_issued_op(candidate_node) &&
+        node_issue_group_size(candidate_node) > 1) {
         return {nullptr, nullptr};
     }
-    Pipeline* pipe = node_ready_and_pipe(candidate_node, current_cycle, pipelines, sram, l2);
+    Pipeline* pipe =
+        node_ready_and_pipe(candidate_node, current_cycle, pipelines, sram, l2);
 
     if (pipe != nullptr) {
         ready_queue.pop_front();
@@ -181,16 +181,18 @@ std::pair<DAGNode*, Pipeline*> Scheduler::try_issue_from_warp(
         if (last_pipeline.has_value()) {
             for (size_t idx = 1; idx < ready_queue.size(); ++idx) {
                 DAGNode* n = ready_queue[idx];
-                if (is_barrier_op(n) &&
-                    n->remaining_deps == 0 &&
+                if (is_barrier_op(n) && n->remaining_deps == 0 &&
                     n->ready_cycle <= current_cycle &&
                     warp_is_resident[n->warp_id]) {
-                    ready_queue.erase(ready_queue.begin() + static_cast<long>(idx));
+                    ready_queue.erase(ready_queue.begin() +
+                                      static_cast<long>(idx));
                     return {n, nullptr};
                 }
-                Pipeline* p = node_ready_and_pipe(n, current_cycle, pipelines, sram, l2);
+                Pipeline* p =
+                    node_ready_and_pipe(n, current_cycle, pipelines, sram, l2);
                 if (p != nullptr && n->pipeline_type != last_pipeline.value()) {
-                    ready_queue.erase(ready_queue.begin() + static_cast<long>(idx));
+                    ready_queue.erase(ready_queue.begin() +
+                                      static_cast<long>(idx));
                     return {n, p};
                 }
             }
@@ -198,14 +200,14 @@ std::pair<DAGNode*, Pipeline*> Scheduler::try_issue_from_warp(
 
         for (size_t idx = 1; idx < ready_queue.size(); ++idx) {
             DAGNode* n = ready_queue[idx];
-            if (is_barrier_op(n) &&
-                n->remaining_deps == 0 &&
+            if (is_barrier_op(n) && n->remaining_deps == 0 &&
                 n->ready_cycle <= current_cycle &&
                 warp_is_resident[n->warp_id]) {
                 ready_queue.erase(ready_queue.begin() + static_cast<long>(idx));
                 return {n, nullptr};
             }
-            Pipeline* p = node_ready_and_pipe(n, current_cycle, pipelines, sram, l2);
+            Pipeline* p =
+                node_ready_and_pipe(n, current_cycle, pipelines, sram, l2);
             if (p != nullptr) {
                 ready_queue.erase(ready_queue.begin() + static_cast<long>(idx));
                 return {n, p};
@@ -274,30 +276,18 @@ static bool is_tmem_op(const DAGNode* node) {
 
 static int memory_op_index(const DAGNode* node) {
     switch (node->op_type) {
-        case OpType::LD_SRAM2REG:
-            return 0;
-        case OpType::ST_REG2SRAM:
-            return 1;
-        case OpType::LD_SRAM2REG_DSM:
-            return 2;
-        case OpType::ST_REG2SRAM_DSM:
-            return 3;
-        case OpType::LD_DRAM2REG:
-            return 4;
-        case OpType::ST_REG2DRAM:
-            return 5;
-        case OpType::CP_DRAM2SRAM:
-            return 6;
-        case OpType::CP_SRAM2DRAM:
-            return 7;
-        case OpType::CP_SRAM2TMEM:
-            return 8;
-        case OpType::TCGEN05_LD:
-            return 9;
-        case OpType::TCGEN05_ST:
-            return 10;
-        default:
-            return -1;
+    case OpType::LD_SRAM2REG: return 0;
+    case OpType::ST_REG2SRAM: return 1;
+    case OpType::LD_SRAM2REG_DSM: return 2;
+    case OpType::ST_REG2SRAM_DSM: return 3;
+    case OpType::LD_DRAM2REG: return 4;
+    case OpType::ST_REG2DRAM: return 5;
+    case OpType::CP_DRAM2SRAM: return 6;
+    case OpType::CP_SRAM2DRAM: return 7;
+    case OpType::CP_SRAM2TMEM: return 8;
+    case OpType::TCGEN05_LD: return 9;
+    case OpType::TCGEN05_ST: return 10;
+    default: return -1;
     }
 }
 
@@ -385,7 +375,8 @@ void Scheduler::issue_node(DAGNode* node, Pipeline* pipe, int current_cycle,
 
         if (is_memory_op(node)) {
             if (is_l2_dram_op(node)) {
-                node->pending_transactions = l2->get_total_transaction_count(*node);
+                node->pending_transactions =
+                    l2->get_total_transaction_count(*node);
             } else {
                 node->pending_transactions = node->total_transactions;
             }
@@ -398,14 +389,16 @@ void Scheduler::issue_node(DAGNode* node, Pipeline* pipe, int current_cycle,
     int subop_index = node->next_transaction_index;
     node->next_transaction_index++;
 
-    if (!is_memory_op(node) && issue_span_override < 0 && node->setup_latency > 0) {
+    if (!is_memory_op(node) && issue_span_override < 0 &&
+        node->setup_latency > 0) {
         issue_span_override = node->setup_latency;
     }
     pipe->issue_node(node->id, subop_index, current_cycle, issue_span_override);
     if (is_memory_op(node) && node->setup_latency > 0) {
         int idx = memory_op_index(node);
         if (idx >= 0) {
-            throttle_memory_issue(idx, warp_id, current_cycle + node->setup_latency);
+            throttle_memory_issue(idx, warp_id,
+                                  current_cycle + node->setup_latency);
         }
     }
 
@@ -467,7 +460,8 @@ static bool is_barrier_op(const DAGNode* node) {
     return node->op_type == OpType::BARRIER;
 }
 
-std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipeline*>& pipelines,
+std::vector<DAGNode*> Scheduler::schedule(int current_cycle,
+                                          std::vector<Pipeline*>& pipelines,
                                           Memory* sram, L2Cache* l2) {
     ensure_pipeline_map();
 
@@ -486,9 +480,9 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
             auto& leader_queue = ready_warp[warp_id];
             while (!leader_queue.empty()) {
                 DAGNode* front = leader_queue.front();
-                if (front->finished ||
-                    (front->total_transactions > 0 &&
-                     front->next_transaction_index >= front->total_transactions)) {
+                if (front->finished || (front->total_transactions > 0 &&
+                                        front->next_transaction_index >=
+                                            front->total_transactions)) {
                     leader_queue.pop_front();
                     continue;
                 }
@@ -532,9 +526,9 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
                 auto& q = sched->ready_warp[warp_ids[i]];
                 while (!q.empty()) {
                     DAGNode* front = q.front();
-                    if (front->finished ||
-                        (front->total_transactions > 0 &&
-                         front->next_transaction_index >= front->total_transactions)) {
+                    if (front->finished || (front->total_transactions > 0 &&
+                                            front->next_transaction_index >=
+                                                front->total_transactions)) {
                         q.pop_front();
                         continue;
                     }
@@ -555,7 +549,8 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
                     ready = false;
                     break;
                 }
-                Pipeline* p = sched->node_ready_and_pipe(n, current_cycle, pipelines, sram, l2);
+                Pipeline* p = sched->node_ready_and_pipe(n, current_cycle,
+                                                         pipelines, sram, l2);
                 if (p == nullptr) {
                     ready = false;
                     break;
@@ -580,7 +575,8 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
                 if (!q.empty() && q.front() == nodes[i]) {
                     q.pop_front();
                 }
-                sched->issue_node(nodes[i], pipes[i], current_cycle, sram, l2, issue_span);
+                sched->issue_node(nodes[i], pipes[i], current_cycle, sram, l2,
+                                  issue_span);
                 issued.push_back(nodes[i]);
             }
             return issued;
@@ -594,7 +590,8 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
             for (int i = 0; i < count; ++i) {
                 int idx = (start + i) % count;
                 int warp_id = resident_warps[idx];
-                auto [node, pipe] = try_issue_from_warp(warp_id, current_cycle, pipelines, sram, l2);
+                auto [node, pipe] = try_issue_from_warp(warp_id, current_cycle,
+                                                        pipelines, sram, l2);
                 if (node != nullptr) {
                     issue_node(node, pipe, current_cycle, sram, l2);
                     rr_cursor = (idx + 1) % count;
@@ -604,10 +601,10 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
         }
     } else {
         // Step 1: GTO - Try the warp that issued last cycle (Greedy part)
-        if (last_issued_warp != -1 &&
-            last_issued_warp % 4 == subpartition_id &&
+        if (last_issued_warp != -1 && last_issued_warp % 4 == subpartition_id &&
             warp_is_resident[last_issued_warp]) {
-            auto [node, pipe] = try_issue_from_warp(last_issued_warp, current_cycle, pipelines, sram, l2);
+            auto [node, pipe] = try_issue_from_warp(
+                last_issued_warp, current_cycle, pipelines, sram, l2);
             if (node != nullptr) {
                 // Successfully issued from same warp - continue for locality
                 issue_node(node, pipe, current_cycle, sram, l2);
@@ -619,11 +616,14 @@ std::vector<DAGNode*> Scheduler::schedule(int current_cycle, std::vector<Pipelin
         // input order and comparator, including their equal-age tie behavior.
         std::vector<int> ranked_warps = resident_warps;
         std::sort(ranked_warps.begin(), ranked_warps.end(),
-                  [this](int a, int b) { return last_issue_cycle[a] < last_issue_cycle[b]; });
+                  [this](int a, int b) {
+                      return last_issue_cycle[a] < last_issue_cycle[b];
+                  });
 
         // Step 2: GTO - Cannot continue from last warp, try other warps in order of staleness
         for (int warp_id : ranked_warps) {
-            auto [node, pipe] = try_issue_from_warp(warp_id, current_cycle, pipelines, sram, l2);
+            auto [node, pipe] = try_issue_from_warp(warp_id, current_cycle,
+                                                    pipelines, sram, l2);
             if (node != nullptr) {
                 // Successfully issued from this warp
                 issue_node(node, pipe, current_cycle, sram, l2);

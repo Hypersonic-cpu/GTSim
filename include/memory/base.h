@@ -28,7 +28,9 @@ struct MemoryRoutingHint {
 };
 
 enum class MemoryReadPath : std::uint8_t { Host, Prefetch, Resident };
-struct MemoryLocation { int stack{}, die{}, plane{}; };
+struct MemoryLocation {
+    int stack{}, die{}, plane{};
+};
 
 struct MemRequest {
     std::uint64_t request_id;
@@ -71,13 +73,16 @@ struct DeviceCounters {
 struct TierCounterSnapshot {
     std::uint64_t read_bytes{}, write_bytes{};
     DeviceCounters device;
-    std::uint64_t read_completions{}, read_latency_cycles{}, unadmitted_alias_read_bytes{};
+    std::uint64_t read_completions{}, read_latency_cycles{},
+        unadmitted_alias_read_bytes{};
 };
 
 // Placement runs before construction of the persistent memory system.
 using TensorPlacement = std::function<void(TensorRegistry&, TensorMetadata)>;
-void allocate_contiguous_tensor(TensorRegistry& registry, TensorMetadata tensor);
-TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTier tier);
+void allocate_contiguous_tensor(TensorRegistry& registry,
+                                TensorMetadata tensor);
+TensorPlacement make_tensor_placement(const MemorySystemConfig& config,
+                                      MemoryTier tier);
 
 // A rejected request remains owned by the caller. An accepted request produces
 // exactly one response, even when the backend splits it into multiple bursts.
@@ -104,42 +109,67 @@ public:
     virtual std::uint64_t prefetch_alias(std::uint64_t handle) const {
         return handle;
     }
-    virtual int prefetch_admission_cycle(std::uint64_t) const { return -1; }
-    virtual void on_demand_miss(std::uint64_t, std::uint64_t,
-                                std::uint64_t) {}
+    virtual int prefetch_admission_cycle(std::uint64_t) const {
+        return -1;
+    }
+    virtual void on_demand_miss(std::uint64_t, std::uint64_t, std::uint64_t) {}
     virtual void start_prefetch(std::uint64_t) {
         throw std::invalid_argument("device does not support prefetch");
     }
-    virtual bool prefetch_ready(std::uint64_t) const { return false; }
+    virtual bool prefetch_ready(std::uint64_t) const {
+        return false;
+    }
     virtual void release_prefetch(std::uint64_t) {
         throw std::invalid_argument("device does not support prefetch");
     }
-    virtual std::uint64_t residency_epoch() const { return 0; }
-    virtual std::size_t pending_background_requests() const { return 0; }
-    virtual std::uint64_t prefetch_capacity_stalls() const { return 0; }
-    virtual std::uint64_t prefetch_canceled() const { return 0; }
-    virtual MemoryBackendStatistics backend_statistics() const { return {}; }
-    virtual DeviceCounters device_counters() const { return {}; }
-    virtual HBFBackendStatistics hbf_statistics() const { return {}; }
+    virtual std::uint64_t residency_epoch() const {
+        return 0;
+    }
+    virtual std::size_t pending_background_requests() const {
+        return 0;
+    }
+    virtual std::uint64_t prefetch_capacity_stalls() const {
+        return 0;
+    }
+    virtual std::uint64_t prefetch_canceled() const {
+        return 0;
+    }
+    virtual MemoryBackendStatistics backend_statistics() const {
+        return {};
+    }
+    virtual DeviceCounters device_counters() const {
+        return {};
+    }
+    virtual HBFBackendStatistics hbf_statistics() const {
+        return {};
+    }
     virtual std::vector<MemoryBandwidthSample> bandwidth_samples() const {
         return {};
     }
-    virtual bool supports_sram_paths() const { return false; }
-    virtual MemoryLocation locate(std::uint64_t) const {
-        throw std::invalid_argument("backend does not expose physical SRAM placement");
+    virtual bool supports_sram_paths() const {
+        return false;
     }
-    virtual bool supports_prefetch() const { return false; }
+    virtual MemoryLocation locate(std::uint64_t) const {
+        throw std::invalid_argument(
+            "backend does not expose physical SRAM placement");
+    }
+    virtual bool supports_prefetch() const {
+        return false;
+    }
     virtual void preload_region(std::uint64_t, std::uint64_t, bool) {
         throw std::invalid_argument("backend does not support preload");
     }
 };
 
-std::unique_ptr<MemoryBackend> make_sram_backend(std::unique_ptr<MemoryBackend>, const HBFConfig&, std::uint64_t);
+std::unique_ptr<MemoryBackend> make_sram_backend(std::unique_ptr<MemoryBackend>,
+                                                 const HBFConfig&,
+                                                 std::uint64_t);
 
 std::unique_ptr<MemoryBackend> make_hbm_backend(const HBMConfig& config,
-                                              double core_frequency_mhz);
+                                                double core_frequency_mhz);
 std::unique_ptr<MemoryBackend> make_hbf_backend(const HBFConfig& config,
-                                              double core_frequency_mhz, std::uint64_t base_address);
+                                                double core_frequency_mhz,
+                                                std::uint64_t base_address);
 
 } // namespace GTSim
 

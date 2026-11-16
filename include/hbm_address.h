@@ -23,12 +23,16 @@ struct HBMAddress {
 // This is an explicit modeling assumption, not NVIDIA's private address hash.
 // After stripping the channel: byte[4:0], PC, burst-column[4:0], bank[1:0],
 // bank-group[1:0], SID, row[13:0]. Column addresses are BL8 burst indices.
-inline HBMAddress decode_h100_hbm_address(std::uint64_t address, int stacks = 5) {
-    if (stacks < 1 || stacks > 5) throw std::invalid_argument("invalid HBM stack count");
+inline HBMAddress decode_h100_hbm_address(std::uint64_t address,
+                                          int stacks = 5) {
+    if (stacks < 1 || stacks > 5)
+        throw std::invalid_argument("invalid HBM stack count");
     const auto channels = static_cast<std::uint64_t>(stacks * 16);
-    const std::uint64_t capacity = static_cast<std::uint64_t>(stacks) * (16ULL << 30);
+    const std::uint64_t capacity =
+        static_cast<std::uint64_t>(stacks) * (16ULL << 30);
     if (address >= capacity) {
-        throw std::out_of_range("physical address exceeds configured HBM stack capacity");
+        throw std::out_of_range(
+            "physical address exceeds configured HBM stack capacity");
     }
     const int channel = static_cast<int>((address / 128) % channels);
     std::uint64_t local = (address / (128 * channels)) * 128 + address % 128;
@@ -51,8 +55,10 @@ inline HBMAddress decode_h100_hbm_address(std::uint64_t address, int stacks = 5)
     return result;
 }
 
-inline std::uint64_t encode_h100_hbm_address(const HBMAddress& address, int stacks = 5) {
-    if (stacks < 1 || stacks > 5 || address.channel < 0 || address.channel >= stacks * 16)
+inline std::uint64_t encode_h100_hbm_address(const HBMAddress& address,
+                                             int stacks = 5) {
+    if (stacks < 1 || stacks > 5 || address.channel < 0 ||
+        address.channel >= stacks * 16)
         throw std::invalid_argument("invalid HBM stack count or channel");
     std::uint64_t local = address.row;
     local = (local << 1) | address.sid;
@@ -61,7 +67,8 @@ inline std::uint64_t encode_h100_hbm_address(const HBMAddress& address, int stac
     local = (local << 5) | address.column;
     local = (local << 1) | address.pseudochannel;
     local = (local << 5) | address.byte_offset;
-    return ((local / 128) * (stacks * 16) + address.channel) * 128 + local % 128;
+    return ((local / 128) * (stacks * 16) + address.channel) * 128 +
+           local % 128;
 }
 
 } // namespace GTSim

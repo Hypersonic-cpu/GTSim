@@ -64,8 +64,6 @@ def dumps(ir):
 
 def loads(text):
     result = decode(json.loads(text))
-    if not isinstance(
-        result, (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR)
-    ):
+    if not isinstance(result, (A.ProgIR, A.AlgoIR, A.FlowIR, A.ArchIR)):
         raise ValueError("expected an IR root record")
     return result

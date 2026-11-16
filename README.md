@@ -6,7 +6,7 @@ describe tile-level operations and whose edges encode data and order
 dependencies.
 
 This repository accompanies [GPU-Tile-Sim: A Tile-Centric GPU Simulation
-Framework for LLM Hardware-Software Co-Design](https://arxiv.org/abs/2607.11262). 
+Framework for LLM Hardware-Software Co-Design](https://arxiv.org/abs/2607.11262).
 This paper is accepted and to appear in the proceedings of **MICRO 2026**.
 
 This public core release provides the graph-driven simulator core and two H100

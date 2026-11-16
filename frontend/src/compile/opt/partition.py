@@ -48,9 +48,10 @@ class PartitionPolicy:
         )
         if result.partition_policy != "n_slab_fit_double_buffer":
             raise ValueError("unsupported FlashAccel partition policy")
-        if result.buffer_count != 2 or min(
-            result.bm, result.bn, result.bk, result.stages, result.split
-        ) <= 0:
+        if (
+            result.buffer_count != 2
+            or min(result.bm, result.bn, result.bk, result.stages, result.split) <= 0
+        ):
             raise ValueError("FlashAccel policy requires positive double-buffer tiling")
         if (result.bm, result.bn, result.bk, result.stages, result.split) != (
             16,
@@ -117,9 +118,7 @@ class PhysicalLayout:
         if lanes <= 0 or self.planes_per_die % lanes:
             raise ValueError("invalid grouped-plane geometry")
         group, lane = divmod(page, lanes)
-        group %= self.stacks * self.dies_per_stack * (
-            self.planes_per_die // lanes
-        )
+        group %= self.stacks * self.dies_per_stack * (self.planes_per_die // lanes)
         stack = group % self.stacks
         die_group = group // self.stacks
         die = die_group % self.dies_per_stack
@@ -138,7 +137,11 @@ class PhysicalLayout:
             for extent in shape:
                 size *= extent
             size *= 2 if tensor.dtype in (A.DataType.BF16, A.DataType.FP16) else 4
-            alignment = self.group_bytes if self.align_tensors_to_command_group else self.page_bytes
+            alignment = (
+                self.group_bytes
+                if self.align_tensors_to_command_group
+                else self.page_bytes
+            )
             cursor = (cursor + alignment - 1) // alignment * alignment
             result[tensor.id] = cursor
             cursor += (size + alignment - 1) // alignment * alignment
@@ -244,9 +247,7 @@ def _gemm_weight(region, global_tensors):
         and global_tensors[name].read_only
         and len(global_tensors[name].shape) == 2
     ]
-    if len(candidates) != 1 or not any(
-        op.kind == A.OpKind.MATRIX for op in region.ops
-    ):
+    if len(candidates) != 1 or not any(op.kind == A.OpKind.MATRIX for op in region.ops):
         return None
     return candidates[0]
 
@@ -264,12 +265,19 @@ def _shift(region, names, offset, parent_row_stride):
     return replace(
         region,
         offsets=tuple(offsets),
-        parent_row_stride=region.parent_row_stride or A.IndexExpr(str(parent_row_stride)),
+        parent_row_stride=region.parent_row_stride
+        or A.IndexExpr(str(parent_row_stride)),
     )
 
 
 def _partition_region(
-    region, tensor, resolver, layout, policy, bases, global_tensors,
+    region,
+    tensor,
+    resolver,
+    layout,
+    policy,
+    bases,
+    global_tensors,
     revealed_ids=None,
 ):
     n = _argument(resolver, region, "N")
@@ -283,6 +291,7 @@ def _partition_region(
     row_ranges = _weight_rows(region, resolver, tensor, revealed_ids)
     element_bytes = _element_bytes(tensor)
     base_page = bases[tensor.id] // layout.page_bytes
+
     def footprint(col, width):
         # All Expert rows which can be live in this N-slab share one SRAM
         # reservation.  Capacity is therefore checked against their union,
@@ -398,9 +407,7 @@ def _partition_region(
         children.append(child)
         for row, height in row_ranges:
             views.append(
-                TensorPartitionView(
-                    tensor.id, row, col, height, width, parent_cols
-                )
+                TensorPartitionView(tensor.id, row, col, height, width, parent_cols)
             )
     return tuple(children), tuple(views), True
 
@@ -510,7 +517,8 @@ def partition_flow(flow, policy: PartitionPolicy, layout: PhysicalLayout):
     tails = {}
     for region in flow.regions:
         children = tuple(
-            item for item in transformed
+            item
+            for item in transformed
             if item.symbol in origin_launches.get(region.symbol, (region.symbol,))
         )
         if not children:

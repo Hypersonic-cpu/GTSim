@@ -10,7 +10,7 @@
 
 namespace GTSim {
 
-class NoC;  // Forward declaration
+class NoC; // Forward declaration
 
 // Register file for a subpartition
 struct Register {
@@ -18,7 +18,8 @@ struct Register {
     int register_totally_used;
 
     explicit Register(int size_in_bytes)
-        : register_size(size_in_bytes), register_totally_used(0) {}
+        : register_size(size_in_bytes),
+          register_totally_used(0) {}
 };
 
 // Subpartition containing scheduler, pipelines, and registers
@@ -40,7 +41,8 @@ public:
         bool use_line_key;
     };
 
-    std::unordered_map<int, std::string> pending_memory_ops;  // node_id -> op type
+    std::unordered_map<int, std::string>
+        pending_memory_ops; // node_id -> op type
     std::vector<RetryEntry> retry_queue_sram;
     std::vector<RetryEntry> retry_queue_l2;
     std::vector<int> deferred_tmem_pair_completions;
@@ -57,29 +59,40 @@ public:
     int l2_max_transactions_per_cycle;
     int tmem_write_extra_latency_cycles;
 
-    Subpartition(int id, int warp_count, int tensor_throughput, int simd_throughput,
-                 int sfu_throughput, int ls_throughput_bytes,
-                 int tensor_latency_cycles, int simd_latency_cycles,
-                 int sfu_latency_cycles, int shfl_latency_cycles, int ls_latency_cycles,
-                 int tensor_width, int simd_width, int sfu_width, int ls_width_bytes,
-                 bool o2, SchedulePolicy policy, int l2_max_tx_per_cycle)
-        : subpartition_id(id), noc(nullptr), owning_sm_id(-1),
+    Subpartition(int id, int warp_count, int tensor_throughput,
+                 int simd_throughput, int sfu_throughput,
+                 int ls_throughput_bytes, int tensor_latency_cycles,
+                 int simd_latency_cycles, int sfu_latency_cycles,
+                 int shfl_latency_cycles, int ls_latency_cycles,
+                 int tensor_width, int simd_width, int sfu_width,
+                 int ls_width_bytes, bool o2, SchedulePolicy policy,
+                 int l2_max_tx_per_cycle)
+        : subpartition_id(id),
+          noc(nullptr),
+          owning_sm_id(-1),
           tensor_core_throughput(tensor_throughput),
-          O2_enabled(o2), l2_max_transactions_per_cycle(l2_max_tx_per_cycle),
+          O2_enabled(o2),
+          l2_max_transactions_per_cycle(l2_max_tx_per_cycle),
           tmem_write_extra_latency_cycles(0) {
 
         // Create pipelines (throughput is per-cycle capability)
-        pipelines.push_back(new Pipeline("Tensor", tensor_latency_cycles, tensor_throughput, tensor_width));
-        pipelines.push_back(new Pipeline("SIMD", simd_latency_cycles, simd_throughput, simd_width));
-        pipelines.push_back(new Pipeline("SFU", sfu_latency_cycles, sfu_throughput, sfu_width));
+        pipelines.push_back(new Pipeline("Tensor", tensor_latency_cycles,
+                                         tensor_throughput, tensor_width));
+        pipelines.push_back(new Pipeline("SIMD", simd_latency_cycles,
+                                         simd_throughput, simd_width));
+        pipelines.push_back(
+            new Pipeline("SFU", sfu_latency_cycles, sfu_throughput, sfu_width));
         // SHFL is modeled as a lightweight cross-warp shuffle with fixed latency and no contention.
-        pipelines.push_back(new Pipeline("SHFL", shfl_latency_cycles, 1 << 30, 1 << 30));
-        pipelines.push_back(new Pipeline("LD", ls_latency_cycles, ls_throughput_bytes, ls_width_bytes));
-        pipelines.push_back(new Pipeline("ST", ls_latency_cycles, ls_throughput_bytes, ls_width_bytes));
+        pipelines.push_back(
+            new Pipeline("SHFL", shfl_latency_cycles, 1 << 30, 1 << 30));
+        pipelines.push_back(new Pipeline("LD", ls_latency_cycles,
+                                         ls_throughput_bytes, ls_width_bytes));
+        pipelines.push_back(new Pipeline("ST", ls_latency_cycles,
+                                         ls_throughput_bytes, ls_width_bytes));
 
         sp_scheduler = new Scheduler(warp_count, o2, policy);
         sp_scheduler->set_pipelines(&pipelines);
-        sp_register = new Register(65536);  // 64KB register file
+        sp_register = new Register(65536); // 64KB register file
         node_id_to_sp = nullptr;
         completed_node_count = nullptr;
         l2_issue_cycle = -1;
@@ -93,7 +106,8 @@ public:
     }
 
     // Step function for subpartition
-    std::vector<int> step(int current_cycle, Memory* sram, Memory* tmem_mem, L2Cache* l2);
+    std::vector<int> step(int current_cycle, Memory* sram, Memory* tmem_mem,
+                          L2Cache* l2);
 
     void set_completion_observer(std::function<void(int, int)>* observer) {
         completion_observer = observer;
@@ -120,9 +134,9 @@ private:
     std::function<void(int, int)>* completion_observer{};
     // Helper: Try to enqueue memory operation based on node's OpType
     bool try_enqueue_memory(DAGNode* node, int bytes_val, int current_cycle,
-                           int bank_conflict_factor, int subop_index,
-                           const CacheLineKey& line_key, bool use_line_key,
-                           Memory* sram, Memory* tmem_mem, L2Cache* l2);
+                            int bank_conflict_factor, int subop_index,
+                            const CacheLineKey& line_key, bool use_line_key,
+                            Memory* sram, Memory* tmem_mem, L2Cache* l2);
 
     void resolve_issue_dependencies(DAGNode* node, int current_cycle);
 };

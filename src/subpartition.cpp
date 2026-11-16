@@ -20,11 +20,11 @@ static bool is_memory_op(const DAGNode* node) {
            node->op_type == OpType::ST_REG2SRAM_DSM ||
            node->op_type == OpType::TCGEN05_LD ||
            node->op_type == OpType::TCGEN05_ST ||
-           node->op_type == OpType::CP_SRAM2TMEM ||
-           is_l2_dram_op(node);
+           node->op_type == OpType::CP_SRAM2TMEM || is_l2_dram_op(node);
 }
 
-static int compute_chunk_bytes(const DAGNode* node, int subop_index, int throughput_bytes) {
+static int compute_chunk_bytes(const DAGNode* node, int subop_index,
+                               int throughput_bytes) {
     int total_bytes = node->tile.r * node->tile.c * node->element_size_bytes();
     int offset = subop_index * throughput_bytes;
     int remaining = total_bytes - offset;
@@ -32,7 +32,8 @@ static int compute_chunk_bytes(const DAGNode* node, int subop_index, int through
     return std::min(throughput_bytes, remaining);
 }
 
-static int get_pipeline_throughput(const Subpartition* sp, const std::string& name) {
+static int get_pipeline_throughput(const Subpartition* sp,
+                                   const std::string& name) {
     for (auto* pipe : sp->pipelines) {
         if (pipe->pipeline_name == name) {
             return pipe->pipeline_throughput;
@@ -57,7 +58,8 @@ static bool is_store_like_op(const DAGNode* node) {
            node->op_type == OpType::CP_SRAM2DRAM;
 }
 
-static int get_memory_pipeline_throughput(const Subpartition* sp, const DAGNode* node) {
+static int get_memory_pipeline_throughput(const Subpartition* sp,
+                                          const DAGNode* node) {
     if (is_load_like_op(node)) {
         return get_pipeline_throughput(sp, "LD");
     }
@@ -103,7 +105,8 @@ void Subpartition::complete_node(DAGNode* node, int current_cycle) {
     }
 }
 
-void Subpartition::resolve_issue_dependencies(DAGNode* node, int current_cycle) {
+void Subpartition::resolve_issue_dependencies(DAGNode* node,
+                                              int current_cycle) {
     if (node->issue_deps_resolved) {
         return;
     }
@@ -155,36 +158,42 @@ void Subpartition::handle_tma_issue_complete(int node_id, int current_cycle) {
     }
 }
 
-bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val, int current_cycle,
-                                       int bank_conflict_factor, int subop_index,
-                                       const CacheLineKey& line_key, bool use_line_key,
-                                       Memory* sram, Memory* tmem_mem, L2Cache* l2) {
+bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val,
+                                      int current_cycle,
+                                      int bank_conflict_factor, int subop_index,
+                                      const CacheLineKey& line_key,
+                                      bool use_line_key, Memory* sram,
+                                      Memory* tmem_mem, L2Cache* l2) {
     // Dispatch based on operation type
     if (node->op_type == OpType::LD_SRAM2REG) {
         // Check for remote SRAM access via NoC
-        if (noc && node->target_sm_id >= 0 && node->target_sm_id != owning_sm_id) {
+        if (noc && node->target_sm_id >= 0 &&
+            node->target_sm_id != owning_sm_id) {
             // Cross-cluster remote access is not supported (DSMEM only within GPC)
             if (!noc->same_cluster(owning_sm_id, node->target_sm_id)) {
                 static bool warned_cross_cluster = false;
                 if (!warned_cross_cluster) {
-                    std::fprintf(stderr, "[NoC] Warning: cross-cluster remote SRAM access "
-                                 "rejected (SM %d -> SM %d, clusters %d vs %d). "
-                                 "Falling back to local SRAM.\n",
-                                 owning_sm_id, node->target_sm_id,
-                                 noc->cluster_of(owning_sm_id),
-                                 noc->cluster_of(node->target_sm_id));
+                    std::fprintf(
+                        stderr,
+                        "[NoC] Warning: cross-cluster remote SRAM access "
+                        "rejected (SM %d -> SM %d, clusters %d vs %d). "
+                        "Falling back to local SRAM.\n",
+                        owning_sm_id, node->target_sm_id,
+                        noc->cluster_of(owning_sm_id),
+                        noc->cluster_of(node->target_sm_id));
                     warned_cross_cluster = true;
                 }
                 // Fall through to local SRAM path
             } else {
                 return noc->enqueue(node->id, owning_sm_id, node->target_sm_id,
-                                    bytes_val, false, bank_conflict_factor, current_cycle);
+                                    bytes_val, false, bank_conflict_factor,
+                                    current_cycle);
             }
         }
         // ld.sram2reg uses read queue with bank conflicts
         if (!sram->is_full(false)) {
             return sram->enqueue(node->id, bytes_val, current_cycle,
-                               bank_conflict_factor, false);
+                                 bank_conflict_factor, false);
         }
     } else if (node->op_type == OpType::CP_SRAM2TMEM) {
         // cp.sram2tmem models one-way shared-memory read into Tensor Memory.
@@ -206,29 +215,34 @@ bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val, int current_
         }
     } else if (node->op_type == OpType::LD_SRAM2REG_DSM) {
         if (noc != nullptr) {
-            int dst_sm_id = (node->target_sm_id >= 0) ? node->target_sm_id : owning_sm_id;
-            return noc->enqueue(node->id, owning_sm_id, dst_sm_id,
-                                bytes_val, false, bank_conflict_factor, current_cycle);
+            int dst_sm_id =
+                (node->target_sm_id >= 0) ? node->target_sm_id : owning_sm_id;
+            return noc->enqueue(node->id, owning_sm_id, dst_sm_id, bytes_val,
+                                false, bank_conflict_factor, current_cycle);
         }
     } else if (node->op_type == OpType::ST_REG2SRAM) {
         // Check for remote SRAM access via NoC
-        if (noc && node->target_sm_id >= 0 && node->target_sm_id != owning_sm_id) {
+        if (noc && node->target_sm_id >= 0 &&
+            node->target_sm_id != owning_sm_id) {
             // Cross-cluster remote access is not supported (DSMEM only within GPC)
             if (!noc->same_cluster(owning_sm_id, node->target_sm_id)) {
                 static bool warned_cross_cluster_st = false;
                 if (!warned_cross_cluster_st) {
-                    std::fprintf(stderr, "[NoC] Warning: cross-cluster remote SRAM store "
-                                 "rejected (SM %d -> SM %d, clusters %d vs %d). "
-                                 "Falling back to local SRAM.\n",
-                                 owning_sm_id, node->target_sm_id,
-                                 noc->cluster_of(owning_sm_id),
-                                 noc->cluster_of(node->target_sm_id));
+                    std::fprintf(
+                        stderr,
+                        "[NoC] Warning: cross-cluster remote SRAM store "
+                        "rejected (SM %d -> SM %d, clusters %d vs %d). "
+                        "Falling back to local SRAM.\n",
+                        owning_sm_id, node->target_sm_id,
+                        noc->cluster_of(owning_sm_id),
+                        noc->cluster_of(node->target_sm_id));
                     warned_cross_cluster_st = true;
                 }
                 // Fall through to local SRAM path
             } else {
                 return noc->enqueue(node->id, owning_sm_id, node->target_sm_id,
-                                    bytes_val, true, bank_conflict_factor, current_cycle);
+                                    bytes_val, true, bank_conflict_factor,
+                                    current_cycle);
             }
         }
         // st.reg2sram uses write queue
@@ -238,9 +252,10 @@ bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val, int current_
         }
     } else if (node->op_type == OpType::ST_REG2SRAM_DSM) {
         if (noc != nullptr) {
-            int dst_sm_id = (node->target_sm_id >= 0) ? node->target_sm_id : owning_sm_id;
-            return noc->enqueue(node->id, owning_sm_id, dst_sm_id,
-                                bytes_val, true, bank_conflict_factor, current_cycle);
+            int dst_sm_id =
+                (node->target_sm_id >= 0) ? node->target_sm_id : owning_sm_id;
+            return noc->enqueue(node->id, owning_sm_id, dst_sm_id, bytes_val,
+                                true, bank_conflict_factor, current_cycle);
         }
     } else if (is_l2_dram_op(node)) {
         if (l2_issue_cycle != current_cycle) {
@@ -251,7 +266,8 @@ bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val, int current_
             l2_issue_count >= l2_max_transactions_per_cycle) {
             return false;
         }
-        bool is_write = (node->op_type == OpType::ST_REG2DRAM || node->op_type == OpType::CP_SRAM2DRAM);
+        bool is_write = (node->op_type == OpType::ST_REG2DRAM ||
+                         node->op_type == OpType::CP_SRAM2DRAM);
         if (use_line_key) {
             if (l2->enqueue_transaction_key(node->id, line_key, is_write)) {
                 l2_issue_count++;
@@ -267,8 +283,8 @@ bool Subpartition::try_enqueue_memory(DAGNode* node, int bytes_val, int current_
     return false;
 }
 
-std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tmem_mem,
-                                    L2Cache* l2) {
+std::vector<int> Subpartition::step(int current_cycle, Memory* sram,
+                                    Memory* tmem_mem, L2Cache* l2) {
     if (l2_issue_cycle != current_cycle) {
         l2_issue_cycle = current_cycle;
         l2_issue_count = 0;
@@ -309,80 +325,85 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
     // Use remove_if to eliminate successful retries in-place (avoids temporary vector allocation)
     retry_queue_sram.erase(
         std::remove_if(retry_queue_sram.begin(), retry_queue_sram.end(),
-            [&](const auto& retry) {
-                const auto& [node_id, bytes_val, bank_conflict_factor, subop_index,
-                             is_l2, ready_cycle, line_key, use_line_key] = retry;
+                       [&](const auto& retry) {
+                           const auto& [node_id, bytes_val,
+                                        bank_conflict_factor, subop_index,
+                                        is_l2, ready_cycle, line_key,
+                                        use_line_key] = retry;
 
-                if (current_cycle < ready_cycle) {
-                    return false;  // Not ready to retry yet
-                }
+                           if (current_cycle < ready_cycle) {
+                               return false; // Not ready to retry yet
+                           }
 
-                auto it = sp_scheduler->node_dict.find(node_id);
-                if (it == sp_scheduler->node_dict.end()) {
-                    return true;  // Remove invalid node
-                }
+                           auto it = sp_scheduler->node_dict.find(node_id);
+                           if (it == sp_scheduler->node_dict.end()) {
+                               return true; // Remove invalid node
+                           }
 
-                DAGNode* node = it->second;
+                           DAGNode* node = it->second;
 
-                // Try to enqueue using helper function
-                bool success = try_enqueue_memory(node, bytes_val, current_cycle,
-                                                 bank_conflict_factor,
-                                                 is_l2 ? subop_index : 0,
-                                                 line_key, use_line_key, sram, tmem_mem, l2);
+                           // Try to enqueue using helper function
+                           bool success = try_enqueue_memory(
+                               node, bytes_val, current_cycle,
+                               bank_conflict_factor, is_l2 ? subop_index : 0,
+                               line_key, use_line_key, sram, tmem_mem, l2);
 
-                if (success) {
-                    pending_memory_ops[node->id] = node->op;
-                    if (node->op_type == OpType::LD_SRAM2REG ||
-                        node->op_type == OpType::LD_SRAM2REG_DSM) {
-                        sp_scheduler->throttle_sram_issue(current_cycle + bank_conflict_factor);
-                    }
-                    return true;  // Remove from retry queue
-                }
-                return false;  // Keep in retry queue
-            }),
-        retry_queue_sram.end()
-    );
+                           if (success) {
+                               pending_memory_ops[node->id] = node->op;
+                               if (node->op_type == OpType::LD_SRAM2REG ||
+                                   node->op_type == OpType::LD_SRAM2REG_DSM) {
+                                   sp_scheduler->throttle_sram_issue(
+                                       current_cycle + bank_conflict_factor);
+                               }
+                               return true; // Remove from retry queue
+                           }
+                           return false; // Keep in retry queue
+                       }),
+        retry_queue_sram.end());
 
     retry_queue_l2.erase(
         std::remove_if(retry_queue_l2.begin(), retry_queue_l2.end(),
-            [&](const auto& retry) {
-                const auto& [node_id, bytes_val, bank_conflict_factor, subop_index,
-                             is_l2, ready_cycle, line_key, use_line_key] = retry;
+                       [&](const auto& retry) {
+                           const auto& [node_id, bytes_val,
+                                        bank_conflict_factor, subop_index,
+                                        is_l2, ready_cycle, line_key,
+                                        use_line_key] = retry;
 
-                if (current_cycle < ready_cycle) {
-                    return false;
-                }
+                           if (current_cycle < ready_cycle) {
+                               return false;
+                           }
 
-                auto it = sp_scheduler->node_dict.find(node_id);
-                if (it == sp_scheduler->node_dict.end()) {
-                    return true;
-                }
+                           auto it = sp_scheduler->node_dict.find(node_id);
+                           if (it == sp_scheduler->node_dict.end()) {
+                               return true;
+                           }
 
-                DAGNode* node = it->second;
+                           DAGNode* node = it->second;
 
-                bool success = try_enqueue_memory(node, bytes_val, current_cycle,
-                                                 bank_conflict_factor,
-                                                 is_l2 ? subop_index : 0,
-                                                 line_key, use_line_key, sram, tmem_mem, l2);
+                           bool success = try_enqueue_memory(
+                               node, bytes_val, current_cycle,
+                               bank_conflict_factor, is_l2 ? subop_index : 0,
+                               line_key, use_line_key, sram, tmem_mem, l2);
 
-                if (success) {
-                    pending_memory_ops[node->id] = node->op;
-                    if (node->op_type == OpType::LD_SRAM2REG ||
-                        node->op_type == OpType::LD_SRAM2REG_DSM) {
-                        sp_scheduler->throttle_sram_issue(current_cycle + bank_conflict_factor);
-                    }
-                    return true;
-                }
-                return false;
-            }),
-        retry_queue_l2.end()
-    );
+                           if (success) {
+                               pending_memory_ops[node->id] = node->op;
+                               if (node->op_type == OpType::LD_SRAM2REG ||
+                                   node->op_type == OpType::LD_SRAM2REG_DSM) {
+                                   sp_scheduler->throttle_sram_issue(
+                                       current_cycle + bank_conflict_factor);
+                               }
+                               return true;
+                           }
+                           return false;
+                       }),
+        retry_queue_l2.end());
 
     // Step 2: Step pipelines
     std::vector<std::pair<int, int>> all_completed;
     for (auto* pipe : pipelines) {
         auto completed = pipe->step(current_cycle);
-        all_completed.insert(all_completed.end(), completed.begin(), completed.end());
+        all_completed.insert(all_completed.end(), completed.begin(),
+                             completed.end());
     }
 
     // Step 3: Handle completed pipeline executions
@@ -399,24 +420,26 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
                 node->op_type == OpType::ST_REG2SRAM ||
                 node->op_type == OpType::LD_SRAM2REG_DSM ||
                 node->op_type == OpType::ST_REG2SRAM_DSM) {
-                bytes_val = compute_sram_subop_bytes(*node, get_access_granularity_bytes(*node),
-                                                     subop_index);
+                bytes_val = compute_sram_subop_bytes(
+                    *node, get_access_granularity_bytes(*node), subop_index);
             } else if (node->op_type == OpType::CP_SRAM2TMEM ||
                        node->op_type == OpType::TCGEN05_LD ||
                        node->op_type == OpType::TCGEN05_ST) {
                 // Bulk one-shot TMEM transfer size in bytes.
-                bytes_val = node->tile.r * node->tile.c * node->element_size_bytes();
+                bytes_val =
+                    node->tile.r * node->tile.c * node->element_size_bytes();
             } else {
-                int throughput_bytes = get_memory_pipeline_throughput(this, node);
-                bytes_val = compute_chunk_bytes(node, subop_index, throughput_bytes);
+                int throughput_bytes =
+                    get_memory_pipeline_throughput(this, node);
+                bytes_val =
+                    compute_chunk_bytes(node, subop_index, throughput_bytes);
             }
 
             int bank_conflict_factor = 0;
             if (node->op_type == OpType::LD_SRAM2REG ||
                 node->op_type == OpType::LD_SRAM2REG_DSM) {
-                bank_conflict_factor = compute_sram_subop_conflict(*node,
-                                                                  get_access_granularity_bytes(*node),
-                                                                  subop_index);
+                bank_conflict_factor = compute_sram_subop_conflict(
+                    *node, get_access_granularity_bytes(*node), subop_index);
             }
             int setup_latency = 0;
             if (is_memory_op(node)) {
@@ -431,22 +454,25 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
                 for (const auto& line_key : lines) {
                     bool success = false;
                     if (setup_latency > 0) {
-                        retry_queue_l2.push_back({node_id, bytes_val, bank_conflict_factor,
-                                                  subop_index, true, current_cycle + setup_latency,
-                                                  line_key, true});
+                        retry_queue_l2.push_back(
+                            {node_id, bytes_val, bank_conflict_factor,
+                             subop_index, true, current_cycle + setup_latency,
+                             line_key, true});
                     } else {
-                        success = try_enqueue_memory(node, bytes_val, current_cycle,
-                                                     bank_conflict_factor, subop_index,
-                                                     line_key, true, sram, tmem_mem, l2);
+                        success = try_enqueue_memory(
+                            node, bytes_val, current_cycle,
+                            bank_conflict_factor, subop_index, line_key, true,
+                            sram, tmem_mem, l2);
                     }
 
                     if (success) {
                         pending_memory_ops[node->id] = node->op;
                     } else {
                         if (setup_latency == 0) {
-                            retry_queue_l2.push_back({node_id, bytes_val, bank_conflict_factor,
-                                                      subop_index, true, current_cycle,
-                                                      line_key, true});
+                            retry_queue_l2.push_back(
+                                {node_id, bytes_val, bank_conflict_factor,
+                                 subop_index, true, current_cycle, line_key,
+                                 true});
                         }
                     }
                 }
@@ -456,13 +482,15 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
             // Try to enqueue using helper function (SRAM paths)
             bool success = false;
             if (setup_latency > 0) {
-                retry_queue_sram.push_back({node_id, bytes_val, bank_conflict_factor,
-                                            subop_index, false, current_cycle + setup_latency,
-                                            CacheLineKey{0, 0, 0}, false});
+                retry_queue_sram.push_back(
+                    {node_id, bytes_val, bank_conflict_factor, subop_index,
+                     false, current_cycle + setup_latency,
+                     CacheLineKey{0, 0, 0}, false});
             } else {
                 success = try_enqueue_memory(node, bytes_val, current_cycle,
                                              bank_conflict_factor, subop_index,
-                                             CacheLineKey{0, 0, 0}, false, sram, tmem_mem, l2);
+                                             CacheLineKey{0, 0, 0}, false, sram,
+                                             tmem_mem, l2);
             }
 
             if (success) {
@@ -470,13 +498,14 @@ std::vector<int> Subpartition::step(int current_cycle, Memory* sram, Memory* tme
                 if (node->op_type == OpType::LD_SRAM2REG ||
                     node->op_type == OpType::LD_SRAM2REG_DSM ||
                     node->op_type == OpType::CP_SRAM2TMEM) {
-                    sp_scheduler->throttle_sram_issue(current_cycle + bank_conflict_factor);
+                    sp_scheduler->throttle_sram_issue(current_cycle +
+                                                      bank_conflict_factor);
                 }
             } else {
                 if (setup_latency == 0) {
-                    retry_queue_sram.push_back({node_id, bytes_val, bank_conflict_factor,
-                                                subop_index, false, current_cycle,
-                                                CacheLineKey{0, 0, 0}, false});
+                    retry_queue_sram.push_back(
+                        {node_id, bytes_val, bank_conflict_factor, subop_index,
+                         false, current_cycle, CacheLineKey{0, 0, 0}, false});
                 }
             }
         } else {

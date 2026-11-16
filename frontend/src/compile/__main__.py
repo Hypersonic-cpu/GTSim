@@ -18,8 +18,10 @@ def main():
     cli.add_argument("--param", action="append", default=[], metavar="NAME=JSON_VALUE")
     cli.add_argument("-o", "--output", required=True)
     args = cli.parse_args()
-    parameters = {name: json.loads(value) for name, value in
-                  (item.split("=", 1) for item in args.param)}
+    parameters = {
+        name: json.loads(value)
+        for name, value in (item.split("=", 1) for item in args.param)
+    }
     if args.params:
         parameters = {**json.loads(args.params.read_text()), **parameters}
     if args.lib:
@@ -31,10 +33,15 @@ def main():
     elif parameters:
         bindings = {value.id: value.expression for value in source.static.arguments}
         bindings.update((name, repr(value)) for name, value in parameters.items())
-        source = replace(source, static=replace(
-            source.static,
-            arguments=tuple(A.StaticBinding(name, value) for name, value in bindings.items()),
-        ))
+        source = replace(
+            source,
+            static=replace(
+                source.static,
+                arguments=tuple(
+                    A.StaticBinding(name, value) for name, value in bindings.items()
+                ),
+            ),
+        )
     suffix = Path(args.output).suffix
     if isinstance(source, A.FlowIR) and suffix != ".flowir":
         source = lower_flow(source)

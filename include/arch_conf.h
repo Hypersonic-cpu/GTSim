@@ -40,28 +40,33 @@ template <> struct meta<GTSim::NoCTopology> {
 
 template <> struct meta<GTSim::MemoryTopology> {
     using enum GTSim::MemoryTopology;
-    static constexpr auto value = enumerate("FullHBM", FullHBM, "FullHBF",
-                                              FullHBF, "CoLocated", CoLocated,
-                                              "Cascaded", Cascaded);
+    static constexpr auto value =
+        enumerate("FullHBM", FullHBM, "FullHBF", FullHBF, "CoLocated",
+                  CoLocated, "Cascaded", Cascaded);
 };
 
 template <> struct meta<GTSim::HBMBackend> {
     using enum GTSim::HBMBackend;
-    static constexpr auto value = enumerate("naive", Naive, "ramulator2", Ramulator2);
+    static constexpr auto value =
+        enumerate("naive", Naive, "ramulator2", Ramulator2);
 };
 
 template <> struct meta<GTSim::HBFBackend> {
     using enum GTSim::HBFBackend;
-    static constexpr auto value = enumerate("naive", Naive, "hbfine", HBFine, "eventlab", EventLab, "flashlab", FlashLab);
+    static constexpr auto value =
+        enumerate("naive", Naive, "hbfine", HBFine, "eventlab", EventLab,
+                  "flashlab", FlashLab);
 };
 template <> struct meta<GTSim::HBFGeometryProfile> {
     using enum GTSim::HBFGeometryProfile;
-    static constexpr auto value = enumerate("ocp_reference", OCPReference, "hbflex_research", HBFlexResearch,
-                                            "grouped_planes", GroupedPlanes);
+    static constexpr auto value =
+        enumerate("ocp_reference", OCPReference, "hbflex_research",
+                  HBFlexResearch, "grouped_planes", GroupedPlanes);
 };
 template <> struct meta<GTSim::TensorPlacementProfile> {
     using enum GTSim::TensorPlacementProfile;
-    static constexpr auto value = enumerate("all_hbm", AllHBM, "gemm_b_hbf", GEMMBInHBF, "fa3_q_hbf", FA3QInHBF);
+    static constexpr auto value = enumerate("all_hbm", AllHBM, "gemm_b_hbf",
+                                            GEMMBInHBF, "fa3_q_hbf", FA3QInHBF);
 };
 
 } // namespace glz
@@ -151,15 +156,20 @@ public:
                 "': " + glz::format_error(config_error, normalized_yaml));
         }
         try {
-            validate_memory_system_config(candidate.memory, candidate.core_frequency_mhz);
+            validate_memory_system_config(candidate.memory,
+                                          candidate.core_frequency_mhz);
         } catch (const std::exception& error) {
             throw std::runtime_error("invalid memory configuration in '" +
                                      filename_.string() + "': " + error.what());
         }
         auto& ramulator_file = candidate.memory.hbm.ramulator.config_file;
-        if (!ramulator_file.empty() && std::filesystem::path(ramulator_file).is_relative()) {
-            ramulator_file = (std::filesystem::absolute(filename_).parent_path() /
-                              ramulator_file).lexically_normal().string();
+        if (!ramulator_file.empty() &&
+            std::filesystem::path(ramulator_file).is_relative()) {
+            ramulator_file =
+                (std::filesystem::absolute(filename_).parent_path() /
+                 ramulator_file)
+                    .lexically_normal()
+                    .string();
         }
         conf = std::move(candidate);
     }
@@ -213,7 +223,8 @@ private:
     }
 
     static bool is_memory_config_field(std::string_view key) {
-        return key == "topology" || key == "placement" || key == "address_layout" || key == "hbm" || key == "hbf" ||
+        return key == "topology" || key == "placement" ||
+               key == "address_layout" || key == "hbm" || key == "hbf" ||
                key == "d2dlink";
     }
 
@@ -299,8 +310,8 @@ private:
                     continue;
                 }
                 if (!value.is_object() || value.get<YamlObject>().empty()) {
-                    throw std::runtime_error("expected a non-empty mapping at '" +
-                                             key + "'");
+                    throw std::runtime_error(
+                        "expected a non-empty mapping at '" + key + "'");
                 }
                 const auto& section = value.get<YamlObject>();
                 if (key == "d2dlink") {
@@ -324,19 +335,24 @@ private:
             // the same reflected members and are rejected as duplicates.
             if (key == "dram") {
                 if (!value.is_object() || value.get<YamlObject>().empty()) {
-                    throw std::runtime_error("expected a non-empty mapping at 'dram'");
+                    throw std::runtime_error(
+                        "expected a non-empty mapping at 'dram'");
                 }
                 YamlValue hbm;
                 hbm.data = YamlObject{};
                 auto& hbm_target = hbm.get<YamlObject>();
-                for (const auto& [field, member_value] : value.get<YamlObject>()) {
+                for (const auto& [field, member_value] :
+                     value.get<YamlObject>()) {
                     if (field == "bandwidth_GBps") {
                         add_member(hbm_target, "read_bw_GBps", member_value);
-                        add_member(hbm_target, "write_max_bw_GBps", member_value);
+                        add_member(hbm_target, "write_max_bw_GBps",
+                                   member_value);
                     } else if (field == "latency_cycles" ||
                                field == "miss_penalty_cycles") {
-                        add_member(hbm_target, "read_latency_cycles", member_value);
-                        add_member(hbm_target, "write_latency_cycles", member_value);
+                        add_member(hbm_target, "read_latency_cycles",
+                                   member_value);
+                        add_member(hbm_target, "write_latency_cycles",
+                                   member_value);
                     } else {
                         throw std::runtime_error("unknown legacy DRAM field '" +
                                                  field + "'");

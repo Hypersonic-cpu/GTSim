@@ -12,13 +12,18 @@ struct HBFBackendStatistics {
     std::uint64_t host_read_bytes{}, host_write_bytes{}, sensed_bytes{};
     // Counts actual Sense commands, independently of the number of sensed planes.
     std::uint64_t sense_commands{}, unique_sense_addresses{};
-    std::uint64_t senses{}, programs{}, erases{}, cache_hits{}, cache_misses{}, cache_evictions{};
-    std::uint64_t queue_stalls{}, bank_wait_ps{}, transfer_wait_ps{}, events_processed{};
+    std::uint64_t senses{}, programs{}, erases{}, cache_hits{}, cache_misses{},
+        cache_evictions{};
+    std::uint64_t queue_stalls{}, bank_wait_ps{}, transfer_wait_ps{},
+        events_processed{};
     std::uint64_t elapsed_ps{};
     std::vector<BandwidthBin> bandwidth_bins;
-    std::vector<std::uint64_t> stack_read_bytes, channel_read_bytes, bank_reads, plane_reads;
-    std::vector<std::uint64_t> stack_busy_ps, channel_read_busy_ps, channel_write_busy_ps;
-    std::vector<std::uint64_t> bank_busy_ps, plane_sense_busy_ps, plane_program_busy_ps, plane_erase_busy_ps;
+    std::vector<std::uint64_t> stack_read_bytes, channel_read_bytes, bank_reads,
+        plane_reads;
+    std::vector<std::uint64_t> stack_busy_ps, channel_read_busy_ps,
+        channel_write_busy_ps;
+    std::vector<std::uint64_t> bank_busy_ps, plane_sense_busy_ps,
+        plane_program_busy_ps, plane_erase_busy_ps;
     std::vector<std::uint64_t> die_transfer_busy_ps, ecc_busy_ps;
 };
 
@@ -40,4 +45,4 @@ struct MemoryBackendStatistics {
     std::vector<std::uint64_t> channel_transactions;
 };
 
-}
+} // namespace GTSim

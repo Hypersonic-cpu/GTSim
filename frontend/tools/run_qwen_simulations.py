@@ -13,7 +13,12 @@ from time import perf_counter
 
 from compile import compile_program, lower_flow
 from compile.static import EMPTY, Resolver, bound_resolver
-from compile.streaming import ExecutionIRProducer, SocketFramedTransport, _strides, make_program_plan
+from compile.streaming import (
+    ExecutionIRProducer,
+    SocketFramedTransport,
+    _strides,
+    make_program_plan,
+)
 from compile.opt.partition import (
     PartitionPolicy,
     PhysicalLayout,
@@ -45,7 +50,10 @@ def isolate_launch(flow, root, name, expert, params):
             region,
             domain=replace(
                 region.domain,
-                loops=(replace(loop, start=lo, stop=lo + resolver.value("%NTILES")), *outer),
+                loops=(
+                    replace(loop, start=lo, stop=lo + resolver.value("%NTILES")),
+                    *outer,
+                ),
             ),
         )
     return replace(flow, regions=(replace(region, after=()),), outputs=())
@@ -66,17 +74,28 @@ def plan_program(
 ):
     layouts = layouts or {}
     placements = placements or {}
-    flow = compile_program(source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir")))
+    flow = compile_program(
+        source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
+    )
     known = {tensor.id for tensor in flow.tensors}
     if placements.keys() - known:
-        raise ValueError(f"unknown tensor placements: {sorted(placements.keys() - known)}")
+        raise ValueError(
+            f"unknown tensor placements: {sorted(placements.keys() - known)}"
+        )
     tiers = {name: A.MemorySpace(tier) for name, tier in placements.items()}
     for tensor in flow.tensors:
-        if tiers.get(tensor.id) == A.MemorySpace.HBF and not (tensor.external and tensor.read_only):
-            raise ValueError(f"HBF placement requires read-only external weights: {tensor.id}")
+        if tiers.get(tensor.id) == A.MemorySpace.HBF and not (
+            tensor.external and tensor.read_only
+        ):
+            raise ValueError(
+                f"HBF placement requires read-only external weights: {tensor.id}"
+            )
     flow = replace(
         flow,
-        tensors=tuple(replace(tensor, tier=tiers.get(tensor.id, tensor.tier)) for tensor in flow.tensors),
+        tensors=tuple(
+            replace(tensor, tier=tiers.get(tensor.id, tensor.tier))
+            for tensor in flow.tensors
+        ),
     )
     root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
     if focus:
@@ -85,7 +104,9 @@ def plan_program(
     for name, layout in layouts.items():
         spec = specs[name]
         if not (spec.read_only and spec.external and spec.tier == A.MemorySpace.HBF):
-            raise ValueError(f"tile-major experiment requires read-only HBF weights: {name}")
+            raise ValueError(
+                f"tile-major experiment requires read-only HBF weights: {name}"
+            )
         layout.validate(tuple(root.value(d) for d in spec.shape))
     partition = None
     if flashaccel_policy is not None and physical_layout is not None:
@@ -117,7 +138,9 @@ def plan_program(
                 partition.origin_launches if partition is not None else None,
             )
         else:
-            root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
+            root = bound_resolver(
+                flow.static, Resolver(EMPTY, {})
+            ).materialize_constants()
             bases = (
                 physical_layout.bases(flow.tensors, root)
                 if physical_layout is not None
@@ -141,19 +164,39 @@ def plan_program(
         shape = tuple(root.value(d) for d in spec.shape)
         tensors.append(
             A.KernelTensor(
-                len(tensors), spec.id, shape, _strides(shape), spec.dtype,
-                spec.tier or A.MemorySpace.HBM, spec.external, spec.read_only,
+                len(tensors),
+                spec.id,
+                shape,
+                _strides(shape),
+                spec.dtype,
+                spec.tier or A.MemorySpace.HBM,
+                spec.external,
+                spec.read_only,
                 layouts.get(spec.id),
             )
         )
     regions = []
     for region in arch.regions:
-        arguments = {arg.id: root.value(arg.expression) for arg in region.static.arguments}
-        resolver = Resolver(replace(region.static, parameters=(), constraints=()),
-                            {**root.values, **arguments})
-        if not any(not resolver.value(g.condition) for g in region.static_ifs if not g.iterations):
+        arguments = {
+            arg.id: root.value(arg.expression) for arg in region.static.arguments
+        }
+        resolver = Resolver(
+            replace(region.static, parameters=(), constraints=()),
+            {**root.values, **arguments},
+        )
+        if not any(
+            not resolver.value(g.condition)
+            for g in region.static_ifs
+            if not g.iterations
+        ):
             regions.append(region)
-    return parse_file(source), regions, replace(arch, regions=tuple(regions)), prefetch, tuple(tensors)
+    return (
+        parse_file(source),
+        regions,
+        replace(arch, regions=tuple(regions)),
+        prefetch,
+        tuple(tensors),
+    )
 
 
 def run_streaming_interface(
@@ -174,20 +217,31 @@ def run_streaming_interface(
     topology = memory_topology(args.memory)
     requested_prefetch_mode = args.prefetch or "default"
     effective_prefetch_mode = (
-        "disabled_fullhbm" if topology == "FullHBM"
-        else ("on" if prefetch is not None and prefetch.streaming is not None
-              else "off")
+        "disabled_fullhbm"
+        if topology == "FullHBM"
+        else (
+            "on" if prefetch is not None and prefetch.streaming is not None else "off"
+        )
     )
     producer = ExecutionIRProducer(
-        arch, plan,
-        {"prefetch_config": prefetch.streaming if prefetch is not None else None,
-         "prefetch_bases": prefetch.bases if prefetch is not None else None,
-         "layouts": layouts,
-         "prefetch_windows": not flashaccel},
+        arch,
+        plan,
+        {
+            "prefetch_config": prefetch.streaming if prefetch is not None else None,
+            "prefetch_bases": prefetch.bases if prefetch is not None else None,
+            "layouts": layouts,
+            "prefetch_windows": not flashaccel,
+        },
     )
     args.out.mkdir(parents=True, exist_ok=True)
-    source_paths = sorted([*Path("frontend/src").rglob("*.py"), *args.lib.glob("*ir"),
-                           args.source, args.params])
+    source_paths = sorted(
+        [
+            *Path("frontend/src").rglob("*.py"),
+            *args.lib.glob("*ir"),
+            args.source,
+            args.params,
+        ]
+    )
     provenance = {
         "version": "stream-v2",
         "params": params,
@@ -205,7 +259,9 @@ def run_streaming_interface(
         "max_cycles": args.max_cycles,
         "architecture_sha256": sha(args.architecture),
         "memory_sha256": sha(args.memory),
-        "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        "git_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip(),
         "source_sha256": {str(path): sha(path) for path in source_paths},
         "transport": "AF_UNIX socketpair; length-prefixed JSON; bounded InstructionBatch",
     }
@@ -215,12 +271,21 @@ def run_streaming_interface(
     children_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     log = (args.out / "simulation.log").open("w")
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-    command = [str(args.runner), str(args.architecture), "--memory-config", str(args.memory),
-               "--stream-fd", str(child.fileno()), "--max-frame", str(args.max_frame)]
+    command = [
+        str(args.runner),
+        str(args.architecture),
+        "--memory-config",
+        str(args.memory),
+        "--stream-fd",
+        str(child.fileno()),
+        "--max-frame",
+        str(args.max_frame),
+    ]
     if args.max_cycles:
         command += ["--max-cycles", str(args.max_cycles)]
-    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
-                               pass_fds=(child.fileno(),))
+    process = subprocess.Popen(
+        command, stdout=log, stderr=subprocess.STDOUT, pass_fds=(child.fileno(),)
+    )
     child.close()
     transport = SocketFramedTransport(parent, args.max_frame)
     completed, failures, program_end_sent = set(), [], False
@@ -267,22 +332,31 @@ def run_streaming_interface(
     )
     python_peak_rss_kib = int(python_after.ru_maxrss)
     cpp_peak_rss_kib = int(children_after.ru_maxrss)
-    outcome = {"version": "stream-v2", "batch": params.get("B"), "program": plan.symbol,
-               "memory_topology": topology,
-               "requested_prefetch_mode": requested_prefetch_mode,
-               "effective_prefetch_mode": effective_prefetch_mode,
-               "returncode": returncode, "elapsed_seconds": perf_counter() - start,
-               "python_cpu_seconds": python_cpu_seconds,
-               "cpp_cpu_seconds": cpp_cpu_seconds,
-               "python_peak_rss_kib": python_peak_rss_kib,
-               "cpp_peak_rss_kib": cpp_peak_rss_kib,
-               "peak_rss_kib": max(python_peak_rss_kib, cpp_peak_rss_kib),
-               "kernels": [], "errors": failures,
-               "transport": "unix socketpair framed JSON InstructionBatch"}
+    outcome = {
+        "version": "stream-v2",
+        "batch": params.get("B"),
+        "program": plan.symbol,
+        "memory_topology": topology,
+        "requested_prefetch_mode": requested_prefetch_mode,
+        "effective_prefetch_mode": effective_prefetch_mode,
+        "returncode": returncode,
+        "elapsed_seconds": perf_counter() - start,
+        "python_cpu_seconds": python_cpu_seconds,
+        "cpp_cpu_seconds": cpp_cpu_seconds,
+        "python_peak_rss_kib": python_peak_rss_kib,
+        "cpp_peak_rss_kib": cpp_peak_rss_kib,
+        "peak_rss_kib": max(python_peak_rss_kib, cpp_peak_rss_kib),
+        "kernels": [],
+        "errors": failures,
+        "transport": "unix socketpair framed JSON InstructionBatch",
+    }
     if returncode:
         raise RuntimeError(f"GTSim streaming runner failed with {returncode}")
-    timing_line = next(line for line in (args.out / "simulation.log").read_text().splitlines()
-                       if line.startswith("Program timing JSON: "))
+    timing_line = next(
+        line
+        for line in (args.out / "simulation.log").read_text().splitlines()
+        if line.startswith("Program timing JSON: ")
+    )
     outcome["timing"] = json.loads(timing_line.split(": ", 1)[1])
     outcome["prefetch_stats"] = outcome["timing"].get(
         "prefetch_stats",
@@ -296,15 +370,26 @@ def run_streaming_interface(
         },
     )
     (args.out / "result.json").write_text(json.dumps(outcome, indent=2) + "\n")
-    print(json.dumps({"version": "stream-v2", "batch": params.get("B"),
-                      "program": plan.symbol, "returncode": returncode,
-                      "cycles": outcome["timing"].get("total_cycles")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "version": "stream-v2",
+                "batch": params.get("B"),
+                "program": plan.symbol,
+                "returncode": returncode,
+                "cycles": outcome["timing"].get("total_cycles"),
+            }
+        ),
+        flush=True,
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--params", type=Path, required=True)
-    parser.add_argument("--source", type=Path, default=Path("frontend/asm/qwen3/one_block.progir"))
+    parser.add_argument(
+        "--source", type=Path, default=Path("frontend/asm/qwen3/one_block.progir")
+    )
     parser.add_argument("--lib", type=Path, default=Path("frontend/lib"))
     parser.add_argument("--runner", type=Path, required=True)
     parser.add_argument("--architecture", type=Path, required=True)
@@ -323,31 +408,53 @@ def main():
     if not 0 < args.max_frame <= 0xFFFFFFFF:
         parser.error("--max-frame must be in [1, 4294967295]")
     params = json.loads(args.params.read_text())
-    residency = json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
-    raw_layouts = json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
-    placements = json.loads(args.tensor_placements.read_text()) if args.tensor_placements else {}
-    layout_objects = {name: A.TileMajorLayout(**layout) for name, layout in raw_layouts.items()}
+    residency = (
+        json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
+    )
+    raw_layouts = (
+        json.loads(args.tensor_layouts.read_text()) if args.tensor_layouts else {}
+    )
+    placements = (
+        json.loads(args.tensor_placements.read_text()) if args.tensor_placements else {}
+    )
+    layout_objects = {
+        name: A.TileMajorLayout(**layout) for name, layout in raw_layouts.items()
+    }
     flashaccel_policy = (
         PartitionPolicy.from_json(args.flashaccel_config)
         if args.flashaccel_config
         else None
     )
     physical_layout = (
-        PhysicalLayout.from_memory_yaml(args.memory)
-        if flashaccel_policy
-        else None
+        PhysicalLayout.from_memory_yaml(args.memory) if flashaccel_policy else None
     )
     source_program, regions, arch, prefetch, tensors = plan_program(
-        args.source, args.lib, params, residency, layout_objects, args.focus_launch,
+        args.source,
+        args.lib,
+        params,
+        residency,
+        layout_objects,
+        args.focus_launch,
         args.focus_expert,
         placements,
         flashaccel_policy,
         physical_layout,
         args.prefetch != "off" and memory_topology(args.memory) != "FullHBM",
     )
-    run_streaming_interface(args, params, source_program, regions, arch, prefetch, tensors,
-                            layout_objects, residency, raw_layouts, placements,
-                            flashaccel=flashaccel_policy is not None)
+    run_streaming_interface(
+        args,
+        params,
+        source_program,
+        regions,
+        arch,
+        prefetch,
+        tensors,
+        layout_objects,
+        residency,
+        raw_layouts,
+        placements,
+        flashaccel=flashaccel_policy is not None,
+    )
 
 
 if __name__ == "__main__":

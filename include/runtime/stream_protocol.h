@@ -43,8 +43,8 @@ private:
 
 template <class T> T decode_message(const Message& message) {
     T result{};
-    constexpr auto options =
-        glz::opts{.error_on_unknown_keys = false, .error_on_missing_keys = false};
+    constexpr auto options = glz::opts{.error_on_unknown_keys = false,
+                                       .error_on_missing_keys = false};
     if (auto error = glz::read<options>(result, message.json))
         throw std::invalid_argument("stream " + message.type + ": " +
                                     glz::format_error(error, message.json));

@@ -16,8 +16,8 @@ namespace GTSim {
 // waiting for the target SM's SRAM to finish.
 struct NoCPendingEntry {
     int node_id;
-    int src_sm_id;   // Originating SM (where the subpartition lives)
-    int dst_sm_id;   // Target SM (whose SRAM was accessed)
+    int src_sm_id; // Originating SM (where the subpartition lives)
+    int dst_sm_id; // Target SM (whose SRAM was accessed)
     int bytes;
     int bank_conflict;
 };
@@ -35,9 +35,9 @@ struct NoCReturnRetryEntry {
 class GPU {
 public:
     std::vector<SM*> sms;
-    L2Cache* l2;  // L2 cache
+    L2Cache* l2; // L2 cache
     std::unique_ptr<MemorySystem> memory_system;
-    NoC* noc;  // NoC interconnect (nullptr if disabled)
+    NoC* noc; // NoC interconnect (nullptr if disabled)
     std::vector<Subpartition*>* node_id_to_sp;
     std::vector<int>* node_id_to_sm;
 
@@ -53,56 +53,46 @@ public:
 
     int num_sms;
 
-    GPU(int num_streaming_multiprocessors, int warp_count, int tensor_throughput,
-        int simd_throughput, int sfu_throughput, int ls_throughput_bytes,
-        int tensor_latency_cycles, int simd_latency_cycles,
-        int sfu_latency_cycles, int shfl_latency_cycles, int ls_latency_cycles,
-        int tensor_width, int simd_width, int sfu_width, int ls_width_bytes,
-        int sram_latency_cycles, int sram_bandwidth_bytes_per_cycle, int sram_queue_depth,
-        bool o2, SchedulePolicy policy,
+    GPU(int num_streaming_multiprocessors, int warp_count,
+        int tensor_throughput, int simd_throughput, int sfu_throughput,
+        int ls_throughput_bytes, int tensor_latency_cycles,
+        int simd_latency_cycles, int sfu_latency_cycles,
+        int shfl_latency_cycles, int ls_latency_cycles, int tensor_width,
+        int simd_width, int sfu_width, int ls_width_bytes,
+        int sram_latency_cycles, int sram_bandwidth_bytes_per_cycle,
+        int sram_queue_depth, bool o2, SchedulePolicy policy,
         int max_blocks_per_sm, int l2_cache_size_bytes, int l2_line_size_bytes,
         int l2_hit_latency, int l2_bandwidth_bytes_per_cycle,
         int l2_write_bandwidth_bytes_per_cycle, int l2_queue_depth,
-        int l2_max_transactions_per_cycle_per_sp,
-        bool l2_bypass_cache,
+        int l2_max_transactions_per_cycle_per_sp, bool l2_bypass_cache,
         const MemorySystemConfig& memory_config, double core_freq_mhz,
-        int tma_setup_latency_cycles,
-        int tma_issue_interval_cycles,
-        int tma_issue_rate_bytes_per_cycle,
-        int tmem_cols_per_cta,
-        int tmem_issue_interval_cycles,
-        int tmem_read_latency_cycles,
-        int tmem_read_bandwidth_bytes_per_cycle,
-        int tmem_write_latency_cycles,
-        int tmem_write_bandwidth_bytes_per_cycle,
-        int tmem_queue_depth,
-        int startup_delay_cycles,
-        int block_schedule_latency_cycles,
+        int tma_setup_latency_cycles, int tma_issue_interval_cycles,
+        int tma_issue_rate_bytes_per_cycle, int tmem_cols_per_cta,
+        int tmem_issue_interval_cycles, int tmem_read_latency_cycles,
+        int tmem_read_bandwidth_bytes_per_cycle, int tmem_write_latency_cycles,
+        int tmem_write_bandwidth_bytes_per_cycle, int tmem_queue_depth,
+        int startup_delay_cycles, int block_schedule_latency_cycles,
         const TensorRegistry& tensors)
-        : l2(nullptr), noc(nullptr), num_sms(num_streaming_multiprocessors) {
+        : l2(nullptr),
+          noc(nullptr),
+          num_sms(num_streaming_multiprocessors) {
 
         // Create SMs
         for (int i = 0; i < num_sms; ++i) {
-            sms.push_back(new SM(i, warp_count, tensor_throughput, simd_throughput,
-                                 sfu_throughput, ls_throughput_bytes,
-                                 tensor_latency_cycles, simd_latency_cycles,
-                                 sfu_latency_cycles, shfl_latency_cycles, ls_latency_cycles,
-                                 tensor_width, simd_width, sfu_width, ls_width_bytes,
-                                 sram_latency_cycles, sram_bandwidth_bytes_per_cycle,
-                                 sram_queue_depth, o2, policy, max_blocks_per_sm,
-                                 l2_max_transactions_per_cycle_per_sp,
-                                 tma_setup_latency_cycles,
-                                 tma_issue_interval_cycles,
-                                 tma_issue_rate_bytes_per_cycle,
-                                 tmem_cols_per_cta,
-                                 tmem_issue_interval_cycles,
-                                 tmem_read_latency_cycles,
-                                 tmem_read_bandwidth_bytes_per_cycle,
-                                 tmem_write_latency_cycles,
-                                 tmem_write_bandwidth_bytes_per_cycle,
-                                 tmem_queue_depth,
-                                 startup_delay_cycles,
-                                 block_schedule_latency_cycles));
+            sms.push_back(new SM(
+                i, warp_count, tensor_throughput, simd_throughput,
+                sfu_throughput, ls_throughput_bytes, tensor_latency_cycles,
+                simd_latency_cycles, sfu_latency_cycles, shfl_latency_cycles,
+                ls_latency_cycles, tensor_width, simd_width, sfu_width,
+                ls_width_bytes, sram_latency_cycles,
+                sram_bandwidth_bytes_per_cycle, sram_queue_depth, o2, policy,
+                max_blocks_per_sm, l2_max_transactions_per_cycle_per_sp,
+                tma_setup_latency_cycles, tma_issue_interval_cycles,
+                tma_issue_rate_bytes_per_cycle, tmem_cols_per_cta,
+                tmem_issue_interval_cycles, tmem_read_latency_cycles,
+                tmem_read_bandwidth_bytes_per_cycle, tmem_write_latency_cycles,
+                tmem_write_bandwidth_bytes_per_cycle, tmem_queue_depth,
+                startup_delay_cycles, block_schedule_latency_cycles));
         }
 
         memory_system = std::make_unique<MemorySystem>(

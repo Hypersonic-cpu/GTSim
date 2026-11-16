@@ -210,25 +210,24 @@ class NativeExpander:
                     suffix += f"_iter{scheduled_executor}"
                 suffix += "_w" + str(self.warp_bases[cta] + executor)
                 instruction = A.ArchInstruction(
-                        identity,
-                        f"{self.region.symbol}_{pattern.id}_{step_id}_{suffix}",
-                        step.opcode.value,
-                        step.resource,
-                        cta,
-                        self.warp_bases[cta] + executor,
-                        tensor.id if tensor else None,
-                        (*offsets, *shape),
-                        step.dtype,
-                        resolver.value(step.leading_dim.expression)
-                        if step.leading_dim
-                        else None,
-                        tuple(dict.fromkeys(issue)),
-                        tuple(dict.fromkeys(complete)),
-                        tuple(
-                            (v.id, resolver.value(v.expression))
-                            for v in step.static_args
-                        ),
-                        point.get(self.region.domain.pipeline.loop.variable),
+                    identity,
+                    f"{self.region.symbol}_{pattern.id}_{step_id}_{suffix}",
+                    step.opcode.value,
+                    step.resource,
+                    cta,
+                    self.warp_bases[cta] + executor,
+                    tensor.id if tensor else None,
+                    (*offsets, *shape),
+                    step.dtype,
+                    resolver.value(step.leading_dim.expression)
+                    if step.leading_dim
+                    else None,
+                    tuple(dict.fromkeys(issue)),
+                    tuple(dict.fromkeys(complete)),
+                    tuple(
+                        (v.id, resolver.value(v.expression)) for v in step.static_args
+                    ),
+                    point.get(self.region.domain.pipeline.loop.variable),
                 )
                 if self.emit_instruction_callback is not None:
                     self.emit_instruction_callback(instruction)

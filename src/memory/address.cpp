@@ -10,9 +10,11 @@ TensorPlacement make_hbf_tensor_placement(const MemorySystemConfig& config) {
     return [placement = std::move(placement)](TensorRegistry& registry,
                                               TensorMetadata tensor) mutable {
         if (!tensor.preloaded || !tensor.read_only)
-            throw std::invalid_argument("HBF program tensors require preloaded read-only data");
+            throw std::invalid_argument(
+                "HBF program tensors require preloaded read-only data");
         if (placement) {
-            tensor.global_base_address = placement->allocate(tensor.byte_size()).base;
+            tensor.global_base_address =
+                placement->allocate(tensor.byte_size()).base;
             registry.register_tensor(std::move(tensor));
         } else {
             allocate_contiguous_tensor(registry, std::move(tensor));
@@ -20,4 +22,4 @@ TensorPlacement make_hbf_tensor_placement(const MemorySystemConfig& config) {
     };
 }
 
-}
+} // namespace GTSim

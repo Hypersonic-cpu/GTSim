@@ -3,25 +3,28 @@
 
 namespace GTSim {
 
-std::unique_ptr<MemoryBackend> make_hbfine_backend(
-    const HBFConfig&, double, std::uint64_t);
+std::unique_ptr<MemoryBackend> make_hbfine_backend(const HBFConfig&, double,
+                                                   std::uint64_t);
 
-std::unique_ptr<MemoryBackend> make_eventlab_backend(const HBFConfig&, double, std::uint64_t);
-std::unique_ptr<MemoryBackend> make_flashlab_backend(const HBFConfig&, double, std::uint64_t);
+std::unique_ptr<MemoryBackend> make_eventlab_backend(const HBFConfig&, double,
+                                                     std::uint64_t);
+std::unique_ptr<MemoryBackend> make_flashlab_backend(const HBFConfig&, double,
+                                                     std::uint64_t);
 
 TensorPlacement make_hbf_tensor_placement(const MemorySystemConfig&);
 
-void allocate_contiguous_tensor(TensorRegistry& registry, TensorMetadata tensor) {
+void allocate_contiguous_tensor(TensorRegistry& registry,
+                                TensorMetadata tensor) {
     registry.allocate_tensor(
         tensor.id, std::move(tensor.name), std::move(tensor.shape),
         std::move(tensor.strides), tensor.dtype, tensor.initial_memory_tier,
         tensor.preloaded, tensor.read_only, tensor.tile_major);
 }
 
-TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTier tier) {
+TensorPlacement make_tensor_placement(const MemorySystemConfig& config,
+                                      MemoryTier tier) {
     switch (tier) {
-    case MemoryTier::HBM:
-        return allocate_contiguous_tensor;
+    case MemoryTier::HBM: return allocate_contiguous_tensor;
     case MemoryTier::HBF:
         // The FlashAccel control uses the same HBF-tagged source program for
         // every memory profile.  A FullHBM run is the explicit no-HBF
@@ -34,12 +37,15 @@ TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTi
             };
         }
         if (!config.address_layout.enabled)
-            throw std::invalid_argument("HBF program tensors require an active HBF segment");
+            throw std::invalid_argument(
+                "HBF program tensors require an active HBF segment");
         if (config.hbf.backend == HBFBackend::HBFine ||
             config.hbf.controller.geometry == HBFGeometryProfile::GroupedPlanes)
             return make_hbf_tensor_placement(config);
         return [](TensorRegistry& r, TensorMetadata t) {
-            if (!t.preloaded || !t.read_only) throw std::invalid_argument("HBF weights require preload and readonly");
+            if (!t.preloaded || !t.read_only)
+                throw std::invalid_argument(
+                    "HBF weights require preload and readonly");
             allocate_contiguous_tensor(r, std::move(t));
         };
     }
@@ -47,11 +53,19 @@ TensorPlacement make_tensor_placement(const MemorySystemConfig& config, MemoryTi
 }
 
 std::unique_ptr<MemoryBackend> make_hbf_backend(const HBFConfig& config,
-                                              double frequency, std::uint64_t base) {
-    if (config.backend == HBFBackend::EventLab) return make_sram_backend(make_eventlab_backend(config, frequency, base),config,base);
-    if (config.backend == HBFBackend::FlashLab) return make_sram_backend(make_flashlab_backend(config, frequency, base),config,base);
-    if (config.backend == HBFBackend::Naive) return std::make_unique<HBFModel>(config, frequency);
-    if (config.backend == HBFBackend::HBFine) return make_sram_backend(make_hbfine_backend(config, frequency, base),config,base);
+                                                double frequency,
+                                                std::uint64_t base) {
+    if (config.backend == HBFBackend::EventLab)
+        return make_sram_backend(make_eventlab_backend(config, frequency, base),
+                                 config, base);
+    if (config.backend == HBFBackend::FlashLab)
+        return make_sram_backend(make_flashlab_backend(config, frequency, base),
+                                 config, base);
+    if (config.backend == HBFBackend::Naive)
+        return std::make_unique<HBFModel>(config, frequency);
+    if (config.backend == HBFBackend::HBFine)
+        return make_sram_backend(make_hbfine_backend(config, frequency, base),
+                                 config, base);
     throw std::invalid_argument("unknown HBF backend");
 }
 

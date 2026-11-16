@@ -21,20 +21,32 @@ public:
           device_(config_, base, request_capacity(config)) {}
 
     bool try_submit(const MemRequest& request, int now) override {
-        if (request.tier != MemoryTier::HBF) throw std::invalid_argument("HBFineBackend received a non-HBF request");
+        if (request.tier != MemoryTier::HBF)
+            throw std::invalid_argument(
+                "HBFineBackend received a non-HBF request");
         if (pending_.contains(request.request_id))
             throw std::logic_error("duplicate HBFine request ID");
         hbfine::Operation operation;
         switch (request.operation) {
         case MemoryOperation::Read: operation = hbfine::Operation::Read; break;
-        case MemoryOperation::Write: operation = hbfine::Operation::Write; break;
-        case MemoryOperation::Writeback: operation = hbfine::Operation::Writeback; break;
+        case MemoryOperation::Write:
+            operation = hbfine::Operation::Write;
+            break;
+        case MemoryOperation::Writeback:
+            operation = hbfine::Operation::Writeback;
+            break;
         default: throw std::invalid_argument("unsupported HBF operation");
         }
-        const auto path=request.read_path==MemoryReadPath::Prefetch ? hbfine::ReadPath::Prefetch :
-            request.read_path==MemoryReadPath::Resident ? hbfine::ReadPath::Resident : hbfine::ReadPath::Host;
-        if (!device_.try_submit({request.request_id, request.global_addr, request.size_bytes,
-                                 operation, request.routing.axi_id, path}, physical_time(now))) return false;
+        const auto path = request.read_path == MemoryReadPath::Prefetch
+                              ? hbfine::ReadPath::Prefetch
+                          : request.read_path == MemoryReadPath::Resident
+                              ? hbfine::ReadPath::Resident
+                              : hbfine::ReadPath::Host;
+        if (!device_.try_submit({request.request_id, request.global_addr,
+                                 request.size_bytes, operation,
+                                 request.routing.axi_id, path},
+                                physical_time(now)))
+            return false;
         pending_.emplace(request.request_id, request);
         return true;
     }
@@ -46,16 +58,19 @@ public:
         responses.reserve(completions.size());
         for (const auto& completion : completions) {
             const auto& request = pending_.at(completion.request_id);
-            responses.push_back({request.request_id, request.global_addr, request.tier,
-                                 completion.error == hbfine::Error::None,
-                                 request.operation == MemoryOperation::Read ? request.size_bytes : 16,
-                                 request.operation, static_cast<int>(completion.error)});
+            responses.push_back(
+                {request.request_id, request.global_addr, request.tier,
+                 completion.error == hbfine::Error::None,
+                 request.operation == MemoryOperation::Read ? request.size_bytes
+                                                            : 16,
+                 request.operation, static_cast<int>(completion.error)});
             pending_.erase(completion.request_id);
-
         }
         return responses;
     }
-    std::size_t pending_requests() const override { return pending_.size(); }
+    std::size_t pending_requests() const override {
+        return pending_.size();
+    }
     DeviceCounters device_counters() const override {
         const auto& stats = device_.statistics();
         DeviceCounters counters{{{"sensed_bytes", stats.sensed_bytes},
@@ -72,12 +87,15 @@ public:
         }
         return counters;
     }
-    bool supports_sram_paths() const override { return true; }
-    MemoryLocation locate(std::uint64_t address) const override {
-        const auto a=hbfine::decode_address(address,base_,config_);
-        return {a.stack,a.die,a.plane};
+    bool supports_sram_paths() const override {
+        return true;
     }
-    HBFBackendStatistics hbf_statistics() const override { const auto& s = device_.statistics();
+    MemoryLocation locate(std::uint64_t address) const override {
+        const auto a = hbfine::decode_address(address, base_, config_);
+        return {a.stack, a.die, a.plane};
+    }
+    HBFBackendStatistics hbf_statistics() const override {
+        const auto& s = device_.statistics();
         HBFBackendStatistics r;
         r.accepted_requests = s.accepted_requests;
         r.completed_requests = s.completed_requests;
@@ -111,8 +129,13 @@ public:
         r.plane_erase_busy_ps = s.plane_erase_busy_ps;
         r.die_transfer_busy_ps = s.die_transfer_busy_ps;
         r.ecc_busy_ps = s.ecc_busy_ps;
-        for (const auto& b : s.bandwidth_bins) r.bandwidth_bins.push_back({b.start_ps,b.end_ps,b.media_read_bytes,b.host_read_bytes,b.prefetch_fill_bytes,b.resident_read_bytes,b.sense_commands});
-        return r; }
+        for (const auto& b : s.bandwidth_bins)
+            r.bandwidth_bins.push_back(
+                {b.start_ps, b.end_ps, b.media_read_bytes, b.host_read_bytes,
+                 b.prefetch_fill_bytes, b.resident_read_bytes,
+                 b.sense_commands});
+        return r;
+    }
     std::vector<MemoryBandwidthSample> bandwidth_samples() const override {
         std::vector<MemoryBandwidthSample> result;
         for (const auto& bin : device_.statistics().bandwidth_bins)
@@ -125,13 +148,15 @@ public:
                               {{"sense_commands", bin.sense_commands}}});
         return result;
     }
-    void preload_region(std::uint64_t address, std::uint64_t bytes, bool /*read_only*/) override {
+    void preload_region(std::uint64_t address, std::uint64_t bytes,
+                        bool /*read_only*/) override {
         device_.preload_region(address, bytes);
     }
 
 private:
     static std::size_t request_capacity(const HBFConfig& config) {
-        if (config.queue_capacity <= 0) throw std::invalid_argument("invalid HBF request capacity");
+        if (config.queue_capacity <= 0)
+            throw std::invalid_argument("invalid HBF request capacity");
         return static_cast<std::size_t>(config.queue_capacity);
     }
     static std::uint64_t clock_khz(double mhz) {
@@ -141,7 +166,8 @@ private:
     }
     hbfine::Time physical_time(int cycle) const {
         if (cycle < 0) throw std::invalid_argument("negative HBF core cycle");
-        return static_cast<std::uint64_t>(cycle) * 1000000000ULL / frequency_khz_;
+        return static_cast<std::uint64_t>(cycle) * 1000000000ULL /
+               frequency_khz_;
     }
     std::uint64_t frequency_khz_;
     hbfine::Config config_;
@@ -151,7 +177,8 @@ private:
 };
 } // namespace
 std::unique_ptr<MemoryBackend> make_hbfine_backend(const HBFConfig& config,
-                                                   double frequency, std::uint64_t base) {
+                                                   double frequency,
+                                                   std::uint64_t base) {
     return std::make_unique<HBFineBackend>(config, frequency, base);
 }
 } // namespace GTSim

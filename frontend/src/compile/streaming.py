@@ -15,6 +15,7 @@ from parser import ast as A
 from .expand_native import NativeExpander
 from .static import EMPTY, Resolver, bound_resolver
 from .opt.prefetch import PageBudget, spans
+
 PIPELINES = {
     A.ExecutionResource.LOAD: "LD",
     A.ExecutionResource.STORE: "ST",
@@ -159,8 +160,7 @@ def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
             commands.append({"kind": "WaitEvent", "target": command.target})
     if not commands:
         commands = [
-            {"kind": "LaunchKernel", "target": launch_id}
-            for launch_id in launch_ids
+            {"kind": "LaunchKernel", "target": launch_id} for launch_id in launch_ids
         ] + [{"kind": "StreamSynchronize", "target": stream}]
     prefetches = []
     if prefetch is not None:
@@ -179,8 +179,10 @@ def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
         for item in prefetch.queue:
             for name in item.consumers:
                 users.setdefault(name, []).append(item.id)
-        launches = [replace(launch, read_aliases=tuple(users.get(launch.launch_id, ())))
-                    for launch in launches]
+        launches = [
+            replace(launch, read_aliases=tuple(users.get(launch.launch_id, ())))
+            for launch in launches
+        ]
         enqueue = {}
         release = {}
         for item in prefetch.queue:
@@ -191,11 +193,15 @@ def make_program_plan(source_program, arch, regions, tensors, prefetch=None):
         for command in commands:
             if command["kind"] == "LaunchKernel":
                 target = command["target"]
-                expanded.extend({"kind": "QueuePrefetch", "target": item}
-                                for item in enqueue.get(launch_index, ()))
+                expanded.extend(
+                    {"kind": "QueuePrefetch", "target": item}
+                    for item in enqueue.get(launch_index, ())
+                )
                 expanded.append(command)
-                expanded.extend({"kind": "Release", "target": item}
-                                for item in release.get(target, ()))
+                expanded.extend(
+                    {"kind": "Release", "target": item}
+                    for item in release.get(target, ())
+                )
                 launch_index += 1
             else:
                 expanded.append(command)
@@ -227,7 +233,9 @@ class ExecutionIRProducer:
             launch_overhead_cycles=self.plan.launch_overhead_cycles,
         )
         for tensor in self.plan.tensors:
-            writer.send("TensorDef", **{k: v for k, v in tensor.items() if k != "record"})
+            writer.send(
+                "TensorDef", **{k: v for k, v in tensor.items() if k != "record"}
+            )
         for launch in self.plan.launches:
             writer.send(
                 "LaunchDef",
@@ -254,9 +262,7 @@ class ExecutionIRProducer:
     def emit_kernel(self, launch_id: str, writer) -> None:
         if self._active_launch is not None:
             raise RuntimeError("concurrent kernel expansion is forbidden")
-        launch = next(
-            (x for x in self.plan.launches if x.launch_id == launch_id), None
-        )
+        launch = next((x for x in self.plan.launches if x.launch_id == launch_id), None)
         if launch is None:
             raise KeyError(launch_id)
         self._active_launch = launch_id
@@ -310,6 +316,7 @@ class ExecutionIRProducer:
                 writer.send("InstructionBatch", instructions=list(instruction_batch))
                 instruction_batch.clear()
                 instruction_batch_bytes = 0
+
             # A kernel's output contract is the set of tensors it actually
             # stores.  Program-level returns may omit intermediates (e.g. H in
             # a two-GEMM chain), so using ArchIR.outputs here would reject a
@@ -363,7 +370,10 @@ class ExecutionIRProducer:
                 instruction_batch_bytes += instruction_bytes + (
                     1 if len(instruction_batch) > 1 else 0
                 )
-                if node.opcode == A.NativeOpcode.TMA_LOAD.value and node.tensor is not None:
+                if (
+                    node.opcode == A.NativeOpcode.TMA_LOAD.value
+                    and node.tensor is not None
+                ):
                     loads.append(
                         (
                             node.cta,
@@ -373,10 +383,12 @@ class ExecutionIRProducer:
                             node.tile,
                         )
                     )
-                if node.opcode == A.NativeOpcode.TMA_STORE.value and node.tensor is not None:
+                if (
+                    node.opcode == A.NativeOpcode.TMA_STORE.value
+                    and node.tensor is not None
+                ):
                     store_areas[node.tensor] = (
-                        store_areas.get(node.tensor, 0)
-                        + node.tile[2] * node.tile[3]
+                        store_areas.get(node.tensor, 0) + node.tile[2] * node.tile[3]
                     )
                     output_ids.add(node.tensor)
 
@@ -443,7 +455,14 @@ class ExecutionIRProducer:
             and tensors_by_id[item[3]].preloaded
             and tensors_by_id[item[3]].read_only
         ]
-        eligible.sort(key=lambda item: (waves[item[0]], -1 if item[1] is None else item[1], item[0], item[2]))
+        eligible.sort(
+            key=lambda item: (
+                waves[item[0]],
+                -1 if item[1] is None else item[1],
+                item[0],
+                item[2],
+            )
+        )
         windows, consumers = [], []
         budget = PageBudget(config, bases, len(windows) % config.buffer_count)
         active_wave = None
@@ -453,10 +472,16 @@ class ExecutionIRProducer:
                 return
             windows.append(
                 A.PrefetchWindow(
-                    A.PrefetchBuffer(len(windows) % config.buffer_count, config.buffer_count, len(windows)),
+                    A.PrefetchBuffer(
+                        len(windows) % config.buffer_count,
+                        config.buffer_count,
+                        len(windows),
+                    ),
                     tuple(consumers),
                     tuple(
-                        A.PrefetchRange(tensor_ids_by_name[span.tensor], span.offset, span.bytes)
+                        A.PrefetchRange(
+                            tensor_ids_by_name[span.tensor], span.offset, span.bytes
+                        )
                         for span in spans(budget.pages, sizes, config)
                     ),
                 )
@@ -468,14 +493,20 @@ class ExecutionIRProducer:
             width = 2 if tensor.dtype in (A.DataType.BF16, A.DataType.FP16) else 4
             pages = set()
             if tensor.tile_major:
-                pages.update((tensor.name, p) for p in tensor.tile_major.pages(tensor.shape[1], r, c, h, w))
+                pages.update(
+                    (tensor.name, p)
+                    for p in tensor.tile_major.pages(tensor.shape[1], r, c, h, w)
+                )
             else:
                 for row in range(r, r + h):
                     begin = (row * tensor.shape[1] + c) * width
                     end = begin + w * width
                     pages.update(
                         (tensor.name, p)
-                        for p in range(begin // config.page_bytes, (end - 1) // config.page_bytes + 1)
+                        for p in range(
+                            begin // config.page_bytes,
+                            (end - 1) // config.page_bytes + 1,
+                        )
                     )
             current_wave = waves[cta_id]
             if current_wave != active_wave:

@@ -18,12 +18,12 @@ namespace GTSim {
 class SM {
 public:
     int sm_id;
-    std::vector<Subpartition*> sps;  // 4 subpartitions
+    std::vector<Subpartition*> sps; // 4 subpartitions
     std::vector<Scheduler*> sp_schedulers;
-    Memory* sram;                     // Shared memory
-    Memory* tmem_mem;                 // Tensor memory access model
-    TMAUnit* tma;                     // TMA unit
-    TMEMUnit* tmem;                   // Tensor Memory unit
+    Memory* sram;     // Shared memory
+    Memory* tmem_mem; // Tensor memory access model
+    TMAUnit* tma;     // TMA unit
+    TMEMUnit* tmem;   // Tensor Memory unit
     std::vector<Subpartition*>* node_id_to_sp;
 
     std::unordered_map<int, CTAResources> cta_resources;
@@ -36,65 +36,68 @@ public:
     bool can_admit(int tb) const;
     void reserve_cta(int tb, int sign);
 
-    int max_concurrent_blocks;  // Maximum concurrent thread blocks per SM
+    int max_concurrent_blocks; // Maximum concurrent thread blocks per SM
 
     // Thread block residency scheduling
-    int max_resident_tbs;                          // R: maximum resident TBs (e.g., 2)
-    std::set<int> resident_tb_ids;                 // Currently resident TB IDs
-    std::queue<int> waiting_tb_queue;              // TBs waiting to be dispatched
-    std::deque<int> tb_dispatch_ready;             // Ready cycles for dispatching waiting TBs
-    std::set<int> all_tb_ids;                      // All unique TB IDs in workload
-    std::unordered_map<int, std::vector<DAGNode*>> tb_to_nodes;  // Map TB ID to its nodes
-    std::unordered_map<int, int> tb_remaining_count;  // Remaining nodes per TB (for fast completion check)
-    std::vector<int> node_id_to_tb_id;             // Direct mapping: node ID → TB ID (O(1) lookup)
-    int block_schedule_latency_cycles;            // Delay before scheduling next TB after completion
+    int max_resident_tbs;             // R: maximum resident TBs (e.g., 2)
+    std::set<int> resident_tb_ids;    // Currently resident TB IDs
+    std::queue<int> waiting_tb_queue; // TBs waiting to be dispatched
+    std::deque<int>
+        tb_dispatch_ready;    // Ready cycles for dispatching waiting TBs
+    std::set<int> all_tb_ids; // All unique TB IDs in workload
+    std::unordered_map<int, std::vector<DAGNode*>>
+        tb_to_nodes; // Map TB ID to its nodes
+    std::unordered_map<int, int>
+        tb_remaining_count; // Remaining nodes per TB (for fast completion check)
+    std::vector<int>
+        node_id_to_tb_id; // Direct mapping: node ID → TB ID (O(1) lookup)
+    int block_schedule_latency_cycles; // Delay before scheduling next TB after completion
 
     SM(int id, int warp_count, int tensor_throughput, int simd_throughput,
-       int sfu_throughput, int ls_throughput_bytes,
-       int tensor_latency_cycles, int simd_latency_cycles,
-       int sfu_latency_cycles, int shfl_latency_cycles, int ls_latency_cycles,
-       int tensor_width, int simd_width, int sfu_width, int ls_width_bytes,
-       int sram_latency_cycles, int sram_bandwidth_bytes_per_cycle, int sram_queue_depth,
-       bool o2, SchedulePolicy policy, int max_blocks,
-       int l2_max_transactions_per_cycle_per_sp,
-       int tma_setup_latency_cycles,
-       int tma_issue_interval_cycles,
-       int tma_issue_rate_bytes_per_cycle,
-       int tmem_cols_per_cta,
-       int tmem_issue_interval_cycles,
-       int tmem_read_latency_cycles,
-       int tmem_read_bandwidth_bytes_per_cycle,
-       int tmem_write_latency_cycles,
-       int tmem_write_bandwidth_bytes_per_cycle,
-       int tmem_queue_depth,
-       int startup_delay_cycles,
+       int sfu_throughput, int ls_throughput_bytes, int tensor_latency_cycles,
+       int simd_latency_cycles, int sfu_latency_cycles, int shfl_latency_cycles,
+       int ls_latency_cycles, int tensor_width, int simd_width, int sfu_width,
+       int ls_width_bytes, int sram_latency_cycles,
+       int sram_bandwidth_bytes_per_cycle, int sram_queue_depth, bool o2,
+       SchedulePolicy policy, int max_blocks,
+       int l2_max_transactions_per_cycle_per_sp, int tma_setup_latency_cycles,
+       int tma_issue_interval_cycles, int tma_issue_rate_bytes_per_cycle,
+       int tmem_cols_per_cta, int tmem_issue_interval_cycles,
+       int tmem_read_latency_cycles, int tmem_read_bandwidth_bytes_per_cycle,
+       int tmem_write_latency_cycles, int tmem_write_bandwidth_bytes_per_cycle,
+       int tmem_queue_depth, int startup_delay_cycles,
        int block_schedule_latency_cycles)
-        : sm_id(id), max_concurrent_blocks(max_blocks), max_resident_tbs(max_blocks),
+        : sm_id(id),
+          max_concurrent_blocks(max_blocks),
+          max_resident_tbs(max_blocks),
           block_schedule_latency_cycles(block_schedule_latency_cycles) {
 
         // Create 4 subpartitions
         for (int i = 0; i < 4; ++i) {
-            sps.push_back(new Subpartition(i, warp_count, tensor_throughput, simd_throughput,
-                                           sfu_throughput, ls_throughput_bytes,
-                                           tensor_latency_cycles, simd_latency_cycles,
-                                           sfu_latency_cycles, shfl_latency_cycles, ls_latency_cycles,
-                                           tensor_width, simd_width, sfu_width, ls_width_bytes,
-                                           o2, policy, l2_max_transactions_per_cycle_per_sp));
+            sps.push_back(new Subpartition(
+                i, warp_count, tensor_throughput, simd_throughput,
+                sfu_throughput, ls_throughput_bytes, tensor_latency_cycles,
+                simd_latency_cycles, sfu_latency_cycles, shfl_latency_cycles,
+                ls_latency_cycles, tensor_width, simd_width, sfu_width,
+                ls_width_bytes, o2, policy,
+                l2_max_transactions_per_cycle_per_sp));
         }
 
         for (auto* sp : sps) {
             sp_schedulers.push_back(sp->sp_scheduler);
-            sp->tmem_write_extra_latency_cycles =
-                std::max(0, tmem_write_latency_cycles - tmem_read_latency_cycles);
+            sp->tmem_write_extra_latency_cycles = std::max(
+                0, tmem_write_latency_cycles - tmem_read_latency_cycles);
         }
         for (auto* sp : sps) {
             sp->sp_scheduler->set_peer_schedulers(&sp_schedulers);
         }
 
         // Create shared memory (SRAM) with separate read/write ports
-        sram = new Memory(sram_latency_cycles, sram_bandwidth_bytes_per_cycle, sram_queue_depth);
-        tmem_mem = new Memory(tmem_read_latency_cycles, tmem_read_bandwidth_bytes_per_cycle,
-                              tmem_queue_depth);
+        sram = new Memory(sram_latency_cycles, sram_bandwidth_bytes_per_cycle,
+                          sram_queue_depth);
+        tmem_mem =
+            new Memory(tmem_read_latency_cycles,
+                       tmem_read_bandwidth_bytes_per_cycle, tmem_queue_depth);
         tmem_mem->memory_write_bandwidth = tmem_write_bandwidth_bytes_per_cycle;
         tmem_mem->memory_write_queue_depth = tmem_queue_depth;
         tmem_mem->memory_write_occupied_until = 0;

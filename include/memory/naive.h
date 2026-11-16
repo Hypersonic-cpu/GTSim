@@ -16,7 +16,9 @@ public:
           frequency_khz_(static_cast<std::uint64_t>(
               std::llround(core_frequency_mhz * 1000))) {}
 
-    std::size_t pending_requests() const override { return queued_requests(); }
+    std::size_t pending_requests() const override {
+        return queued_requests();
+    }
 
     // Compatibility constructor for code that used the previous DRAMModel API.
     HBMModel(int bandwidth_bytes_per_cycle, int latency_cycles,
@@ -55,7 +57,9 @@ public:
         }
     }
 
-    void enqueue(const MemRequest& request, int now) { submit(request, now); }
+    void enqueue(const MemRequest& request, int now) {
+        submit(request, now);
+    }
 
     std::vector<MemResponse> step(int now) override {
         std::vector<MemResponse> completed;
@@ -69,10 +73,10 @@ public:
             return completed;
         }
 
-        double total_budget = total_bandwidth_bytes_per_cycle_ +
-                              total_fractional_credit_;
-        double write_budget = write_max_bandwidth_bytes_per_cycle_ +
-                              write_fractional_credit_;
+        double total_budget =
+            total_bandwidth_bytes_per_cycle_ + total_fractional_credit_;
+        double write_budget =
+            write_max_bandwidth_bytes_per_cycle_ + write_fractional_credit_;
         while (total_budget > kBandwidthEpsilon) {
             const bool can_read = !read_requests_.empty() &&
                                   read_requests_.front().ready_cycle <= now;
@@ -84,11 +88,10 @@ public:
             }
 
             const bool use_write = can_write && (!can_read || prefer_write_);
-            Request& request = use_write ? write_requests_.front()
-                                         : read_requests_.front();
-            const double available = use_write
-                                         ? std::min(total_budget, write_budget)
-                                         : total_budget;
+            Request& request =
+                use_write ? write_requests_.front() : read_requests_.front();
+            const double available =
+                use_write ? std::min(total_budget, write_budget) : total_budget;
             const double transferred = std::min(
                 static_cast<double>(request.remaining_bytes), available);
             if (transferred <= kBandwidthEpsilon) {
@@ -174,8 +177,13 @@ private:
         const int response_bytes = request.operation == MemoryOperation::Read
                                        ? std::max(1, request.size_bytes)
                                        : kMemoryControlBytes;
-        return {request.request_id, request.global_addr, request.tier, true,
-                response_bytes, request.operation, 0};
+        return {request.request_id,
+                request.global_addr,
+                request.tier,
+                true,
+                response_bytes,
+                request.operation,
+                0};
     }
 };
 
@@ -213,7 +221,9 @@ public:
         return true;
     }
 
-    std::size_t pending_requests() const override { return queued_requests(); }
+    std::size_t pending_requests() const override {
+        return queued_requests();
+    }
 
     void submit(const MemRequest& request, int now) {
         if (!try_submit(request, now)) {
@@ -261,8 +271,13 @@ private:
         const int response_bytes = request.operation == MemoryOperation::Read
                                        ? std::max(1, request.size_bytes)
                                        : kMemoryControlBytes;
-        return {request.request_id, request.global_addr, request.tier, true,
-                response_bytes, request.operation, 0};
+        return {request.request_id,
+                request.global_addr,
+                request.tier,
+                true,
+                response_bytes,
+                request.operation,
+                0};
     }
 
     static void service_queue(std::deque<Request>& requests,
@@ -278,7 +293,8 @@ private:
         while (budget > kBandwidthEpsilon && !requests.empty() &&
                requests.front().ready_cycle <= now) {
             Request& request = requests.front();
-            const double transferred = std::min(request.remaining_bytes, budget);
+            const double transferred =
+                std::min(request.remaining_bytes, budget);
             if (transferred <= kBandwidthEpsilon) {
                 break;
             }
@@ -296,4 +312,4 @@ private:
 // Full-duplex point-to-point link. Each direction has its own serializer and
 // propagation latency; queueing is FIFO and bounded by queue_capacity.
 
-}
+} // namespace GTSim

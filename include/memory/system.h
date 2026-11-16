@@ -198,8 +198,9 @@ public:
                      std::optional<PrefetchBuffer> buffer = std::nullopt) {
         auto alias = prefetch_range(tensor_id, offset, bytes);
         alias.buffer = buffer;
-        alias.queue_id = device(alias.tier).enqueue_prefetch(
-            alias.address, alias.bytes, alias.buffer);
+        alias.queue_id =
+            device(alias.tier)
+                .enqueue_prefetch(alias.address, alias.bytes, alias.buffer);
         return alias;
     }
 
@@ -249,9 +250,9 @@ public:
         std::vector<std::shared_ptr<std::vector<ReadAlias>>>().swap(
             node_read_aliases_);
     }
-    void bind_node_read_aliases(
-        const std::vector<int>& nodes,
-        std::shared_ptr<std::vector<ReadAlias>> aliases) {
+    void
+    bind_node_read_aliases(const std::vector<int>& nodes,
+                           std::shared_ptr<std::vector<ReadAlias>> aliases) {
         for (const auto node : nodes) {
             assert(node >= 0 &&
                    static_cast<std::size_t>(node) < node_read_aliases_.size());
@@ -311,9 +312,9 @@ public:
             result.emplace(
                 tier, TierCounterSnapshot{
                           traffic.read_bytes, traffic.write_bytes,
-                                                    device ? device->device_counters() : DeviceCounters{},
-                                                    traffic.read_completions, traffic.read_latency_cycles,
-                                                    traffic.unadmitted_alias_read_bytes});
+                          device ? device->device_counters() : DeviceCounters{},
+                          traffic.read_completions, traffic.read_latency_cycles,
+                          traffic.unadmitted_alias_read_bytes});
         };
         snapshot(MemoryTier::HBM, hbm_.get(), hbm_statistics_);
         snapshot(MemoryTier::HBF, hbf_.get(), hbf_statistics_);
@@ -386,14 +387,14 @@ private:
     void build_full_hbm(double core_frequency_mhz) {
         hbm_ = make_hbm_backend(memory_config_.hbm, core_frequency_mhz);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
     }
 
     void build_full_hbf(double core_frequency_mhz) {
         hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
                                 tensors_.address_layout().hbf_base);
         gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
     }
 
     void build_co_located(double core_frequency_mhz) {
@@ -401,9 +402,9 @@ private:
         hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
                                 tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
         gpu_to_hbf_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbf,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
     }
 
     void build_cascaded(double core_frequency_mhz) {
@@ -411,9 +412,9 @@ private:
         hbf_ = make_hbf_backend(memory_config_.hbf, core_frequency_mhz,
                                 tensors_.address_layout().hbf_base);
         gpu_to_hbm_ = std::make_unique<D2DLink>(memory_config_.gpu_to_hbm,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
         hbm_to_hbf_ = std::make_unique<D2DLink>(memory_config_.hbm_to_hbf,
-                                                 core_frequency_mhz);
+                                                core_frequency_mhz);
     }
 
     MemoryTier effective_tier(MemoryTier requested) const {
@@ -465,14 +466,15 @@ private:
                     request.global_addr - alias.address < alias.bytes &&
                     static_cast<std::uint64_t>(request.size_bytes) <=
                         alias.bytes - (request.global_addr - alias.address)) {
-                    request.read_alias = alias.queue_id
-                                             ? device(alias.tier).prefetch_alias(
-                                                   alias.queue_id)
-                                             : alias.token;
+                    request.read_alias =
+                        alias.queue_id
+                            ? device(alias.tier).prefetch_alias(alias.queue_id)
+                            : alias.token;
                     if (alias.queue_id && !request.read_alias)
-                        device(alias.tier).on_demand_miss(
-                            alias.queue_id, request.global_addr,
-                            static_cast<std::uint64_t>(request.size_bytes));
+                        device(alias.tier)
+                            .on_demand_miss(
+                                alias.queue_id, request.global_addr,
+                                static_cast<std::uint64_t>(request.size_bytes));
                     if (!request.read_alias)
                         statistics_for(tier).unadmitted_alias_read_bytes +=
                             request.size_bytes;
@@ -481,12 +483,10 @@ private:
         }
         const auto [it, inserted] = request_routes_.emplace(
             request.request_id,
-            RequestRoute{tier,
-                         current_cycle,
-                         request.global_addr,
-                         static_cast<std::uint64_t>(
-                             std::max(1, request.size_bytes)),
-                         request.operation});
+            RequestRoute{
+                tier, current_cycle, request.global_addr,
+                static_cast<std::uint64_t>(std::max(1, request.size_bytes)),
+                request.operation});
         assert(inserted);
         (void)it;
         TierMemoryStatistics& stats = statistics_for(tier);
@@ -502,20 +502,18 @@ private:
         }
 
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-            case MemoryTopology::CoLocated:
-                if (tier == MemoryTier::HBM) {
-                    pending_to_hbm_.push_back(request);
-                } else {
-                    pending_to_hbf_.push_back(request);
-                }
-                break;
-            case MemoryTopology::FullHBF:
+        case MemoryTopology::FullHBM:
+        case MemoryTopology::CoLocated:
+            if (tier == MemoryTier::HBM) {
+                pending_to_hbm_.push_back(request);
+            } else {
                 pending_to_hbf_.push_back(request);
-                break;
-            case MemoryTopology::Cascaded:
-                pending_to_base_.push_back(request);
-                break;
+            }
+            break;
+        case MemoryTopology::FullHBF: pending_to_hbf_.push_back(request); break;
+        case MemoryTopology::Cascaded:
+            pending_to_base_.push_back(request);
+            break;
         }
     }
 
@@ -544,21 +542,21 @@ private:
 
     void launch_pending_requests(int current_cycle) {
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-                launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
-                break;
-            case MemoryTopology::FullHBF:
-                launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
-                break;
-            case MemoryTopology::CoLocated:
-                launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
-                launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
-                break;
-            case MemoryTopology::Cascaded:
-                launch_requests(gpu_to_hbm_.get(), pending_to_base_, current_cycle);
-                launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
-                                current_cycle);
-                break;
+        case MemoryTopology::FullHBM:
+            launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
+            break;
+        case MemoryTopology::FullHBF:
+            launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
+            break;
+        case MemoryTopology::CoLocated:
+            launch_requests(gpu_to_hbm_.get(), pending_to_hbm_, current_cycle);
+            launch_requests(gpu_to_hbf_.get(), pending_to_hbf_, current_cycle);
+            break;
+        case MemoryTopology::Cascaded:
+            launch_requests(gpu_to_hbm_.get(), pending_to_base_, current_cycle);
+            launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
+                            current_cycle);
+            break;
         }
     }
 
@@ -580,30 +578,30 @@ private:
 
     void advance_forward_links(int current_cycle) {
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-                gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
-                route_first_hop_arrivals(link_request_scratch_);
-                break;
-            case MemoryTopology::FullHBF:
-                gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
-                route_first_hop_arrivals(link_request_scratch_);
-                break;
-            case MemoryTopology::CoLocated:
-                gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
-                route_first_hop_arrivals(link_request_scratch_);
-                gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
-                route_first_hop_arrivals(link_request_scratch_);
-                break;
-            case MemoryTopology::Cascaded:
-                gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
-                route_first_hop_arrivals(link_request_scratch_);
-                launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
-                                current_cycle);
-                hbm_to_hbf_->step_requests(current_cycle, link_request_scratch_);
-                for (const auto& request : link_request_scratch_) {
-                    pending_hbf_device_.push_back(request);
-                }
-                break;
+        case MemoryTopology::FullHBM:
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            break;
+        case MemoryTopology::FullHBF:
+            gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            break;
+        case MemoryTopology::CoLocated:
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            gpu_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            break;
+        case MemoryTopology::Cascaded:
+            gpu_to_hbm_->step_requests(current_cycle, link_request_scratch_);
+            route_first_hop_arrivals(link_request_scratch_);
+            launch_requests(hbm_to_hbf_.get(), pending_hbm_to_hbf_,
+                            current_cycle);
+            hbm_to_hbf_->step_requests(current_cycle, link_request_scratch_);
+            for (const auto& request : link_request_scratch_) {
+                pending_hbf_device_.push_back(request);
+            }
+            break;
         }
     }
 
@@ -624,51 +622,51 @@ private:
         assert(response.size_bytes == static_cast<int>(route.bytes) ||
                route.operation != MemoryOperation::Read);
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
+        case MemoryTopology::FullHBM:
+            pending_hbm_response_.push_back(response);
+            break;
+        case MemoryTopology::FullHBF:
+            pending_hbf_response_.push_back(response);
+            break;
+        case MemoryTopology::CoLocated:
+            if (route.tier == MemoryTier::HBM) {
                 pending_hbm_response_.push_back(response);
-                break;
-            case MemoryTopology::FullHBF:
+            } else {
                 pending_hbf_response_.push_back(response);
-                break;
-            case MemoryTopology::CoLocated:
-                if (route.tier == MemoryTier::HBM) {
-                    pending_hbm_response_.push_back(response);
-                } else {
-                    pending_hbf_response_.push_back(response);
-                }
-                break;
-            case MemoryTopology::Cascaded:
-                if (route.tier == MemoryTier::HBM) {
-                    pending_hbm_response_.push_back(response);
-                } else {
-                    pending_hbm_to_hbf_response_.push_back(response);
-                }
-                break;
+            }
+            break;
+        case MemoryTopology::Cascaded:
+            if (route.tier == MemoryTier::HBM) {
+                pending_hbm_response_.push_back(response);
+            } else {
+                pending_hbm_to_hbf_response_.push_back(response);
+            }
+            break;
         }
     }
 
     void launch_pending_responses(int current_cycle) {
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
-                                 current_cycle);
-                break;
-            case MemoryTopology::FullHBF:
-                launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
-                                 current_cycle);
-                break;
-            case MemoryTopology::CoLocated:
-                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
-                                 current_cycle);
-                launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
-                                 current_cycle);
-                break;
-            case MemoryTopology::Cascaded:
-                launch_responses(hbm_to_hbf_.get(), pending_hbm_to_hbf_response_,
-                                 current_cycle);
-                launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
-                                 current_cycle);
-                break;
+        case MemoryTopology::FullHBM:
+            launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                             current_cycle);
+            break;
+        case MemoryTopology::FullHBF:
+            launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
+                             current_cycle);
+            break;
+        case MemoryTopology::CoLocated:
+            launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                             current_cycle);
+            launch_responses(gpu_to_hbf_.get(), pending_hbf_response_,
+                             current_cycle);
+            break;
+        case MemoryTopology::Cascaded:
+            launch_responses(hbm_to_hbf_.get(), pending_hbm_to_hbf_response_,
+                             current_cycle);
+            launch_responses(gpu_to_hbm_.get(), pending_hbm_response_,
+                             current_cycle);
+            break;
         }
     }
 
@@ -688,8 +686,7 @@ private:
         const auto retire = [&](const std::vector<MemResponse>& responses) {
             for (const auto& response : responses) {
                 const auto& route = request_routes_.at(response.request_id);
-                TierMemoryStatistics& stats =
-                    statistics_for(route.tier);
+                TierMemoryStatistics& stats = statistics_for(route.tier);
                 ++stats.completed_requests;
                 if (response.operation == MemoryOperation::Read) {
                     ++stats.read_completions;
@@ -703,24 +700,24 @@ private:
             }
         };
         switch (memory_config_.topology) {
-            case MemoryTopology::FullHBM:
-                gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
-                retire(link_response_scratch_);
-                break;
-            case MemoryTopology::FullHBF:
-                gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
-                retire(link_response_scratch_);
-                break;
-            case MemoryTopology::CoLocated:
-                gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
-                retire(link_response_scratch_);
-                gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
-                retire(link_response_scratch_);
-                break;
-            case MemoryTopology::Cascaded:
-                gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
-                retire(link_response_scratch_);
-                break;
+        case MemoryTopology::FullHBM:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::FullHBF:
+            gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::CoLocated:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            gpu_to_hbf_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
+        case MemoryTopology::Cascaded:
+            gpu_to_hbm_->step_responses(current_cycle, link_response_scratch_);
+            retire(link_response_scratch_);
+            break;
         }
     }
 };

@@ -21,7 +21,6 @@ void SM::reserve_cta(int tb, int sign) {
     warps_used += sign * it->second.warps;
 }
 
-
 void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
     // Build mapping from TB ID to nodes
     int max_node_id = 0;
@@ -38,7 +37,7 @@ void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
     }
 
     // Build direct node ID → TB ID mapping for O(1) lookup in hot path
-    node_id_to_tb_id.resize(max_node_id + 1, -1);  // -1 indicates unmapped
+    node_id_to_tb_id.resize(max_node_id + 1, -1); // -1 indicates unmapped
     for (auto* node : all_nodes) {
         node_id_to_tb_id[node->id] = node->thread_block_id;
     }
@@ -47,7 +46,8 @@ void SM::initialize_tb_scheduler(const std::vector<DAGNode*>& all_nodes) {
     int dispatched = 0;
     bool admission_open = true;
     for (int tb_id : all_tb_ids) {
-        if (admission_open && dispatched < max_resident_tbs && can_admit(tb_id)) {
+        if (admission_open && dispatched < max_resident_tbs &&
+            can_admit(tb_id)) {
             reserve_cta(tb_id, 1);
             resident_tb_ids.insert(tb_id);
 
@@ -70,18 +70,19 @@ bool SM::is_tb_complete(int tb_id) {
     // Optimized: O(1) counter check instead of O(nodes) iteration
     auto it = tb_remaining_count.find(tb_id);
     if (it == tb_remaining_count.end()) {
-        return true;  // No nodes for this TB
+        return true; // No nodes for this TB
     }
     return it->second == 0;
 }
 
 bool SM::dispatch_next_tb(int current_cycle) {
     if (waiting_tb_queue.empty() || !can_admit(waiting_tb_queue.front())) {
-        return false;  // No TBs waiting
+        return false; // No TBs waiting
     }
 
-    if (!tb_dispatch_ready.empty() && current_cycle < tb_dispatch_ready.front()) {
-        return false;  // Dispatch delay not yet satisfied
+    if (!tb_dispatch_ready.empty() &&
+        current_cycle < tb_dispatch_ready.front()) {
+        return false; // Dispatch delay not yet satisfied
     }
 
     if (!tb_dispatch_ready.empty()) {
@@ -131,7 +132,8 @@ void SM::step(int current_cycle, L2Cache* l2,
             node_id < static_cast<int>(node_id_to_sp->size())) {
             if (auto* sp = (*node_id_to_sp)[node_id]) {
                 if (std::find(sps.begin(), sps.end(), sp) != sps.end()) {
-                    bool finished = sp->handle_memory_completion(node_id, current_cycle);
+                    bool finished =
+                        sp->handle_memory_completion(node_id, current_cycle);
                     if (finished) {
                         on_node_complete(node_id);
                     }
@@ -151,7 +153,8 @@ void SM::step(int current_cycle, L2Cache* l2,
             node_id < static_cast<int>(node_id_to_sp->size())) {
             if (auto* sp = (*node_id_to_sp)[node_id]) {
                 if (std::find(sps.begin(), sps.end(), sp) != sps.end()) {
-                    bool finished = sp->handle_memory_completion(node_id, current_cycle);
+                    bool finished =
+                        sp->handle_memory_completion(node_id, current_cycle);
                     if (finished) {
                         on_node_complete(node_id);
                     }
@@ -177,7 +180,8 @@ void SM::step(int current_cycle, L2Cache* l2,
 
     // Step 4: Step each subpartition
     for (auto* sp : sps) {
-        auto non_memory_completions = sp->step(current_cycle, sram, tmem_mem, l2);
+        auto non_memory_completions =
+            sp->step(current_cycle, sram, tmem_mem, l2);
 
         // Decrement TB remaining count using direct array lookup (O(1))
         for (int node_id : non_memory_completions) {
@@ -204,7 +208,8 @@ void SM::step(int current_cycle, L2Cache* l2,
         reserve_cta(tb_id, -1);
         resident_tb_ids.erase(tb_id);
         if (block_schedule_latency_cycles > 0) {
-            tb_dispatch_ready.push_back(current_cycle + block_schedule_latency_cycles);
+            tb_dispatch_ready.push_back(current_cycle +
+                                        block_schedule_latency_cycles);
         } else {
             tb_dispatch_ready.push_back(current_cycle);
         }

@@ -21,7 +21,8 @@ public:
     };
 
     HardwarePrefetchEngine(std::size_t capacity, bool cancel_on_miss)
-        : capacity_(capacity), cancel_on_miss_(cancel_on_miss) {}
+        : capacity_(capacity),
+          cancel_on_miss_(cancel_on_miss) {}
 
     std::uint64_t enqueue(std::uint64_t address, std::uint64_t bytes,
                           std::optional<PrefetchBuffer> buffer) {
@@ -98,10 +99,18 @@ public:
         return {true, token};
     }
 
-    std::uint64_t queued_total() const { return queued_total_; }
-    std::size_t pending_count() const { return pending_count_; }
-    std::uint64_t capacity_stalls() const { return capacity_stalls_; }
-    std::uint64_t canceled() const { return canceled_; }
+    std::uint64_t queued_total() const {
+        return queued_total_;
+    }
+    std::size_t pending_count() const {
+        return pending_count_;
+    }
+    std::uint64_t capacity_stalls() const {
+        return capacity_stalls_;
+    }
+    std::uint64_t canceled() const {
+        return canceled_;
+    }
     int admission_cycle(std::uint64_t handle) const {
         const auto found = queued_.find(handle);
         return found == queued_.end() ? -1 : found->second.admission_cycle;
@@ -129,11 +138,11 @@ public:
                   config.controller.planes_per_die,
                   config.controller.page_bytes,
                   config.controller.sram_bytes_per_plane,
-          config.controller.base_die_sram_bytes_per_stack},
+                  config.controller.base_die_sram_bytes_per_stack},
           enabled_(config.controller.enable_read_sram &&
                    config.prefetch_engine.enabled),
-          prefetch_engine_(static_cast<std::size_t>(
-                               std::max(1, config.prefetch_engine.queue_capacity)),
+          prefetch_engine_(static_cast<std::size_t>(std::max(
+                               1, config.prefetch_engine.queue_capacity)),
                            config.prefetch_engine.cancel_queued_on_demand_miss),
           base_(base),
           interleave_(config.prefetch_hyperpage_order),
@@ -178,7 +187,8 @@ public:
                  ? resident_read_bytes_
                  : fallback_read_bytes_) += request.size_bytes;
         }
-        const auto inserted = pending_.emplace(request.request_id, request).second;
+        const auto inserted =
+            pending_.emplace(request.request_id, request).second;
         assert(inserted);
         (void)inserted;
         return true;
@@ -251,9 +261,9 @@ public:
                         return std::tuple{page / (groups_ * lanes_),
                                           page % lanes_,
                                           (page / lanes_) % groups_};
-                };
+                    };
                     return key(a.address) < key(b.address);
-            });
+                });
         }
         auto reservation = sram_.reserve(address, bytes, buffer);
         if (!reservation) return 0;
@@ -265,9 +275,9 @@ public:
         return token;
     }
 
-    std::uint64_t enqueue_prefetch(
-        std::uint64_t address, std::uint64_t bytes,
-        std::optional<PrefetchBuffer> buffer) override {
+    std::uint64_t
+    enqueue_prefetch(std::uint64_t address, std::uint64_t bytes,
+                     std::optional<PrefetchBuffer> buffer) override {
         if (!enabled_ || !bytes || address % 64 || bytes % 64 ||
             address > std::numeric_limits<std::uint64_t>::max() - bytes)
             throw std::invalid_argument(
@@ -303,8 +313,8 @@ public:
         if (region.started || region.released)
             throw std::invalid_argument("invalid prefetch start");
         region.started = true;
-        const auto position = std::lower_bound(
-            active_regions_.begin(), active_regions_.end(), token);
+        const auto position = std::lower_bound(active_regions_.begin(),
+                                               active_regions_.end(), token);
         active_regions_.insert(position, token);
         ++started_fills_;
         ++active_fills_;
@@ -412,8 +422,7 @@ private:
             return started && !failed && submitted == bytes && !outstanding;
         }
         bool fill_retired() const {
-            return !started ||
-                   (!outstanding && (failed || submitted == bytes));
+            return !started || (!outstanding && (failed || submitted == bytes));
         }
     };
     struct Background {
@@ -452,8 +461,7 @@ private:
                                       {},
                                       0,
                                       MemoryReadPath::Prefetch};
-                if (!backend_->try_submit(fill, time))
-                    return;
+                if (!backend_->try_submit(fill, time)) return;
                 background_.emplace(id, Background{token, address, bytes});
                 region.submitted += bytes;
                 ++region.next_fill;
@@ -466,8 +474,7 @@ private:
 
     void reclaim(std::uint64_t token) {
         const auto& region = regions_.at(token);
-        if (!region.released || region.consumers ||
-            !region.fill_retired())
+        if (!region.released || region.consumers || !region.fill_retired())
             return;
         sram_.release(region.reservation);
         reserved_bytes_ -= region.reservation.pages.size() * config_.page_bytes;

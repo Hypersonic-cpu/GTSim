@@ -20,8 +20,12 @@ def main():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--emit-ir", action="store_true")
     args = parser.parse_args()
-    flow = compile_program(args.source, json.loads(args.params.read_text()),
-                           list(args.lib.glob("*.algoir")), list(args.lib.glob("*.flowir")))
+    flow = compile_program(
+        args.source,
+        json.loads(args.params.read_text()),
+        list(args.lib.glob("*.algoir")),
+        list(args.lib.glob("*.flowir")),
+    )
     arch = lower_flow(flow)
     if args.emit_ir:
         if args.out is None:
@@ -34,23 +38,43 @@ def main():
     for spec in arch.tensors:
         shape = tuple(root.value(d) for d in spec.shape)
         tensors[spec.id] = A.KernelTensor(
-            spec.id, spec.id, shape, _strides(shape), spec.dtype,
-            spec.tier or A.MemorySpace.HBM, spec.external, spec.read_only, None,
+            spec.id,
+            spec.id,
+            shape,
+            _strides(shape),
+            spec.dtype,
+            spec.tier or A.MemorySpace.HBM,
+            spec.external,
+            spec.read_only,
+            None,
         )
     total = 0
     for region in arch.regions:
         arguments = {a.id: root.value(a.expression) for a in region.static.arguments}
-        resolver = Resolver(replace(region.static, parameters=(), constraints=()),
-                            {**root.values, **arguments}).materialize_constants()
+        resolver = Resolver(
+            replace(region.static, parameters=(), constraints=()),
+            {**root.values, **arguments},
+        ).materialize_constants()
         cta_ids = []
         expander = NativeExpander(region, resolver, tensors)
         expander.expand_to(lambda c: cta_ids.append(c.id), lambda _: None)
         node_count = expander.next_node_id
         cta_count = len(cta_ids)
         if node_count:
-            print(json.dumps(dict(id=region.symbol, nodes=node_count, ctas=cta_count,
-                                  after=region.after)), flush=True)
+            print(
+                json.dumps(
+                    dict(
+                        id=region.symbol,
+                        nodes=node_count,
+                        ctas=cta_count,
+                        after=region.after,
+                    )
+                ),
+                flush=True,
+            )
             total += node_count
     print(json.dumps(dict(symbol=arch.symbol, total_nodes=total)))
+
+
 if __name__ == "__main__":
     main()

@@ -86,7 +86,8 @@ private:
                 bytes += range.bytes;
             }
             for (int node : window.consumers) {
-                assert(node >= 0 && static_cast<std::size_t>(node) < owners_.size() &&
+                assert(node >= 0 &&
+                       static_cast<std::size_t>(node) < owners_.size() &&
                        owners_[node] == -1 && consumer_predicate(node));
                 owners_[node] = i;
             }
