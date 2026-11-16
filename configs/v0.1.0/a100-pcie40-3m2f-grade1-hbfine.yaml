@@ -4,7 +4,7 @@
 # Two HBF stacks: 524.288 GB/s read, 27.96 GB/s write.
 # Grade-1 host-link ceiling: 384 GB/s per stack, 768 aggregate.
 # NAND read/program latency assumptions 4/75 us -> 5640/105750 cycles @1410 MHz.
-name: A100 3M2F matched 8-Hi - Simple HBM plus bank_plane HBF
+name: A100 3M2F matched 8-Hi - Simple HBM plus HBFine HBF
 source: NVIDIA A100 product brief and Ampere tuning guide; uncalibrated timing assumptions documented in report
 sm_count: 108
 core_frequency_mhz: 1410
@@ -41,7 +41,7 @@ hbm:
   write_latency_cycles: 270
   capacity_bytes: 25769803776
 hbf:
-  backend: bank_plane
+  backend: hbfine
   controller:
     geometry: hbflex_research
     stacks: 2

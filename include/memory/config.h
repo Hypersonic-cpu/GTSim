@@ -14,7 +14,7 @@ namespace GTSim {
 enum class MemoryTopology { FullHBM, FullHBF, CoLocated, Cascaded };
 enum class HBMBackend { Naive, Ramulator2 };
 enum class TensorPlacementProfile { AllHBM, GEMMBInHBF, FA3QInHBF };
-enum class HBFBackend { Naive, HBFine, BankPlane = HBFine, EventLab, FlashLab };
+enum class HBFBackend { Naive, HBFine, EventLab, FlashLab };
 using HBFGeometryProfile = hbfine::GeometryProfile;
 using HBFControllerConfig = hbfine::Config;
 

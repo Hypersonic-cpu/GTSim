@@ -151,10 +151,10 @@ void Simulator::print_configuration(bool verbose) {
     *output_stream << "HBF read/write latency: "
                    << config.memory.hbf.read_latency_cycles << "/"
                    << config.memory.hbf.write_latency_cycles << " cycles\n";
-    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+    if (config.memory.hbf.backend == HBFBackend::HBFine) {
         const auto& c = config.memory.hbf.controller;
         const bool grouped = c.geometry == HBFGeometryProfile::GroupedPlanes;
-        *output_stream << "HBF backend: bank_plane; profile "
+        *output_stream << "HBF backend: hbfine; profile "
                        << (c.geometry == HBFGeometryProfile::OCPReference
                                ? "ocp_reference"
                            : grouped ? "grouped_planes"
@@ -278,7 +278,7 @@ void Simulator::print_statistics(bool verbose) {
                        << "; channel burst min/max " << *min_channel << "/"
                        << *max_channel << "\n";
     }
-    if (config.memory.hbf.backend == HBFBackend::BankPlane) {
+    if (config.memory.hbf.backend == HBFBackend::HBFine) {
         const auto hbf = simulated_gpu->memory_system->hbf_backend_statistics();
         *output_stream << "HBF detailed JSON: {";
         bool first = true;

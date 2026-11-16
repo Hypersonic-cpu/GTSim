@@ -87,10 +87,10 @@ git submodule update --init 3rdparty/hbfine
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ./build/gtsim_gemm configs/v0.1.0/h100-sxm.yaml \
-  --memory-config configs/memconf/3F2M_bank_plane.yaml \
+  --memory-config configs/memconf/3F2M_hbfine.yaml \
   --memory-config configs/memconf/placement_gemm_b_hbf.yaml 512 512 512
 ./build/gtsim_fa3 configs/v0.1.0/h100-sxm.yaml \
-  --memory-config configs/memconf/1F4M_bank_plane_ocp.yaml \
+  --memory-config configs/memconf/1F4M_hbfine_ocp.yaml \
   --memory-config configs/memconf/placement_fa3_q_hbf.yaml 1 8 8 1536 1536
 ctest --test-dir build --output-on-failure
 python3 scripts/hbf/compare_backends.py --build-dir build

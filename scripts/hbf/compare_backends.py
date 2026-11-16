@@ -18,8 +18,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ("0F5M_channels", "3F2M_naive", "3F2M_bank_plane", "3F2M_bank_plane_ocp",
-            "1F4M_naive", "1F4M_bank_plane", "1F4M_bank_plane_ocp")
+PROFILES = ("0F5M_channels", "3F2M_naive", "3F2M_hbfine", "3F2M_hbfine_ocp",
+            "1F4M_naive", "1F4M_hbfine", "1F4M_hbfine_ocp")
 CASES = {"gemm": [(512, 512, 512), (1024, 1024, 1024), (2048, 4096, 512)],
          "fa3": [(1, 8, 8, 1536, 1536), (1, 8, 8, 512, 512)]}
 
@@ -66,7 +66,7 @@ def run_case(build, output, workload, shape, profile):
     hbf = traffic.get("HBF", {"read_bytes": 0, "write_bytes": 0})
     assert (hbf["read_bytes"] > 0) == mixed, label + ": intended HBF traffic missing"
     assert hbf["write_bytes"] == 0, label + ": unexpected HBF writes"
-    detailed = "bank_plane" in profile
+    detailed = "hbfine" in profile
     match = re.search(r"^HBF detailed JSON: (.*)$", text, re.M)
     stats = json.loads(match[1]) if match else {}
     if detailed:

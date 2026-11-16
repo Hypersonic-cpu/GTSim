@@ -11,7 +11,7 @@ hbm:
     config_file: ../ramulator/h100_hbm3_3stack.yaml
     stacks: 3
 hbf:
-  backend: bank_plane
+  backend: hbfine
   read_bw_GBps: 1536
   # Nominal array program ceiling, required by the schema. Programming disabled.
   write_bw_GBps: 83.88608

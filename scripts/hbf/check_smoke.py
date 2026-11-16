@@ -17,7 +17,7 @@ def main():
         for workload, placement, shape in (("gemm", "gemm_b_hbf", [128, 256, 64]),
                                            ("fa3", "fa3_q_hbf", [1, 1, 1, 128, 128])):
             command = [str(args.build_dir / f"gtsim_{workload}"), str(ROOT / "configs/v0.1.0/h100-sxm.yaml"),
-                       "--memory-config", str(ROOT / f"configs/memconf/{topology}_bank_plane.yaml"),
+                       "--memory-config", str(ROOT / f"configs/memconf/{topology}_hbfine.yaml"),
                        "--memory-config", str(ROOT / f"configs/memconf/placement_{placement}.yaml"),
                        *map(str, shape)]
             text = subprocess.check_output(command, text=True, stderr=subprocess.STDOUT)

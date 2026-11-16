@@ -150,8 +150,8 @@ private:
     std::unordered_map<std::uint64_t, MemRequest> pending_;
 };
 } // namespace
-std::unique_ptr<MemoryBackend> make_bank_plane_hbf_backend(const HBFConfig& config,
-                                                         double frequency, std::uint64_t base) {
+std::unique_ptr<MemoryBackend> make_hbfine_backend(const HBFConfig& config,
+                                                   double frequency, std::uint64_t base) {
     return std::make_unique<HBFineBackend>(config, frequency, base);
 }
 } // namespace GTSim

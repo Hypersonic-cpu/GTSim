@@ -15,11 +15,11 @@ void matched_profiles(const char* simple, const char* detailed) {
     ArchConfYamlReader(detailed).parse(b);
     require(a.memory.hbm.backend == HBMBackend::Naive && b.memory.hbm.backend == HBMBackend::Naive,
             "HBM must stay Simple in this comparison");
-    require(a.memory.hbf.backend == HBFBackend::Naive && b.memory.hbf.backend == HBFBackend::BankPlane,
+    require(a.memory.hbf.backend == HBFBackend::Naive && b.memory.hbf.backend == HBFBackend::HBFine,
             "HBF selection mismatch");
     b.memory.hbf.backend = HBFBackend::Naive;
     require(glz::write_json(a).value() == glz::write_json(b).value(), "matched profiles differ beyond HBF selection");
-    b.memory.hbf.backend = HBFBackend::BankPlane;
+    b.memory.hbf.backend = HBFBackend::HBFine;
     const auto& c = b.memory.hbf.controller;
     require(c.dies_per_stack == 8 && c.banks_per_channel == 16 && c.planes_per_bank == 1 && c.stacks == 2,
             "incorrect 8-Hi geometry");

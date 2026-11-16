@@ -12,7 +12,7 @@ static void require(bool condition, const char* message) {
 
 int main() {
     HBFConfig config;
-    config.backend = HBFBackend::BankPlane;
+    config.backend = HBFBackend::HBFine;
     auto& c = config.controller;
     c.enable_read_sram = true;
     c.read_sram_access_latency_ns = 20;

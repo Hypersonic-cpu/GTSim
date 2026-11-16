@@ -107,12 +107,12 @@ GPU L2、HBM/HBF 路由和 GTSim D2D link 保持原来的外部接口。明确�
 
 ```yaml
 hbf:
-  backend: bank_plane  # 需要改名为 HBFine 相关
+  backend: hbfine
   # backend: eventlab
   # backend: flashlab
 ```
 
-名称需清晰，原有 `bank_plane` 需要和新的保持“平行”。
+名称需清晰，三种后端使用各自明确的名称。
 
 统一四组配置：
 
@@ -129,7 +129,7 @@ hbf:
 2. HBM 后端保持相同实现，只按 stack 数量调整容量/带宽。
 3. HBF 三组尽可能统一 4 μs read、75 μs program、4 KiB NAND page、stack/channel 数量和物理接口档位；模型无法等价的参数明确记录。
 4. 使用已有 `placement: all_hbm` / `gemm_b_hbf`，保证 A/C 始终 HBM。Split-K 中的 PartialC 也必须保留在 HBM。
-5. 当前 `make_tensor_placement()` 将详细 HBF 限定为 BankPlane，需推广为所有支持的 HBF 后端；不能把 HBFine 的特定物理布局强加给其他模拟器。
+5. 当前 `make_tensor_placement()` 将详细 HBF 限定为 HBFine，需推广为所有支持的 HBF 后端；不能把 HBFine 的特定物理布局强加给其他模拟器。
 6. 确保 B 的 readonly/preloaded 语义一致，测量阶段 HBF write bytes 应为零。
 7. 几组实验可以同时开始跑, 用不同进程. 另外, HBM直接用 simple model 即可.&#x20;
 

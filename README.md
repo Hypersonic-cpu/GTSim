@@ -53,8 +53,7 @@ cmake --build build --target gtsim_gemm --parallel
 ```
 
 In the YAML, `hbm.backend` selects `naive` or `ramulator2`; `hbf.backend`
-selects `naive`, `hbfine`, `eventlab`, or `flashlab` (`bank_plane` remains a
-compatibility alias for `hbfine`). The accompanying topology, capacities and
+selects `naive`, `hbfine`, `eventlab`, or `flashlab`. The accompanying topology, capacities and
 placement must match the selected device. `build/flashlab-native/` is an internal
 third-party library build, linked into the same simulator. Ramulator2 may be
 excluded explicitly with `-DGTSIM_ENABLE_RAMULATOR2=OFF` for smaller builds.

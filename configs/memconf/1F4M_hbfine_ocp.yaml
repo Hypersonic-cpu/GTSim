@@ -1,6 +1,6 @@
 # Five-stack H100 package. HBFlex targets; no H200 HBM3e parameters.
 # OCP Host Channel and Bank semantics; the Bank/Plane assignment is assumed.
-# Sense engines: 512/stack; two page buffers per Bank do not add engines.
+# Sense engines: 256/stack; two page buffers per Bank do not add engines.
 topology: CoLocated
 hbm:
   backend: naive
@@ -12,20 +12,20 @@ hbm:
   read_latency_cycles: 270
   write_latency_cycles: 270
 hbf:
-  backend: bank_plane
+  backend: hbfine
   read_bw_GBps: 488
   write_bw_GBps: 27.2
   read_latency_cycles: 7920
   write_latency_cycles: 148500
   controller:
-    geometry: hbflex_research
+    geometry: ocp_reference
     stacks: 1
     host_channels_per_stack: 16
     virtual_axi_ports_per_channel: 1
     dies_per_stack: 16
     planes_per_die: 32
-    banks_per_channel: 32
-    planes_per_bank: 1
+    banks_per_channel: 16
+    planes_per_bank: 2
     blocks_per_plane: 512
     pages_per_block: 512
     page_bytes: 4096
