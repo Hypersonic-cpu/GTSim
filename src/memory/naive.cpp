@@ -58,6 +58,26 @@ public:
         return stats_;
     }
 
+    std::vector<MemoryBandwidthSample> bandwidth_samples() const override {
+        std::map<std::pair<std::uint64_t, std::uint64_t>, MemoryBandwidthSample>
+            merged;
+        for (const auto& channel : channels_) {
+            for (const auto& sample : channel->bandwidth_samples()) {
+                auto& target = merged[{sample.start_ps, sample.end_ps}];
+                target.start_ps = sample.start_ps;
+                target.end_ps = sample.end_ps;
+                for (const auto& [name, bytes] : sample.bytes)
+                    target.bytes[name] += bytes;
+                for (const auto& [name, count] : sample.counts)
+                    target.counts[name] += count;
+            }
+        }
+        std::vector<MemoryBandwidthSample> result;
+        result.reserve(merged.size());
+        for (auto& [interval, sample] : merged) result.push_back(std::move(sample));
+        return result;
+    }
+
 private:
     int stacks_;
     std::size_t pending_{};

@@ -390,6 +390,7 @@ def optimize(flow, config, layouts=None, origin_launches=None):
     )
     regions, uses, gates, tails = [], [], [], {}
     router_done = False
+    router_boundary = None
     for region in flow.regions:
         if any(name not in tails for name in region.after):
             raise ValueError(f"non-topological dependency in {region.symbol}")
@@ -404,13 +405,17 @@ def optimize(flow, config, layouts=None, origin_launches=None):
             raise ValueError(
                 f"{region.symbol}: routing-dependent prefetch precedes router completion"
             )
-        # QueuePrefetch is inserted at the launch index of this region.  For
-        # routing-dependent weights that index is therefore strictly after
-        # router_softmax_topk, while static weights retain their first-use
-        # order and can overlap earlier kernels.
-        gate = len(regions) if trace_gate else 0
+        # QueuePrefetch is inserted at a launch boundary.  Routing-dependent
+        # weights become legal immediately after router_softmax_topk, not at
+        # the eventual consumer boundary; histogram/gather work can overlap
+        # their transfer. Static weights retain their first-use order.
         if region.symbol == "router_softmax_topk":
             router_done = True
+        if trace_gate and router_boundary is None:
+            raise ValueError(
+                f"{region.symbol}: routing-dependent prefetch has no router boundary"
+            )
+        gate = router_boundary if trace_gate else 0
         if config.streaming:
             # FlashAccel keeps partition decisions in the preceding pass, but
             # still needs compact page ranges for QueuePrefetch.  Do not split
@@ -451,6 +456,8 @@ def optimize(flow, config, layouts=None, origin_launches=None):
             uses.append(spans(pages, sizes, config))
             gates.append(gate)
             after = (part.symbol,)
+        if region.symbol == "router_softmax_topk":
+            router_boundary = len(regions)
         tails[region.symbol] = after
     if len({r.symbol for r in regions}) != len(regions):
         raise ValueError("duplicate transformed launch ID")

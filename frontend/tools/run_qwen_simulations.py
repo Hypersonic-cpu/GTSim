@@ -25,6 +25,14 @@ from compile.opt.partition import (
     memory_topology,
     partition_flow,
 )
+from compile.opt.gemm_tiling import (
+    GemmTiling,
+    apply_gemm_tiling,
+    summarize_gemm_flow,
+    summaries_json,
+    validate_gemm_flow,
+    validate_native_gemm,
+)
 from compile.opt.prefetch import PrefetchPlan, Residency, optimize
 from parser import ast as A, parse_file
 
@@ -71,12 +79,26 @@ def plan_program(
     flashaccel_policy=None,
     physical_layout=None,
     prefetch_enabled=True,
+    gemm_tiling=None,
 ):
     layouts = layouts or {}
     placements = placements or {}
     flow = compile_program(
         source, params, list(lib.glob("*.algoir")), list(lib.glob("*.flowir"))
     )
+    root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
+    if gemm_tiling is not None:
+        flow = apply_gemm_tiling(
+            flow,
+            gemm_tiling.bm,
+            gemm_tiling.bn,
+            gemm_tiling.bk,
+            gemm_tiling.stages,
+        )
+        root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
+    compiled_tiling = summaries_json(summarize_gemm_flow(flow))
+    if gemm_tiling is not None:
+        validate_gemm_flow(flow, root)
     known = {tensor.id for tensor in flow.tensors}
     if placements.keys() - known:
         raise ValueError(
@@ -97,7 +119,6 @@ def plan_program(
             for tensor in flow.tensors
         ),
     )
-    root = bound_resolver(flow.static, Resolver(EMPTY, {})).materialize_constants()
     if focus:
         flow = isolate_launch(flow, root, focus, expert, params)
     specs = {spec.id: spec for spec in flow.tensors}
@@ -158,6 +179,9 @@ def plan_program(
     if prefetch is not None:
         flow = prefetch.flow
     arch = lower_flow(flow)
+    if gemm_tiling is not None:
+        validate_native_gemm(arch)
+    native_tiling = summaries_json(summarize_gemm_flow(flow, arch))
     root = bound_resolver(arch.static, Resolver(EMPTY, {})).materialize_constants()
     tensors = []
     for spec in arch.tensors:
@@ -190,12 +214,29 @@ def plan_program(
             if not g.iterations
         ):
             regions.append(region)
+    metadata = {
+        "gemm_tiling": compiled_tiling,
+        "native_tiling": native_tiling,
+        "partition": {
+            "enabled": partition is not None,
+            "views": len(partition.views) if partition is not None else 0,
+            "generated_slabs": sum(
+                len(children)
+                for children in (partition.origin_launches.values() if partition else ())
+                if len(children) > 1
+            ),
+            "origin_launches": partition.origin_launches
+            if partition is not None
+            else {},
+        },
+    }
     return (
         parse_file(source),
         regions,
         replace(arch, regions=tuple(regions)),
         prefetch,
         tuple(tensors),
+        metadata,
     )
 
 
@@ -212,6 +253,7 @@ def run_streaming_interface(
     raw_layouts,
     placements,
     flashaccel=False,
+    compile_metadata=None,
 ):
     plan = make_program_plan(source_program, arch, regions, tensors, prefetch)
     topology = memory_topology(args.memory)
@@ -257,6 +299,14 @@ def run_streaming_interface(
         "max_frame": args.max_frame,
         "runner_sha256": sha(args.runner),
         "max_cycles": args.max_cycles,
+        "context_length": args.context_length,
+        "gemm_tiling": {
+            "bm": args.gemm_bm,
+            "bn": args.gemm_bn,
+            "bk": args.gemm_bk,
+            "stages": args.gemm_stages,
+        },
+        "sram_policy": args.sram_policy,
         "architecture_sha256": sha(args.architecture),
         "memory_sha256": sha(args.memory),
         "git_commit": subprocess.check_output(
@@ -266,6 +316,10 @@ def run_streaming_interface(
         "transport": "AF_UNIX socketpair; length-prefixed JSON; bounded InstructionBatch",
     }
     (args.out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    if compile_metadata is not None:
+        (args.out / "ir_summary.json").write_text(
+            json.dumps(compile_metadata, indent=2) + "\n"
+        )
     start = perf_counter()
     python_before = resource.getrusage(resource.RUSAGE_SELF)
     children_before = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -346,6 +400,7 @@ def run_streaming_interface(
         "python_peak_rss_kib": python_peak_rss_kib,
         "cpp_peak_rss_kib": cpp_peak_rss_kib,
         "peak_rss_kib": max(python_peak_rss_kib, cpp_peak_rss_kib),
+        "compile_metadata": compile_metadata,
         "kernels": [],
         "errors": failures,
         "transport": "unix socketpair framed JSON InstructionBatch",
@@ -397,17 +452,37 @@ def main():
     parser.add_argument("--prefetch-config", type=Path)
     parser.add_argument("--flashaccel-config", type=Path)
     parser.add_argument("--prefetch", choices=("on", "off"))
+    parser.add_argument(
+        "--context-length", type=int, choices=(10000, 100000, 200000)
+    )
+    parser.add_argument("--gemm-bm", type=int)
+    parser.add_argument("--gemm-bn", type=int)
+    parser.add_argument("--gemm-bk", type=int)
+    parser.add_argument("--gemm-stages", type=int)
+    parser.add_argument(
+        "--sram-policy", choices=("none", "pool", "double"), default="none"
+    )
     parser.add_argument("--tensor-layouts", type=Path)
     parser.add_argument("--tensor-placements", type=Path)
     parser.add_argument("--focus-launch")
     parser.add_argument("--focus-expert", type=int)
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--max-frame", type=int, default=1 << 20)
+    parser.add_argument("--compile-only", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if not 0 < args.max_frame <= 0xFFFFFFFF:
         parser.error("--max-frame must be in [1, 4294967295]")
     params = json.loads(args.params.read_text())
+    if args.context_length is not None:
+        params["CONTEXTS"] = [args.context_length]
+    tiling_values = (args.gemm_bm, args.gemm_bn, args.gemm_bk, args.gemm_stages)
+    if any(value is not None for value in tiling_values) and any(
+        value is None for value in tiling_values
+    ):
+        parser.error(
+            "--gemm-bm/--gemm-bn/--gemm-bk/--gemm-stages must be given together"
+        )
     residency = (
         json.loads(args.prefetch_config.read_text()) if args.prefetch_config else None
     )
@@ -420,27 +495,95 @@ def main():
     layout_objects = {
         name: A.TileMajorLayout(**layout) for name, layout in raw_layouts.items()
     }
-    flashaccel_policy = (
-        PartitionPolicy.from_json(args.flashaccel_config)
-        if args.flashaccel_config
-        else None
-    )
+    if args.flashaccel_config and args.sram_policy != "none":
+        parser.error("use either --flashaccel-config or --sram-policy, not both")
+    flashaccel_policy = None
+    if args.flashaccel_config:
+        flashaccel_policy = PartitionPolicy.from_json(args.flashaccel_config)
+    elif args.sram_policy != "none":
+        flashaccel_policy = PartitionPolicy(
+            partition_policy="n_slab_fit_sram",
+            buffer_count=1 if args.sram_policy == "pool" else 2,
+            bm=args.gemm_bm if args.gemm_bm is not None else 16,
+            bn=args.gemm_bn if args.gemm_bn is not None else 64,
+            bk=args.gemm_bk if args.gemm_bk is not None else 16,
+            stages=args.gemm_stages if args.gemm_stages is not None else 2,
+        )
+        flashaccel_policy.validate()
+    if flashaccel_policy is not None:
+        if any(value is not None for value in tiling_values):
+            supplied = GemmTiling(*tiling_values)
+            configured = GemmTiling(
+                flashaccel_policy.bm,
+                flashaccel_policy.bn,
+                flashaccel_policy.bk,
+                flashaccel_policy.stages,
+                flashaccel_policy.split,
+            )
+            if supplied != configured:
+                parser.error("direct GEMM tiling conflicts with --flashaccel-config")
+        gemm_tiling = GemmTiling(
+            flashaccel_policy.bm,
+            flashaccel_policy.bn,
+            flashaccel_policy.bk,
+            flashaccel_policy.stages,
+            flashaccel_policy.split,
+        )
+    else:
+        gemm_tiling = GemmTiling(
+            args.gemm_bm if args.gemm_bm is not None else 16,
+            args.gemm_bn if args.gemm_bn is not None else 64,
+            args.gemm_bk if args.gemm_bk is not None else 16,
+            args.gemm_stages if args.gemm_stages is not None else 2,
+        )
+        gemm_tiling.validate()
+    # Provenance should describe the effective geometry even when the legacy
+    # JSON policy supplied it.
+    args.gemm_bm, args.gemm_bn = gemm_tiling.bm, gemm_tiling.bn
+    args.gemm_bk, args.gemm_stages = gemm_tiling.bk, gemm_tiling.stages
+    topology = memory_topology(args.memory)
     physical_layout = (
         PhysicalLayout.from_memory_yaml(args.memory) if flashaccel_policy else None
     )
-    source_program, regions, arch, prefetch, tensors = plan_program(
+    source_program, regions, arch, prefetch, tensors, compile_metadata = plan_program(
         args.source,
         args.lib,
         params,
-        residency,
+        None if topology == "FullHBM" else residency,
         layout_objects,
         args.focus_launch,
         args.focus_expert,
         placements,
         flashaccel_policy,
         physical_layout,
-        args.prefetch != "off" and memory_topology(args.memory) != "FullHBM",
+        args.prefetch != "off" and topology != "FullHBM",
+        gemm_tiling,
     )
+    if args.compile_only:
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / "ir_summary.json").write_text(
+            json.dumps(compile_metadata, indent=2) + "\n"
+        )
+        (args.out / "compile_result.json").write_text(
+            json.dumps(
+                {
+                    "returncode": 0,
+                    "context_length": args.context_length,
+                    "gemm_tiling": {
+                        "bm": args.gemm_bm,
+                        "bn": args.gemm_bn,
+                        "bk": args.gemm_bk,
+                        "stages": args.gemm_stages,
+                    },
+                    "sram_policy": args.sram_policy,
+                    "memory_topology": topology,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        print(json.dumps({"compiled": True, "returncode": 0}), flush=True)
+        return
     run_streaming_interface(
         args,
         params,
@@ -454,6 +597,7 @@ def main():
         raw_layouts,
         placements,
         flashaccel=flashaccel_policy is not None,
+        compile_metadata=compile_metadata,
     )
 
 

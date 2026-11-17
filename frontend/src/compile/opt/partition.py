@@ -25,13 +25,33 @@ class TensorPartitionView:
 
 @dataclass(frozen=True)
 class PartitionPolicy:
-    partition_policy: str = "n_slab_fit_double_buffer"
+    partition_policy: str = "n_slab_fit_sram"
     buffer_count: int = 2
     bm: int = 16
     bn: int = 64
     bk: int = 16
     stages: int = 2
     split: int = 1
+
+    def validate(self):
+        if self.partition_policy not in (
+            "n_slab_fit_sram",
+            "n_slab_fit_double_buffer",
+        ):
+            raise ValueError("unsupported FlashAccel partition policy")
+        if self.partition_policy == "n_slab_fit_double_buffer" and self.buffer_count != 2:
+            raise ValueError("the legacy double-buffer policy requires buffer_count=2")
+        if self.buffer_count not in (1, 2):
+            raise ValueError("FlashAccel SRAM policy requires one or two buffers")
+        if (
+            self.bm not in (16, 32)
+            or self.bn not in (64, 128, 256)
+            or self.bk not in (16, 32, 64, 128, 256)
+            or self.stages != 2
+            or self.split != 1
+        ):
+            raise ValueError("unsupported FlashAccel GEMM tiling")
+        return self
 
     @classmethod
     def from_json(cls, path):
@@ -46,24 +66,7 @@ class PartitionPolicy:
             int(tiling.get("stages", cls.stages)),
             int(tiling.get("split", cls.split)),
         )
-        if result.partition_policy != "n_slab_fit_double_buffer":
-            raise ValueError("unsupported FlashAccel partition policy")
-        if (
-            result.buffer_count != 2
-            or min(result.bm, result.bn, result.bk, result.stages, result.split) <= 0
-        ):
-            raise ValueError("FlashAccel policy requires positive double-buffer tiling")
-        if (result.bm, result.bn, result.bk, result.stages, result.split) != (
-            16,
-            64,
-            16,
-            2,
-            1,
-        ):
-            raise ValueError(
-                "FlashAccel uses the validated small-M 16x64x16, stages=2 schedule"
-            )
-        return result
+        return result.validate()
 
 
 @dataclass(frozen=True)
@@ -468,8 +471,7 @@ def _split_selected_experts(region, resolver):
 
 
 def partition_flow(flow, policy: PartitionPolicy, layout: PhysicalLayout):
-    if policy.partition_policy != "n_slab_fit_double_buffer":
-        raise ValueError("unsupported FlashAccel partition policy")
+    policy.validate()
     root = _resolver(flow)
     global_tensors = {tensor.id: tensor for tensor in flow.tensors}
     bases = layout.bases(flow.tensors, root)

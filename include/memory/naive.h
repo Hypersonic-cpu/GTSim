@@ -98,6 +98,15 @@ public:
                 break;
             }
 
+            if (statistics_interval_ps_) {
+                const auto time_ps = static_cast<std::uint64_t>(now) *
+                                     1000000000ULL / frequency_khz_;
+                auto& bin = (use_write ? write_bandwidth_bins_ :
+                                         read_bandwidth_bins_)[
+                    time_ps / statistics_interval_ps_];
+                bin += transferred;
+            }
+
             request.remaining_bytes -= transferred;
             total_budget -= transferred;
             if (use_write) {
@@ -110,13 +119,6 @@ public:
                 if (use_write) {
                     write_requests_.pop_front();
                 } else {
-                    if (statistics_interval_ps_) {
-                        const auto time_ps = static_cast<std::uint64_t>(now) *
-                                             1000000000ULL / frequency_khz_;
-                        read_bandwidth_bins_[time_ps /
-                                             statistics_interval_ps_] +=
-                            completed.back().size_bytes;
-                    }
                     read_requests_.pop_front();
                 }
             }
@@ -130,14 +132,24 @@ public:
     }
 
     std::vector<MemoryBandwidthSample> bandwidth_samples() const override {
+        std::map<std::uint64_t, std::pair<double, double>> bins;
+        for (const auto& [index, bytes] : read_bandwidth_bins_)
+            bins[index].first += bytes;
+        for (const auto& [index, bytes] : write_bandwidth_bins_)
+            bins[index].second += bytes;
         std::vector<MemoryBandwidthSample> samples;
-        samples.reserve(read_bandwidth_bins_.size());
-        for (const auto& [index, bytes] : read_bandwidth_bins_) {
+        samples.reserve(bins.size());
+        for (const auto& [index, bytes] : bins) {
             const auto start = index * statistics_interval_ps_;
-            samples.push_back({start,
-                               start + statistics_interval_ps_,
-                               {{"demand_read", bytes}},
-                               {}});
+            std::map<std::string, std::uint64_t> measured;
+            if (bytes.first > 0.0)
+                measured.emplace("demand_read", static_cast<std::uint64_t>(
+                                                    std::llround(bytes.first)));
+            if (bytes.second > 0.0)
+                measured.emplace("demand_write", static_cast<std::uint64_t>(
+                                                     std::llround(bytes.second)));
+            samples.push_back(
+                {start, start + statistics_interval_ps_, std::move(measured), {}});
         }
         return samples;
     }
@@ -163,7 +175,8 @@ private:
     bool prefer_write_{};
     std::uint64_t statistics_interval_ps_{};
     std::uint64_t frequency_khz_{};
-    std::map<std::uint64_t, std::uint64_t> read_bandwidth_bins_;
+    std::map<std::uint64_t, double> read_bandwidth_bins_;
+    std::map<std::uint64_t, double> write_bandwidth_bins_;
 
     std::size_t queued_requests() const {
         return read_requests_.size() + write_requests_.size();
