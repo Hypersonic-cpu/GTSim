@@ -10,9 +10,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Initialize required submodules
-        run: >-
-          git -c url.https://github.com/.insteadOf=git@github.com:
-          submodule update --init --depth 1 -- 3rdparty/glaze 3rdparty/hbfine
+        run: |
+          git -c url.https://github.com/.insteadOf=git@github.com: \
+            submodule update --init --depth 1 -- \
+            3rdparty/glaze \
+            3rdparty/hbfine \
+            3rdparty/hbf-eventlab \
+            3rdparty/flashlab-sim
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTSIM_ENABLE_RAMULATOR2=OFF -DGTSIM_ENABLE_LEGACY_TVM_TESTS=OFF
       - name: Build
