@@ -9,8 +9,9 @@ guard as the primary cases.
 
 import argparse
 import asyncio
+from ast import literal_eval
 import csv
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import product
 import hashlib
 import json
@@ -95,6 +96,25 @@ class Case:
             f"{self.hardware}-{self.sram_policy}-"
             f"bm{self.bm}-bn{self.bn}-bk{self.bk}-s{self.stages}"
         )
+
+    def status_fields(self):
+        return dict(context_length=self.context, hardware=self.hardware,
+                    sram_policy=self.sram_policy, prefetch=self.prefetch,
+                    bm=self.bm, bn=self.bn, bk=self.bk, stages=self.stages)
+
+
+@dataclass
+class ProgramCase:
+    kind: str
+    label: str
+    output: Path
+    fingerprint: str
+    parameters: dict
+    invocation: tuple[str, ...]
+    attempt: int = 0
+
+    def status_fields(self):
+        return {"parameters": self.parameters}
 
 
 @dataclass
@@ -279,6 +299,9 @@ def make_case(kind, context, hardware, sram_policy, prefetch, tiling, root, band
 
 
 def command_for(case, runner, root, compile_only=False):
+    if isinstance(case, ProgramCase):
+        return [*case.invocation, "--out", str(case.output),
+                *(("--compile-only",) if compile_only else ())]
     memory = _memory_for(case.hardware)
     if case.bandwidth:
         memory = _bandwidth_memory(
@@ -590,14 +613,7 @@ class Scheduler:
             "returncode": returncode,
             "elapsed_seconds": elapsed,
             "attempt": case.attempt,
-            "context_length": case.context,
-            "hardware": case.hardware,
-            "sram_policy": case.sram_policy,
-            "prefetch": case.prefetch,
-            "bm": case.bm,
-            "bn": case.bn,
-            "bk": case.bk,
-            "stages": case.stages,
+            **case.status_fields(),
             "error": error,
             "result": str(result_path) if result_path.exists() else "",
         }
@@ -635,11 +651,103 @@ class Scheduler:
                 finally:
                     queue.task_done()
 
-        workers = [asyncio.create_task(worker()) for _ in range(worker_count)]
-        await queue.join()
-        for task in workers:
-            task.cancel()
-        await asyncio.gather(*workers, return_exceptions=True)
+        async with asyncio.TaskGroup() as group:
+            workers = [group.create_task(worker()) for _ in range(worker_count)]
+            await queue.join()
+            for task in workers:
+                task.cancel()
+
+
+def parameter_sets(specification):
+    """A list names explicit cases, while a dict names Cartesian axes."""
+    if isinstance(specification, dict):
+        choices = [values if isinstance(values, (tuple, list)) else (values,)
+                   for values in specification.values()]
+        specification = [dict(zip(specification, values)) for values in product(*choices)]
+    if not isinstance(specification, list) or not specification:
+        raise ValueError("sweep requires a nonempty dict of axes or list of case dicts")
+    for case in specification:
+        if not isinstance(case, dict) or any(
+            not isinstance(name, str) or not name.isidentifier() for name in case
+        ):
+            raise ValueError("each case must map parameter identifiers to Python literals")
+    return specification
+
+
+async def run_program_sweep(args, specification):
+    root = args.output.resolve()
+    runner, source, library, architecture, memory = (
+        value.resolve() for value in
+        (args.runner, args.program, args.lib, args.architecture, args.memory)
+    )
+    driver = REPOSITORY / "frontend/tools/run_qwen_simulations.py"
+    invocation = (
+        sys.executable, str(driver), "--source", str(source), "--lib", str(library),
+        "--runner", str(runner), "--architecture", str(architecture), "--memory",
+        str(memory), "--max-cycles", "1000000000",
+    )
+    inputs = [runner, source, driver, architecture, memory, *library.glob("*ir"),
+              *(REPOSITORY / "frontend/src").rglob("*.py")]
+    if args.params:
+        inputs.append(args.params.resolve())
+        invocation += ("--params", str(args.params.resolve()))
+    input_hashes = {str(path): _sha(path) for path in sorted(inputs)}
+    scheduler = Scheduler(
+        root, runner, args.max_concurrency, args.retry_failed,
+        ram_guard=args.ram_guard == "on", case_bytes=args.memory_per_case_gib * 1024**3,
+        safety_fraction=args.memory_budget_fraction, ram_admission=args.ram_admission == "on",
+    )
+    cases = {}
+    for parameters in parameter_sets(specification):
+        # repr preserves list/tuple distinctions and accepts native Python literals.
+        identity = repr((input_hashes, sorted(parameters.items())))
+        fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+        label = fingerprint[:16]
+        overrides = tuple(token for name, value in sorted(parameters.items())
+                          for token in ("--param", f"{name}={value!r}"))
+        cases[label] = ProgramCase("simulation", label, root / "cases" / label,
+                                   fingerprint, parameters, invocation + overrides)
+    checks = [replace(case, kind="preflight", output=root / "preflight" / case.label)
+              for case in cases.values()]
+
+    def phase(name, jobs):
+        pending, saved = [], {}
+        for case in jobs:
+            previous = read_case_status(case)
+            if previous is not None and scheduler.can_skip(case):
+                result = case.output / ("compile_result.json" if name == "preflight" else "result.json")
+                if previous["status"] != "SUCCESS" or result.is_file():
+                    saved[case.label] = previous["status"]
+                    continue
+            pending.append(case)
+        scheduler.begin_phase(name, pending, saved)
+        return pending
+
+    async def finished(result, queue):
+        pass
+
+    os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(REPOSITORY / "frontend/src"), os.environ.get("PYTHONPATH"),
+    )))
+    await scheduler.start()
+    try:
+        scheduler.log("PILOT_SKIPPED", reason="Program sweep uses compiler preflight")
+        await scheduler.run_queue(phase("preflight", checks), True, finished)
+        legal = [cases[check.label] for check in checks
+                 if (read_case_status(check) or {}).get("status") == "SUCCESS"]
+        await scheduler.run_queue(phase("simulation", legal), False, finished)
+    finally:
+        await scheduler.stop()
+    manifest = []
+    for check in checks:
+        case = cases[check.label]
+        record = read_case_status(case) or read_case_status(check) or {}
+        result = _result_payload(case) if record.get("status") == "SUCCESS" else {}
+        manifest.append(dict(case=case.label, parameters=repr(case.parameters),
+                             status=record.get("status", "WAITING"),
+                             cycles=result.get("timing", {}).get("total_cycles"),
+                             error=record.get("error", "")))
+    _write_csv(root / "manifest.csv", manifest)
 
 
 def _base_params():
@@ -1245,11 +1353,19 @@ async def main_async(args):
         await scheduler.stop()
 
 
-def main():
+def main(specification=None, argv=None):
     global FLASHACCEL_MEMORY
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runner", type=Path, default=REPOSITORY / "build/gtsim_program")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--program", type=Path, help="Run any ProgIR with a Python sweep specification")
+    parser.add_argument("--params", type=Path, help="Optional base parameter file for --program")
+    parser.add_argument("--lib", type=Path, default=REPOSITORY / "frontend/lib")
+    parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
+    parser.add_argument("--memory", type=Path, default=FULL_HBM_MEMORY)
+    sweep = parser.add_mutually_exclusive_group()
+    sweep.add_argument("--sweep", help="Python dict of axes or list of case dicts")
+    sweep.add_argument("--sweep-file", type=Path, help="Read the Python literal from a file")
     parser.add_argument("--max-concurrency", type=int, default=MAX_CONCURRENCY)
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--ram-guard", choices=("on", "off"), default="on",
@@ -1264,13 +1380,28 @@ def main():
                         help="Skip the initial serial smoke run; compiler feasibility checks still run")
     parser.add_argument("--flashaccel-memory", type=Path, default=FLASHACCEL_MEMORY)
     parser.add_argument("--pilot-config", choices=("double", "fullhbm"), default="double")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.max_concurrency < 1:
         parser.error("--max-concurrency must be positive")
     if not math.isfinite(args.memory_per_case_gib) or args.memory_per_case_gib <= 0:
         parser.error("--memory-per-case-gib must be finite and positive")
     if not 0 < args.memory_budget_fraction <= 1:
         parser.error("--memory-budget-fraction must be in (0, 1]")
+    if args.program:
+        if args.output == DEFAULT_OUTPUT:
+            parser.error("--program requires a separate --output directory")
+        try:
+            if args.sweep_file is not None:
+                specification = literal_eval(args.sweep_file.read_text())
+            elif args.sweep is not None:
+                specification = literal_eval(args.sweep)
+            specification = parameter_sets(specification)
+        except (OSError, SyntaxError, ValueError) as error:
+            parser.error(str(error))
+        asyncio.run(run_program_sweep(args, specification))
+        return
+    if specification is not None or args.sweep is not None or args.sweep_file is not None:
+        parser.error("sweep parameters require --program")
     FLASHACCEL_MEMORY = args.flashaccel_memory.resolve()
     if not FLASHACCEL_MEMORY.is_file():
         parser.error(f"memory configuration does not exist: {FLASHACCEL_MEMORY}")
