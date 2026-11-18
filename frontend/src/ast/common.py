@@ -22,6 +22,11 @@ class MemorySpace(str, Enum):
     REGISTER = "REGISTER"
 
 
+@dataclass(frozen=True)
+class DTypeParameter:
+    value: str
+
+
 class Layout(str, Enum):
     ROW_MAJOR = "row_major"
     COLUMN_MAJOR = "column_major"
@@ -81,7 +86,7 @@ class Constant:
 class Tensor:
     id: str
     shape: tuple[int | str, ...]
-    dtype: DataType
+    dtype: DataType | DTypeParameter
     tier: MemorySpace | None
     read_only: bool
     layout: Layout | None

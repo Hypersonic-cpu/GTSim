@@ -1,6 +1,7 @@
 """Compile one serving program and execute it through the persistent IPC runner."""
 
 import argparse
+from ast import literal_eval
 from dataclasses import replace
 import hashlib
 import json
@@ -281,7 +282,7 @@ def run_streaming_interface(
             *Path("frontend/src").rglob("*.py"),
             *args.lib.glob("*ir"),
             args.source,
-            args.params,
+            *([args.params] if args.params else []),
         ]
     )
     provenance = {
@@ -441,7 +442,12 @@ def run_streaming_interface(
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--params", type=Path, required=True)
+    parser.add_argument("--params", type=Path)
+    parser.add_argument("--param", metavar="NAME=VALUE", action="append", default=[])
+    parser.add_argument("--pack-gqa", type=int, choices=(0, 1))
+    parser.add_argument("--gqa-block-heads", type=int)
+    parser.add_argument("--attention-splits", type=int)
+    parser.add_argument("--attention-kv-tile", type=int)
     parser.add_argument(
         "--source", type=Path, default=Path("frontend/asm/qwen3/one_block.progir")
     )
@@ -473,7 +479,21 @@ def main():
     args = parser.parse_args()
     if not 0 < args.max_frame <= 0xFFFFFFFF:
         parser.error("--max-frame must be in [1, 4294967295]")
-    params = json.loads(args.params.read_text())
+    params = json.loads(args.params.read_text()) if args.params else {}
+    for assignment in args.param:
+        name, separator, value = assignment.partition("=")
+        if not separator or not name.isidentifier():
+            parser.error("--param requires NAME=VALUE")
+        try:
+            params[name] = literal_eval(value)
+        except (SyntaxError, ValueError):
+            parser.error(f"invalid Python literal for --param {name}: {value!r}")
+    for name, value in (
+        ("PACK_GQA", args.pack_gqa), ("R", args.gqa_block_heads),
+        ("S", args.attention_splits), ("TILE", args.attention_kv_tile),
+    ):
+        if value is not None:
+            params[name] = value
     if args.context_length is not None:
         params["CONTEXTS"] = [args.context_length]
     tiling_values = (args.gemm_bm, args.gemm_bn, args.gemm_bk, args.gemm_stages)
@@ -529,7 +549,7 @@ def main():
             flashaccel_policy.stages,
             flashaccel_policy.split,
         )
-    else:
+    elif any(value is not None for value in tiling_values):
         gemm_tiling = GemmTiling(
             args.gemm_bm if args.gemm_bm is not None else 16,
             args.gemm_bn if args.gemm_bn is not None else 64,
@@ -537,10 +557,13 @@ def main():
             args.gemm_stages if args.gemm_stages is not None else 2,
         )
         gemm_tiling.validate()
+    else:
+        gemm_tiling = None
     # Provenance should describe the effective geometry even when the legacy
     # JSON policy supplied it.
-    args.gemm_bm, args.gemm_bn = gemm_tiling.bm, gemm_tiling.bn
-    args.gemm_bk, args.gemm_stages = gemm_tiling.bk, gemm_tiling.stages
+    if gemm_tiling is not None:
+        args.gemm_bm, args.gemm_bn = gemm_tiling.bm, gemm_tiling.bn
+        args.gemm_bk, args.gemm_stages = gemm_tiling.bk, gemm_tiling.stages
     topology = memory_topology(args.memory)
     physical_layout = (
         PhysicalLayout.from_memory_yaml(args.memory) if flashaccel_policy else None
@@ -560,6 +583,9 @@ def main():
         gemm_tiling,
     )
     if args.compile_only:
+        if not regions:
+            raise ValueError("program has no active launches for these parameters")
+        make_program_plan(source_program, arch, regions, tensors, prefetch)
         args.out.mkdir(parents=True, exist_ok=True)
         (args.out / "ir_summary.json").write_text(
             json.dumps(compile_metadata, indent=2) + "\n"

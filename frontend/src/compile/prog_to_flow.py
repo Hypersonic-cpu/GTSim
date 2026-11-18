@@ -4,11 +4,23 @@ from dataclasses import replace
 from pathlib import Path
 from parser import ast as A, parse_file
 from .algo_to_flow import compile_algorithm
-from .static import source_symbol
+from .static import EMPTY, Resolver, bound_resolver, source_symbol
+from .bind import bind_data_types
 
 
 def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
     program = parse_file(program_path)
+    static = replace(
+        program.static,
+        # Program constants may provide defaults for launch overrides.
+        # Remove overridden definitions so later materialization cannot
+        # shadow the explicit value with the source default.
+        bindings=tuple(binding for binding in program.static.bindings
+                       if binding.id not in parameters),
+        arguments=tuple(A.StaticBinding(name, repr(value)) for name, value in parameters.items()),
+    )
+    root = bound_resolver(static, Resolver(EMPTY, {}))
+    program = bind_data_types(program, root)
     (stream,) = program.streams
     algorithms = {source_symbol(path): Path(path) for path in algorithm_paths}
     schedules = {source_symbol(path): Path(path) for path in schedule_paths}
@@ -61,6 +73,9 @@ def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
                 static_ifs=region.static_ifs
                 + (A.StaticIf(invocation.id, "%__program_guard", ()),),
             )
+        from .nvidia.gqa import specialize_attention
+
+        region = specialize_attention(region, root, tensors, invocation.inputs, invocation.outputs)
         regions.append(
             replace(
                 region,
@@ -78,12 +93,7 @@ def compile_program(program_path, parameters, algorithm_paths, schedule_paths):
         raise ValueError("return references unavailable tensors/events")
     return A.FlowIR(
         program.symbol,
-        replace(
-            program.static,
-            arguments=tuple(
-                A.StaticBinding(name, repr(value)) for name, value in parameters.items()
-            ),
-        ),
+        static,
         program.tensors,
         tuple(regions),
         stream,

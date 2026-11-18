@@ -1,0 +1,56 @@
+prog.program @fa3_decode_benchmark {
+  static.param %B : index
+  static.param %HQ : index
+  static.param %HKV : index
+  static.param %D : index
+  static.param %S : index
+  static.param %R : index
+  static.param %TILE : index
+  static.param %NUM_SMS : index
+  static.param %CONTEXTS : index_list
+  static.let %PACK_GQA = 1
+  static.let %STAGES = 2
+  static.let %TARGET = 'sm90'
+  static.let %QKV_DTYPE = 'bf16'
+  static.let %OUTPUT_DTYPE = 'bf16'
+  static.let %QROWS = %B*%HQ
+  static.let %QWIDTH = %HQ*%D
+  static.let %CACHE_ROWS = (sum(%CONTEXTS)+%B)*%HKV
+  static.let %PART_ROWS = %B*%HQ*%S
+  prog.tensor @Q : tensor<QROWSxDx%QKV_DTYPE> storage<HBM> external readonly
+  prog.tensor @K : tensor<CACHE_ROWSxDx%QKV_DTYPE> storage<HBM> external readonly
+  prog.tensor @V : tensor<CACHE_ROWSxDx%QKV_DTYPE> storage<HBM> external readonly
+  prog.tensor @Partial : tensor<PART_ROWSxDxfp32> storage<HBM>
+  prog.tensor @LSE : tensor<PART_ROWSx1xfp32> storage<HBM>
+  prog.tensor @O : tensor<BxQWIDTHx%OUTPUT_DTYPE> storage<HBM>
+  prog.stream @compute ordered {
+    static.if <%PACK_GQA> {
+      %Partial, %LSE, !split_done = prog.launch @packed_split
+          callee<@fa3_gqa_decode_split> implementation<@fa3_gqa_decode_split_flow>
+          inputs[@Q,@K,@V] outputs[@Partial,@LSE]
+          attrs{B=%B,HQ=%HQ,HKV=%HKV,D=%D,S=%S,R=%R,TILE=%TILE,STAGES=%STAGES,CONTEXTS=%CONTEXTS,NUM_SMS=%NUM_SMS}
+      %O, !done = prog.launch @packed_combine
+          callee<@fa3_gqa_combine> implementation<@fa3_gqa_combine_flow>
+          inputs[@Partial,@LSE] outputs[@O]
+          attrs{B=%B,HQ=%HQ,D=%D,S=%S,NUM_SMS=%NUM_SMS}
+    }
+    static.elif <%S > 1> {
+      %Partial, %LSE, !legacy_split_done = prog.launch @legacy_split
+          callee<@fa3_decode_split> implementation<@fa3_decode_split_flow>
+          inputs[@Q,@K,@V] outputs[@Partial,@LSE]
+          attrs{B=%B,HQ=%HQ,HKV=%HKV,D=%D,S=%S,TILE=%TILE,CONTEXTS=%CONTEXTS,NUM_SMS=%NUM_SMS}
+      %O, !legacy_done = prog.launch @legacy_combine
+          callee<@fa3_combine> implementation<@fa3_combine_flow>
+          inputs[@Partial,@LSE] outputs[@O]
+          attrs{B=%B,HQ=%HQ,D=%D,S=%S,NUM_SMS=%NUM_SMS}
+    }
+    static.else {
+      %O, !legacy_direct_done = prog.launch @legacy_direct
+          callee<@fa3_decode> implementation<@fa3_decode_flow>
+          inputs[@Q,@K,@V] outputs[@O]
+          attrs{B=%B,HQ=%HQ,HKV=%HKV,D=%D,S=%S,TILE=%TILE,CONTEXTS=%CONTEXTS,NUM_SMS=%NUM_SMS}
+    }
+    prog.synchronize @compute after[!done,!legacy_done,!legacy_direct_done]
+  }
+  prog.return @O after[!done,!legacy_done,!legacy_direct_done]
+}

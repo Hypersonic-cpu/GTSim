@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from .common import Header, Tensor, Constant, DataType
+from .common import Header, Tensor, Constant, DataType, DTypeParameter
 
 
 class OperationClass(str, Enum):
@@ -46,7 +46,7 @@ class MathOperation:
     id: str
     category: OperationClass
     cost: ArithmeticCost | SpecialFunction | ReductionKind | CollectiveKind | None
-    dtype: DataType
+    dtype: DataType | DTypeParameter
     inputs: tuple[str, ...]
     output: str
     reduction_axes: tuple[str, ...]

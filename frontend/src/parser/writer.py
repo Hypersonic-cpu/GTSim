@@ -109,7 +109,7 @@ def flowop(op):
                 + "]"
             )
         result = op.results[0]
-        text += f" : tensor<{'x'.join(map(str, result.shape))}x{result.dtype.value}>"
+        text += f" : tensor<{'x'.join(map(str, result.shape))}x{enum(result.dtype)}>"
     else:
         text = _flowop(op)
     if "scope<" not in text:

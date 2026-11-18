@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from .common import ConstantValue, DataType
+from .common import ConstantValue, DataType, DTypeParameter
 
 
 class Phase(str, Enum):
@@ -73,7 +73,7 @@ class IterationId:
 @dataclass(frozen=True)
 class PipelineStage:
     iteration: IterationId
-    modulus: int
+    modulus: int | str
     generation_counts_per_wave: tuple[int | str, ...]
 
 
@@ -115,7 +115,7 @@ class TileLoop:
 class PipelineRegion:
     id: str
     loop: TileLoop
-    depth: int
+    depth: int | str
     stage: PipelineStage
 
 
@@ -137,7 +137,7 @@ class ValueId:
 class SSAValue:
     id: ValueId
     shape: tuple[int | str, ...]
-    dtype: DataType
+    dtype: DataType | DTypeParameter
 
 
 @dataclass(frozen=True)
@@ -150,9 +150,9 @@ class Executor:
 @dataclass(frozen=True)
 class Buffer:
     id: str
-    slots: int
+    slots: int | str
     access: AccessMode
-    bytes_per_slot: int
+    bytes_per_slot: int | str
 
 
 @dataclass(frozen=True)

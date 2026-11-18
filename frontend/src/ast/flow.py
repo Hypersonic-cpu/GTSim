@@ -1,7 +1,7 @@
 """Explicit scheduled operations; no algorithm-family dispatch or presets."""
 
 from dataclasses import dataclass
-from .common import Header, Tensor, DataType, StaticIf, StaticBinding
+from .common import Header, Tensor, DataType, DTypeParameter, StaticIf, StaticBinding
 from .algorithm import MathOperation
 from .profiles import ScheduleConfig
 from .schedule import (
@@ -38,7 +38,7 @@ class FlowOp:
     capabilities: tuple[str, ...]
     destination: str | None
     event: str | None
-    cast: DataType | None
+    cast: DataType | DTypeParameter | None
     implements: str | None
     iterations: tuple[TileLoop, ...]
     work_shape: tuple[int | str, ...]

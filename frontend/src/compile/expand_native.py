@@ -248,6 +248,8 @@ class NativeExpander:
                 continue
             local_cta = point[self.region.cta_variable]
             if local_cta not in cta_ids:
+                # Dependency lookups are CTA-local, including across waves.
+                self.index.clear()
                 identity = len(cta_ids)
                 cta_ids[local_cta] = identity
                 self.warp_bases[identity] = self.next_warp

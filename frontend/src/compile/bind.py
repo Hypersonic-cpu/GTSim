@@ -5,6 +5,21 @@ from parser import ast as A
 from .static import EMPTY
 
 
+def bind_data_types(value, resolver):
+    if isinstance(value, tuple):
+        return tuple(bind_data_types(item, resolver) for item in value)
+    if not is_dataclass(value):
+        return value
+    updates = {}
+    for field in fields(value):
+        item = getattr(value, field.name)
+        if isinstance(item, A.DTypeParameter):
+            updates[field.name] = A.DataType(resolver.value(item.value))
+        else:
+            updates[field.name] = bind_data_types(item, resolver)
+    return replace(value, **updates)
+
+
 def specialize(value, resolver):
     if isinstance(value, tuple):
         return tuple(specialize(v, resolver) for v in value)

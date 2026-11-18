@@ -8,6 +8,10 @@ prog.program @qwen3_moe_block {
   static.param %TK : index
   static.param %I : index
   static.param %S : index
+  static.let %PACK_GQA = 0
+  static.let %R = floordiv(%HQ,%HKV)
+  static.let %STAGES = 2
+  static.let %TARGET = 'sm90'
   static.param %TILE : index
   static.param %NUM_SMS : index
   static.param %CONTEXTS : index_list
@@ -93,7 +97,17 @@ prog.program @qwen3_moe_block {
         callee<@kv_append> implementation<@kv_append_flow>
         inputs[@K_new, @V_new] outputs[@K_cache, @V_cache]
         attrs{B=%B, KVH=%HKV, D=%D, CONTEXTS=%CONTEXTS, NUM_SMS=%NUM_SMS}
-    static.if <%S > 1> {
+    static.if <%PACK_GQA> {
+    %Partial, %LSE, !fa3_packed_split_done = prog.launch @fa3_packed_split
+        callee<@fa3_gqa_decode_split> implementation<@fa3_gqa_decode_split_flow>
+        inputs[@Q, @K_cache, @V_cache] outputs[@Partial, @LSE]
+        attrs{B=%B, HQ=%HQ, HKV=%HKV, D=%D, S=%S, R=%R, TILE=%TILE, STAGES=%STAGES, CONTEXTS=%CONTEXTS, NUM_SMS=%NUM_SMS}
+    %Attention, !fa3_packed_combine_done = prog.launch @fa3_packed_combine
+        callee<@fa3_gqa_combine> implementation<@fa3_gqa_combine_flow>
+        inputs[@Partial, @LSE] outputs[@Attention]
+        attrs{B=%B, HQ=%HQ, D=%D, S=%S, NUM_SMS=%NUM_SMS}
+    }
+    static.elif <%S > 1> {
     %Partial, %LSE, !fa3_decode_split_done = prog.launch @fa3_decode_split
         callee<@fa3_decode_split> implementation<@fa3_decode_split_flow>
         inputs[@Q, @K_cache, @V_cache] outputs[@Partial, @LSE]

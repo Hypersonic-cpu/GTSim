@@ -17,19 +17,23 @@ def scalar(text):
     return int(text) if re.fullmatch(r"-?\d+", text) else text
 
 
+def data_type(value):
+    return A.DTypeParameter(value) if value.startswith("%") else A.DataType(value)
+
+
 def items(text):
     return tuple(part.strip().lstrip("@%!") for part in text.split(",") if part.strip())
 
 
 def tensor(name, text, **options):
     shape, dtype, layout = match(
-        r"tensor<(.+)x(fp16|fp32|bf16|int32)(?:,\s*(\w+))?>", text
+        r"tensor<(.+)x(fp16|fp32|bf16|int32|%\w+)(?:,\s*(\w+))?>", text
     ).groups()
     storage = re.search(r"storage<(\w+)>", text)
     return A.Tensor(
         name,
         tuple(scalar(d.lstrip("%")) for d in shape.split("x")),
-        A.DataType(dtype),
+        data_type(dtype),
         A.MemorySpace(storage[1]) if storage else None,
         "readonly" in text,
         A.Layout(layout) if layout else None,
@@ -282,7 +286,7 @@ def operation(line, stage, views):
     cap = re.search(r"requires<(.*?)>", line)
     event = re.search(r"!(\w+)\s*=", line)
     dest = re.search(r"to\s+(%[\w.]+\([^)]*\))", line)
-    cast = re.search(r"cast<(\w+)>", line)
+    cast = re.search(r"cast<(%?\w+)>", line)
     results = ()
     if opcode in (
         "load_async",
@@ -309,7 +313,7 @@ def operation(line, stage, views):
         capabilities=items(cap[1]) if cap else (),
         destination=dest[1] if dest else None,
         event=event[1] if event else None,
-        cast=A.DataType(cast[1]) if cast else None,
+        cast=data_type(cast[1]) if cast else None,
         implements=(
             re.search(r"implements<@(\w+)>", line)[1] if "implements<" in line else None
         ),
@@ -375,7 +379,7 @@ def flow_statements(nodes, condition="true"):
 
 def flow_region(root, mapping, static):
     symbol, schedule, target = match(
-        r"flow.(?:kernel|region)\s+@(\w+)\s+schedule<(\w+)>\s+target<(\w+)>",
+        r"flow.(?:kernel|region)\s+@(\w+)\s+schedule<(\w+)>\s+target<(%?\w+)>",
         " ".join(root.header),
     ).groups()
     tensors = []
@@ -398,18 +402,18 @@ def flow_region(root, mapping, static):
         if isinstance(node, A.Operation):
             text = " ".join(node.header)
             name, var, end, depth, gens = match(
-                r"flow.pipeline\s+@(\w+)\s+%(\w+)\s*=\s*0\s+to\s+(.*?)\s+step\s+1\s+depth\((\d+)\)\s+generation_counts_per_wave\[(.*?)\]",
+                r"flow.pipeline\s+@(\w+)\s+%(\w+)\s*=\s*0\s+to\s+(.*?)\s+step\s+1\s+depth\((\d+|%\w+)\)\s+generation_counts_per_wave\[(.*?)\]",
                 text,
             ).groups()
             stage = A.PipelineStage(
                 A.IterationId(A.IndexExpr(expression="%" + var)),
-                int(depth),
+                scalar(depth),
                 tuple(scalar(v) for v in split_balanced(gens)),
             )
             pipeline = A.PipelineRegion(
                 name,
                 A.TileLoop(name, var, 0, scalar(end.strip()), 1),
-                int(depth),
+                scalar(depth),
                 stage,
             )
             ops.extend(operation(line, stage, views) for line in statements(node.body))
@@ -476,10 +480,10 @@ def flow_region(root, mapping, static):
             )
         elif line.startswith("flow.buffer"):
             name, slots, access, size = match(
-                r"flow.buffer\s+%(\w+)\s+slots\((\d+)\)\s+access<(\w+)>\s*:\s*bytes_per_slot<(\d+)>",
+                r"flow.buffer\s+%(\w+)\s+slots\((\d+|%\w+)\)\s+access<(\w+)>\s*:\s*bytes_per_slot<(\d+|%\w+)>",
                 line,
             ).groups()
-            buffers.append(A.Buffer(name, int(slots), A.AccessMode(access), int(size)))
+            buffers.append(A.Buffer(name, scalar(slots), A.AccessMode(access), scalar(size)))
         elif re.search(
             r"flow\.(?:store_async|load_async|arithmetic|special_function|reduction)",
             line,
@@ -509,13 +513,13 @@ def flow_region(root, mapping, static):
     if set(config) != expected_config:
         raise ValueError("schedule_config: missing or unknown fields")
     profile = A.ScheduleConfig(
-        tuple(map(int, config["tile"].split("x"))),
-        int(config["stages"]),
-        int(config["warps"]),
-        int(config["consumer_warps"]),
-        int(config["producer_warp"]),
-        int(config["warpgroup"]),
-        tuple(map(int, config["matrix_tile"].split("x"))),
+        tuple(map(scalar, config["tile"].split("x"))),
+        scalar(config["stages"]),
+        scalar(config["warps"]),
+        scalar(config["consumer_warps"]),
+        scalar(config["producer_warp"]),
+        scalar(config["warpgroup"]),
+        tuple(map(scalar, config["matrix_tile"].split("x"))),
     )
     execute = []
     store = []
@@ -524,7 +528,7 @@ def flow_region(root, mapping, static):
     if mapping:
         mh = " ".join(mapping.header)
         mapping_symbol, flowref, mtarget, placement = match(
-            r"mapping.program\s+@(\w+)\s+flow<@(\w+)>\s+target<(\w+)>\s+placement<(\w+)>",
+            r"mapping.program\s+@(\w+)\s+flow<@(\w+)>\s+target<(%?\w+)>\s+placement<(\w+)>",
             mh,
         ).groups()
         if flowref != symbol:
@@ -608,7 +612,7 @@ def dependency_kind(label):
 
 def math_operation(line):
     identity, category, cost, dtype, inputs, output, axes = match(
-        r"(?:algo.op|flow.math)\s+@(\w+)\s+category<(\w+)>\s+cost<(\w+)>\s+dtype<(\w+)>\s+inputs\[(.*?)\]\s+output\[%(\w+)\]\s+reduction\[(.*?)\]",
+        r"(?:algo.op|flow.math)\s+@(\w+)\s+category<(\w+)>\s+cost<(\w+)>\s+dtype<(%?\w+)>\s+inputs\[(.*?)\]\s+output\[%(\w+)\]\s+reduction\[(.*?)\]",
         line,
     ).groups()
     category = A.OperationClass(category)
@@ -625,7 +629,7 @@ def math_operation(line):
     else:
         raise ValueError(f"{category.value} does not accept cost subtype {cost}")
     return A.MathOperation(
-        identity, category, cost, A.DataType(dtype), items(inputs), output, items(axes)
+        identity, category, cost, data_type(dtype), items(inputs), output, items(axes)
     )
 
 

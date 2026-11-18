@@ -216,6 +216,21 @@ def lower_region(flow):
     base_registers = 32
     bm, bn, _ = p.tile_shape
     registers = p.warps * 32 * base_registers * 4 + bm * bn * 4
+    if flow.origin == "fa3_gqa_decode_split":
+        _, _, d = p.tile_shape
+        mm, mn, _ = p.matrix_shape
+        physical_m = (bm + mm - 1) // mm * mm
+        score_n = (bn + mn - 1) // mn * mn
+        output_n = (d + mn - 1) // mn * mn
+        # FP32 scores and output accumulators, low-precision P fragments,
+        # and FP32 per-row m/ell state.
+        fragments = physical_m * (6 * score_n + 4 * output_n + 8)
+        registers = p.warps * 32 * base_registers * 4 + fragments
+        per_consumer = base_registers + (fragments + 4 * p.consumer_warps * 32 - 1) // (4 * p.consumer_warps * 32)
+        if registers > 256 * 1024 or per_consumer > 255:
+            # Inactive alternatives are lowered for legacy source parity.
+            if not any(g.condition == "false" for g in flow.static_ifs):
+                raise ValueError("packed attention exceeds the SM90 register budget")
     cta_variable = flow.domain.loops[0].variable
     from dataclasses import replace
 

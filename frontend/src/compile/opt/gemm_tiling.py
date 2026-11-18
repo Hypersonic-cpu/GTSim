@@ -266,7 +266,7 @@ def summarize_gemm_flow(flow, arch=None, split_k=1):
     arch_by_symbol = {region.symbol: region for region in arch.regions} if arch else {}
     result = []
     for region in flow.regions:
-        if not any(op.kind == A.OpKind.MATRIX for op in region.ops):
+        if region.config.warpgroup != 1 or not any(op.kind == A.OpKind.MATRIX for op in region.ops):
             continue
         arch_region = arch_by_symbol.get(region.symbol)
         scratch = next(
@@ -307,7 +307,8 @@ def validate_gemm_flow(
     if not summaries:
         raise ValueError("no small-M/grouped GEMM regions were found")
     for region, summary in zip(
-        (r for r in flow.regions if any(o.kind == A.OpKind.MATRIX for o in r.ops)),
+        (r for r in flow.regions if r.config.warpgroup == 1 and
+         any(o.kind == A.OpKind.MATRIX for o in r.ops)),
         summaries,
     ):
         n = next(
