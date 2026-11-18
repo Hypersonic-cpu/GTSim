@@ -507,6 +507,7 @@ public:
     bool issue_done;              // All sub-ops issued
     bool issue_deps_resolved;     // Issue dependencies already applied
     int tma_issue_complete_cycle; // Cycle when all TMA transactions issued
+    int pipeline_iteration{-1}; // Optional NativeIR loop index for profiling
 
     // Bank conflicts
     int shared_bank_conflict_factor; // Additional cycles (0-31) for bank conflicts

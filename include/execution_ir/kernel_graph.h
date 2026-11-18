@@ -11,6 +11,7 @@ struct Instruction {
     int id{}, cta{}, warp{}, tensor{}, leading_dim{};
     std::array<int, 4> tile{};
     std::vector<int> after_issue, after_complete;
+    int pipeline_iteration{-1};
 };
 struct PrefetchRange {
     int tensor{};

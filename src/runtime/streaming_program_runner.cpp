@@ -62,6 +62,99 @@ struct InstructionBatchWire {
 
 namespace {
 
+using CycleSpan = std::pair<int, int>;
+
+std::uint64_t covered_cycles(std::vector<CycleSpan>& spans) {
+    std::sort(spans.begin(), spans.end());
+    std::uint64_t cycles = 0;
+    int end = 0;
+    for (const auto& [begin, stop] : spans) {
+        cycles += std::max(0, stop - std::max(begin, end));
+        end = std::max(end, stop);
+    }
+    return cycles;
+}
+
+// Use completed DAG timestamps only. In-flight coverage includes waiting for
+// completion and is not a count of physical pipeline issue-busy cycles.
+void measure_kernel(const DAG& dag, int sms, KernelTiming& timing) {
+    std::map<std::string, std::map<int, std::vector<CycleSpan>>> pipeline_spans;
+    std::map<int, CycleSpan> cta_spans;
+    std::map<int, int> cta_sms;
+    const DAGNode* last = nullptr;
+    for (const auto* node : dag.nodes) {
+        if (node->start < 0 || node->end < node->start) continue;
+        auto [cta, inserted] = cta_spans.try_emplace(
+            node->thread_block_id, node->start, node->end);
+        if (!inserted) {
+            cta->second.first = std::min(cta->second.first, node->start);
+            cta->second.second = std::max(cta->second.second, node->end);
+        }
+        cta_sms.try_emplace(node->thread_block_id, node->sm_id);
+        const bool load = node->op_type == OpType::CP_DRAM2SRAM_TMA;
+        const bool store = node->op_type == OpType::CP_SRAM2DRAM_TMA;
+        if (load || store) {
+            const auto bytes = std::uint64_t(node->tile.element_count()) *
+                               bytes_per_element(node->data_type);
+            (load ? timing.tma_load_bytes : timing.tma_store_bytes) += bytes;
+        }
+        const auto pipeline = load || store ? "TMA" : node->pipeline_type;
+        const auto unit = load || store ? node->sm_id : node->sm_id * 4 + node->warp_id % 4;
+        pipeline_spans[pipeline][unit].emplace_back(node->start, node->end);
+        if (!last || node->end > last->end) last = node;
+    }
+    timing.cta_count = cta_spans.size();
+    std::map<int, std::vector<CycleSpan>> sm_spans;
+    for (const auto& [cta, span] : cta_spans)
+        sm_spans[cta_sms.at(cta)].push_back(span);
+    timing.active_sms = sm_spans.size();
+    for (auto& [sm, spans] : sm_spans) timing.active_sm_cycles += covered_cycles(spans);
+    for (auto& [pipeline, units] : pipeline_spans) {
+        std::uint64_t cycles = 0;
+        for (auto& [unit, spans] : units) cycles += covered_cycles(spans);
+        const auto unit_count = pipeline == "TMA" ? sms : sms * 4;
+        const auto capacity = double(unit_count) * timing.device_cycles;
+        if (capacity > 0) timing.pipeline_inflight_fraction[pipeline] = cycles / capacity;
+    }
+
+    // Trace the latest satisfied explicit predecessor of the last finishing
+    // node. Wait gaps also include resource and scheduler contention.
+    if (!last) return;
+    timing.critical_path_cta = last->thread_block_id;
+    std::map<int, std::uint64_t> iteration_cycles;
+    int cursor = last->end;
+    while (last) {
+        const auto begin = std::min(last->start, cursor);
+        const auto elapsed = cursor - begin;
+        timing.dependency_path_cycles[last->pipeline_type] += elapsed;
+        if (last->pipeline_iteration >= 0)
+            iteration_cycles[last->pipeline_iteration] += elapsed;
+        const DAGNode* predecessor = nullptr;
+        int arrival = timing.start_cycle;
+        const auto consider = [&](int id, bool issue) {
+            const auto* candidate = dag.nodes.at(static_cast<std::size_t>(id));
+            const int ready = !issue ? candidate->end
+                : candidate->tma_issue_complete_cycle >= 0
+                    ? candidate->tma_issue_complete_cycle : candidate->issue_cycle;
+            if (ready > arrival && ready <= begin) {
+                predecessor = candidate;
+                arrival = ready;
+            }
+        };
+        for (int id : last->depends_on) consider(id, false);
+        for (int id : last->issue_depends_on) consider(id, true);
+        timing.dependency_path_wait_cycles += begin - arrival;
+        cursor = arrival;
+        last = predecessor;
+    }
+    for (const auto& [iteration, cycles] : iteration_cycles) {
+        if (cycles > timing.longest_path_iteration_cycles) {
+            timing.longest_path_iteration = iteration;
+            timing.longest_path_iteration_cycles = cycles;
+        }
+    }
+}
+
 DataType parse_dtype(const std::string& value) {
     if (value == "fp16") return DataType::FP16;
     if (value == "bf16") return DataType::BF16;
@@ -396,6 +489,7 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             }
             launch_timing.start_cycle = simulator_->cycle;
             launch_timing.l2_lines_before = l2_->resident_line_count();
+            const auto l2_before = l2_->read_counters();
             const auto background_before = memory_->background_cycles();
             simulator_->attach_graph(*active_dag);
             if (panel)
@@ -408,6 +502,13 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             if (panel) launch_timing.prefetch_windows = panel->finish();
             launch_timing.l2_lines_after = l2_->resident_line_count();
             launch_timing.device_complete_cycle = simulator_->cycle;
+            launch_timing.device_cycles =
+                launch_timing.device_complete_cycle - launch_timing.start_cycle;
+            const auto l2_after = l2_->read_counters();
+            launch_timing.l2_read_hit_bytes = l2_after.hit_bytes - l2_before.hit_bytes;
+            launch_timing.l2_read_merged_bytes = l2_after.merged_bytes - l2_before.merged_bytes;
+            launch_timing.l2_read_miss_bytes = l2_after.miss_bytes - l2_before.miss_bytes;
+            measure_kernel(*active_dag, simulator_->config.num_sms, launch_timing);
             simulator_->detach_graph();
             active_dag.reset();
             launch_timing.complete_cycle =
@@ -415,8 +516,6 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             launch_timing.background_compute_cycles =
                 simulator_->background_cycles_at_device_complete -
                 background_before;
-            launch_timing.device_cycles =
-                launch_timing.device_complete_cycle - launch_timing.start_cycle;
             for (const auto& [tier, after] : memory_->tier_counters()) {
                 const auto& before = traffic_before.at(tier);
                 auto& delta = launch_timing.memory[memory_tier_name(tier)];

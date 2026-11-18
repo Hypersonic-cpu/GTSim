@@ -184,6 +184,7 @@ void KernelGraphBuilder::add_instruction(const Instruction& op) {
         op.id, op.name, op.pipeline, op.op, op.warp, op.after_complete, 0,
         Tile(op.tile[0], op.tile[1], op.tile[2], op.tile[3]), dtype);
     node->issue_depends_on = op.after_issue;
+    node->pipeline_iteration = op.pipeline_iteration;
     node->sm_id = cta_sms_[static_cast<std::size_t>(op.cta)];
     node->thread_block_id = op.cta;
     node->matrix_id = tensor_ids_[local_tensor];

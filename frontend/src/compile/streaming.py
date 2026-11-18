@@ -351,6 +351,8 @@ class ExecutionIRProducer:
                     "after_issue": list(node.after_issue),
                     "after_complete": list(node.after_complete),
                 }
+                if node.pipeline_iteration is not None:
+                    instruction["pipeline_iteration"] = node.pipeline_iteration
                 instruction_bytes = len(
                     json.dumps(instruction, separators=(",", ":")).encode()
                 )

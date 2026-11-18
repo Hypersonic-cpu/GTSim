@@ -652,6 +652,14 @@ public:
         return cache.size();
     }
 
+    struct ReadCounters {
+        std::uint64_t hit_bytes{}, merged_bytes{}, miss_bytes{};
+    };
+
+    ReadCounters read_counters() const {
+        return read_counters_;
+    }
+
     int get_transaction_count(const DAGNode& node) const {
         return get_total_transaction_count(node);
     }
@@ -849,6 +857,7 @@ private:
     std::deque<std::pair<int, int>> completion_queue;
     std::vector<MemRequest> backend_requests;
     std::uint64_t next_request_id{1};
+    ReadCounters read_counters_{};
 
     CacheLineKey tensor_base_key(const DAGNode& node) const {
         const TensorMetadata& tensor = tensors.at(node.matrix_id);
@@ -864,6 +873,8 @@ private:
         if (cache_enabled) {
             const auto cache_it = cache.find(access.line);
             if (cache_it != cache.end()) {
+                if (access.operation == MemoryOperation::Read)
+                    read_counters_.hit_bytes += access.size_bytes;
                 touch_lru(access.line);
                 if (access.operation == MemoryOperation::Write) {
                     cache_it->second.dirty = true;
@@ -876,6 +887,8 @@ private:
 
         auto mshr_it = mshr.find(access.line);
         if (mshr_it != mshr.end()) {
+            if (access.operation == MemoryOperation::Read)
+                read_counters_.merged_bytes += access.size_bytes;
             mshr_it->second.waiting.push_back(access);
             if (access.operation == MemoryOperation::Write) {
                 mshr_it->second.any_write = true;
@@ -885,6 +898,8 @@ private:
             return;
         }
 
+        if (access.operation == MemoryOperation::Read)
+            read_counters_.miss_bytes += access.size_bytes;
         const std::uint64_t request_id = next_request_id++;
         MSHREntry entry{{access},
                         access.operation == MemoryOperation::Write,

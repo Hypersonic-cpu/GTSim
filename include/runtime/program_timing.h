@@ -26,6 +26,15 @@ struct KernelTiming {
     int launch_cycle{}, start_cycle{}, device_complete_cycle{},
         complete_cycle{}, device_cycles{};
     std::size_t l2_lines_before{}, l2_lines_after{};
+    std::uint64_t l2_read_hit_bytes{}, l2_read_merged_bytes{},
+        l2_read_miss_bytes{}, tma_load_bytes{}, tma_store_bytes{};
+    std::size_t cta_count{}, active_sms{};
+    std::uint64_t active_sm_cycles{};
+    std::map<std::string, double> pipeline_inflight_fraction;
+    std::map<std::string, std::uint64_t> dependency_path_cycles;
+    std::uint64_t dependency_path_wait_cycles{};
+    int critical_path_cta{-1}, longest_path_iteration{-1};
+    std::uint64_t longest_path_iteration_cycles{};
     std::vector<PrefetchWindowTiming> prefetch_windows;
     std::map<std::string, TierTiming> memory;
     std::size_t background_at_launch{}, background_at_completion{};
