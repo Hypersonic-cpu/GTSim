@@ -569,7 +569,11 @@ Before launch:
 
 Submit the legal Phase A candidates to one event-driven work queue.
 
-Use cautious initial ramp-up (1, 2, 4, 8 concurrent jobs) before reaching the calculated safe concurrency. The scheduler may increase admissions only while memory observations remain within its reservation model.
+Start up to eight simultaneous simulations, subject to admission. On each
+completion, increase the target by up to four slots until reaching the safe CPU
+or RAM limit. Fill available slots immediately while older jobs run. At the
+limit, replace each completed job as resources permit. Resume growth on a
+completion if the admission budget can safely support a larger target.
 
 After Phase A completes, automatically select the eight configurations according to Section 7, construct the Phase B manifest and run Phase B through the same scheduler.
 

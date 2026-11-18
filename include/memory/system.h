@@ -219,6 +219,11 @@ public:
         return device(alias.tier).prefetch_admission_cycle(handle);
     }
 
+    int prefetch_ready_cycle(const ReadAlias& alias) const {
+        const auto handle = alias.queue_id ? alias.queue_id : alias.token;
+        return handle ? device(alias.tier).prefetch_ready_cycle(handle) : -1;
+    }
+
     void release_prefetch(const ReadAlias& alias, bool require_idle = true) {
         if (!alias.queue_id && !alias.token) return;
         if (require_idle && !foreground_idle())
@@ -314,7 +319,8 @@ public:
                           traffic.read_bytes, traffic.write_bytes,
                           device ? device->device_counters() : DeviceCounters{},
                           traffic.read_completions, traffic.read_latency_cycles,
-                          traffic.unadmitted_alias_read_bytes});
+                          traffic.unadmitted_alias_read_bytes,
+                          traffic.unadmitted_alias_read_requests});
         };
         snapshot(MemoryTier::HBM, hbm_.get(), hbm_statistics_);
         snapshot(MemoryTier::HBF, hbf_.get(), hbf_statistics_);
@@ -475,9 +481,11 @@ private:
                             .on_demand_miss(
                                 alias.queue_id, request.global_addr,
                                 static_cast<std::uint64_t>(request.size_bytes));
-                    if (!request.read_alias)
+                    if (!request.read_alias) {
                         statistics_for(tier).unadmitted_alias_read_bytes +=
                             request.size_bytes;
+                        ++statistics_for(tier).unadmitted_alias_read_requests;
+                    }
                 }
             }
         }

@@ -355,6 +355,8 @@ void Scheduler::issue_node(DAGNode* node, Pipeline* pipe, int current_cycle,
 
     if (is_tma_op(node)) {
         if (node->total_transactions == 0 && tma_unit) {
+            if (tma_issue_observer && *tma_issue_observer)
+                (*tma_issue_observer)(node->id, current_cycle);
             int count = tma_unit->enqueue(node, current_cycle, l2);
             node->total_transactions = count;
             node->pending_transactions = count;

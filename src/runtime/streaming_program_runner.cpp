@@ -2,6 +2,7 @@
 
 #include "memory/base.h"
 #include "kernel_prefetch_session.h"
+#include "lookahead_prefetch_session.h"
 
 #include <algorithm>
 #include <cassert>
@@ -59,6 +60,12 @@ struct KernelEndWire {
 struct InstructionBatchWire {
     std::vector<Instruction> instructions;
 };
+struct LookaheadBeginWire {
+    int distance{};
+};
+struct LookaheadConsumersWire {
+    std::vector<LookaheadConsumer> consumers;
+};
 
 namespace {
 
@@ -93,6 +100,9 @@ void measure_kernel(const DAG& dag, int sms, KernelTiming& timing) {
         cta_sms.try_emplace(node->thread_block_id, node->sm_id);
         const bool load = node->op_type == OpType::CP_DRAM2SRAM_TMA;
         const bool store = node->op_type == OpType::CP_SRAM2DRAM_TMA;
+        if (load) ++timing.tma_load_operations;
+        if (store) ++timing.tma_store_operations;
+        if (node->op_type == OpType::WGMMA) ++timing.wgmma_warp_operations;
         if (load || store) {
             const auto bytes = std::uint64_t(node->tile.element_count()) *
                                bytes_per_element(node->data_type);
@@ -426,10 +436,13 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
     builder.begin(std::move(header));
     std::unique_ptr<DAG> active_dag;
     std::unique_ptr<KernelPrefetchSession> panel;
+    LookaheadPlan lookahead_plan;
+    std::unique_ptr<LookaheadPrefetchSession> lookahead;
     [[maybe_unused]] auto cleanup = std::experimental::scope_exit([&] {
         builder.abort();
         memory_->clear_node_read_aliases();
         simulator_->node_completion_observer = {};
+        simulator_->tma_issue_observer = {};
         if (active_dag) {
             panel.reset();
             simulator_.reset();
@@ -454,6 +467,19 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
         } else if (message.type == "PrefetchWindow") {
             builder.add_prefetch_window(
                 decode_message<PrefetchWindow>(message));
+        } else if (message.type == "LookaheadBegin") {
+            const auto wire = decode_message<LookaheadBeginWire>(message);
+            if (lookahead_plan.distance || wire.distance < 1)
+                throw std::invalid_argument("invalid LookaheadBegin");
+            lookahead_plan.distance = wire.distance;
+        } else if (message.type == "LookaheadSpan" && lookahead_plan.distance) {
+            lookahead_plan.spans.push_back(decode_message<PrefetchRange>(message));
+        } else if (message.type == "LookaheadRegion" && lookahead_plan.distance) {
+            lookahead_plan.regions.push_back(decode_message<LookaheadRegion>(message));
+        } else if (message.type == "LookaheadConsumers" && lookahead_plan.distance) {
+            auto wire = decode_message<LookaheadConsumersWire>(message);
+            for (auto& consumer : wire.consumers)
+                lookahead_plan.consumers.push_back(std::move(consumer));
         } else if (message.type == "KernelEnd") {
             const auto end = decode_message<KernelEndWire>(message);
             KernelEnd contract{end.op_count, end.cta_count, end.outputs,
@@ -468,6 +494,14 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
             }
             memory_->bind_read_aliases(std::move(bindings));
 
+            if (lookahead_plan.distance) {
+                if (!built.prefetch_windows.empty() || !launch.read_aliases.empty())
+                    throw std::invalid_argument("lookahead cannot be combined with another prefetch policy");
+                memory_->prepare_node_read_aliases(active_dag->nodes.size());
+                lookahead = std::make_unique<LookaheadPrefetchSession>(
+                    *memory_, lookahead_plan, *active_dag, launch.bindings,
+                    simulator_->cycle);
+            }
             if (!built.prefetch_windows.empty()) {
                 memory_->prepare_node_read_aliases(active_dag->nodes.size());
                 panel = std::make_unique<KernelPrefetchSession>(
@@ -496,10 +530,20 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
                 simulator_->node_completion_observer = [&](int node, int now) {
                     panel->complete(node, now);
                 };
+            if (lookahead) {
+                simulator_->tma_issue_observer = [&](int node, int now) {
+                    lookahead->issue(node, now);
+                };
+                simulator_->node_completion_observer = [&](int node, int now) {
+                    lookahead->complete(node, now);
+                };
+            }
             if (!simulator_->run_active_graph(max_cycles_, false))
                 throw std::runtime_error("kernel execution timeout");
             simulator_->node_completion_observer = {};
+            simulator_->tma_issue_observer = {};
             if (panel) launch_timing.prefetch_windows = panel->finish();
+            if (lookahead) launch_timing.prefetch_regions = lookahead->finish();
             launch_timing.l2_lines_after = l2_->resident_line_count();
             launch_timing.device_complete_cycle = simulator_->cycle;
             launch_timing.device_cycles =
@@ -528,6 +572,9 @@ void StreamingProgramRunner::execute_launch(const LaunchDef& launch) {
                 delta.unadmitted_alias_read_bytes =
                     after.unadmitted_alias_read_bytes -
                     before.unadmitted_alias_read_bytes;
+                delta.unadmitted_alias_read_requests =
+                    after.unadmitted_alias_read_requests -
+                    before.unadmitted_alias_read_requests;
                 delta.gauges = after.device.gauges;
                 for (const auto& [name, value] : after.device.cumulative)
                     delta.counters.emplace(

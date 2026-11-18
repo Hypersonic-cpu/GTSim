@@ -22,4 +22,17 @@ struct PrefetchWindow {
     std::vector<int> consumers;
     std::vector<PrefetchRange> ranges;
 };
+struct LookaheadRegion {
+    std::vector<int> spans;
+};
+struct LookaheadConsumer {
+    int node{};
+    std::vector<int> regions, spans;
+};
+struct LookaheadPlan {
+    int distance{};
+    std::vector<PrefetchRange> spans;
+    std::vector<LookaheadRegion> regions;
+    std::vector<LookaheadConsumer> consumers;
+};
 } // namespace GTSim::ExecutionIR

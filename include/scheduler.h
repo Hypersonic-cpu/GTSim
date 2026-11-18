@@ -8,6 +8,7 @@
 #include "tmem.h"
 #include <vector>
 #include <deque>
+#include <functional>
 #include <cstdint>
 #include <unordered_map>
 #include <optional>
@@ -60,6 +61,7 @@ public:
     std::vector<Scheduler*>* peer_schedulers;
     std::vector<Pipeline*>* pipelines_ptr;
     TMAUnit* tma_unit;
+    std::function<void(int, int)>* tma_issue_observer{};
     TMEMUnit* tmem_unit;
     std::vector<int> tma_next_issue_cycle;
     std::vector<int> tma_issue_interval_cache;

@@ -10,7 +10,7 @@ struct TierTiming {
     std::vector<std::size_t> active_units;
     std::map<std::size_t, std::uint64_t> unit_busy_ticks;
     std::uint64_t read_completions{}, read_latency_cycles{},
-        unadmitted_alias_read_bytes{};
+        unadmitted_alias_read_bytes{}, unadmitted_alias_read_requests{};
     std::map<std::string, std::uint64_t> gauges;
 };
 
@@ -21,6 +21,13 @@ struct PrefetchWindowTiming {
     bool skipped{};
 };
 
+struct PrefetchRegionTiming {
+    int enqueue_cycle{-1}, ready_cycle{-1}, first_use_cycle{-1},
+        last_consumer_complete_cycle{-1};
+    std::uint64_t bytes{};
+    bool ready_at_first_use{};
+};
+
 struct KernelTiming {
     std::string id, state;
     int launch_cycle{}, start_cycle{}, device_complete_cycle{},
@@ -29,6 +36,7 @@ struct KernelTiming {
     std::uint64_t l2_read_hit_bytes{}, l2_read_merged_bytes{},
         l2_read_miss_bytes{}, tma_load_bytes{}, tma_store_bytes{};
     std::size_t cta_count{}, active_sms{};
+    std::uint64_t tma_load_operations{}, tma_store_operations{}, wgmma_warp_operations{};
     std::uint64_t active_sm_cycles{};
     std::map<std::string, double> pipeline_inflight_fraction;
     std::map<std::string, std::uint64_t> dependency_path_cycles;
@@ -36,6 +44,7 @@ struct KernelTiming {
     int critical_path_cta{-1}, longest_path_iteration{-1};
     std::uint64_t longest_path_iteration_cycles{};
     std::vector<PrefetchWindowTiming> prefetch_windows;
+    std::vector<PrefetchRegionTiming> prefetch_regions;
     std::map<std::string, TierTiming> memory;
     std::size_t background_at_launch{}, background_at_completion{};
     std::uint64_t background_compute_cycles{};

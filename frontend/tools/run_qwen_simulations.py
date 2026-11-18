@@ -255,6 +255,8 @@ def run_streaming_interface(
     placements,
     flashaccel=False,
     compile_metadata=None,
+    producer_options=None,
+    provenance_extra=None,
 ):
     plan = make_program_plan(source_program, arch, regions, tensors, prefetch)
     topology = memory_topology(args.memory)
@@ -263,7 +265,8 @@ def run_streaming_interface(
         "disabled_fullhbm"
         if topology == "FullHBM"
         else (
-            "on" if prefetch is not None and prefetch.streaming is not None else "off"
+            "on" if ((producer_options or {}).get("lookahead_regions")
+                     or prefetch is not None and prefetch.streaming is not None) else "off"
         )
     )
     producer = ExecutionIRProducer(
@@ -274,6 +277,7 @@ def run_streaming_interface(
             "prefetch_bases": prefetch.bases if prefetch is not None else None,
             "layouts": layouts,
             "prefetch_windows": not flashaccel,
+            **(producer_options or {}),
         },
     )
     args.out.mkdir(parents=True, exist_ok=True)
@@ -315,6 +319,7 @@ def run_streaming_interface(
         ).strip(),
         "source_sha256": {str(path): sha(path) for path in source_paths},
         "transport": "AF_UNIX socketpair; length-prefixed JSON; bounded InstructionBatch",
+        **(provenance_extra or {}),
     }
     (args.out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     if compile_metadata is not None:

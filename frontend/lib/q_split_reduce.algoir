@@ -1,0 +1,10 @@
+algo.kernel @q_split_reduce(%Partial: tensor<SPLIT_KxNxfp32>)
+    -> (%Q: tensor<1xNxbf16>) {
+  static.param %N : index
+  static.param %SPLIT_K : index
+  algo.domain %n in [0, N)
+  algo.compute @sum_partial result<%sum[%n]> semantics<sum_s(%Partial[%s,%n])>
+  algo.compute @cast result<%Q[0,%n]> semantics<cast_bf16(%sum[%n])>
+  algo.op @sum_partial category<reduction> cost<sum> dtype<fp32> inputs[%Partial] output[%sum] reduction[s]
+  algo.op @cast category<convert> cost<none> dtype<bf16> inputs[%sum] output[%Q] reduction[]
+}

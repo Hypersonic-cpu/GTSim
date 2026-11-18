@@ -982,7 +982,7 @@ struct TierMemoryStatistics {
     std::uint64_t completed_requests{};
     std::uint64_t total_latency_cycles{};
     std::uint64_t read_completions{}, read_latency_cycles{},
-        unadmitted_alias_read_bytes{};
+        unadmitted_alias_read_bytes{}, unadmitted_alias_read_requests{};
 
     double average_latency_cycles() const {
         return completed_requests == 0

@@ -1,0 +1,71 @@
+flow.kernel @q_gemm_ws schedule<explicit> target<sm90> {
+  static.param %N : index
+  static.param %K : index
+  static.param %NUM_SMS : index
+  static.param %BN : index
+  static.param %BK : index
+  static.param %SPLIT_K : index
+  static.let %n_tiles = floordiv(%N,%BN)
+      %tasks = %n_tiles*%SPLIT_K
+      %ctas = min(%NUM_SMS,%tasks)
+      %waves = ceildiv(%tasks,%ctas)
+      %split_width = floordiv(%K,%SPLIT_K)
+      %k_count = floordiv(%split_width,%BK)
+      %rank = %wave*%ctas+%cta
+      %s = %split_order[%rank]
+      %column = %n_order[%rank]*%BN
+      %k_row = %s*%split_width+%k*%BK
+  flow.tensor @X : tensor<1xKxbf16, row_major>
+  flow.tensor @W : tensor<KxNxbf16, row_major>
+  flow.tensor @Y : tensor<SPLIT_KxNxbf16, row_major>
+  flow.schedule_config tile(64x%BNx%BK) stages(2)
+      warps(12) consumer_warps(8) producer_warp(8) warpgroup(4)
+      matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ctas step 1
+  flow.loop @wave %wave = 0 to %waves step 1
+  static.if <%k > 0> {
+    flow.dependency_rule @previous_load from[@load_X.complete, @load_W.complete] at[%wave = %wave, %k = %k-1] select<all>
+  }
+  static.if <%k == 0 and %wave > 0> {
+    flow.dependency_rule @previous_load from[@load_X.complete, @load_W.complete] at[%wave = %wave-1, %k = %k_count-1] select<all>
+    flow.dependency_rule @previous_task from[@store.complete] at[%wave = %wave-1] select<all>
+  }
+  static.if <%k >= 2> {
+    flow.dependency_rule @reuse from[@matmul.complete] at[%wave = %wave, %k = %k-2] select<all>
+  }
+  static.if <%wave > 0 and %k == 0> {
+    flow.dependency_rule @reuse from[@matmul.complete] at[%wave = %wave-1, %k = %k_count-2+(%k_count mod 2)] select<all>
+  }
+  static.if <%wave > 0 and %k == 1 and %k_count mod 2 == 0> {
+    flow.dependency_rule @reuse from[@matmul.complete] at[%wave = %wave-1, %k = %k_count-1] select<all>
+  }
+  static.if <has_previous_fragment(%executor)> {
+    flow.dependency_rule @accumulate from[@matmul.complete] at[%wave = %wave] select<last_per_executor>
+  }
+  flow.dependency_rule @final_round from[@matmul.complete] at[%wave = %wave, %k = %k_count-1] select<all>
+  static.if <%chunk > 0> {
+    flow.dependency_rule @previous_chunk from[@store.issue] at[%wave = %wave, %chunk = %chunk-1] select<all>
+  }
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %inputs slots(2) access<read_write> : bytes_per_slot<%input_stage_bytes>
+  flow.buffer %output slots(1) access<read_write> : bytes_per_slot<%output_stage_bytes>
+  static.if <%rank < %tasks> scope[%cta, %wave] {
+    flow.pipeline @k_loop %k = 0 to %k_count step 1 depth(2)
+        generation_counts_per_wave[ceildiv(%k_count,2), floordiv(%k_count,2)] {
+      flow.acquire @acquire scope<pipeline> slots[%inputs.s(%k mod 2)] after[@matmul.complete:reuse]
+      %load_X, !x_ready = flow.load_async @load_X @X[0, %k_row]<1xBK> by %producer after[@matmul.complete:reuse, @load_X.complete:previous_load, @load_W.complete:previous_load] requires<bulk_copy> : tensor<1xBKxbf16>
+      %load_W, !w_ready = flow.load_async @load_W @W[%k_row, %column]<BKxBN> by %producer after[@matmul.complete:reuse, @load_X.complete:previous_load, @load_W.complete:previous_load] requires<bulk_copy> : tensor<BKxBNxbf16>
+      %matmul, !acc_ready = flow.matmul @matmul implements<@matmul> reads[%load_X, %load_W, %matmul.prev<zero>] on_tile<@Y[%s, %column]<64xBN>> by %matrix after[@load_X.ready:data, @load_W.ready:data, @matmul.complete:accumulate, @store.complete:previous_task] requires<matrix.mma> : tensor<64xBNxfp32>
+      flow.release @release slots[%inputs.s(%k mod 2)] after[@matmul.complete:data]
+    }
+    !written = flow.store_async @store implements<@write> reads[%matmul] cast<bf16> to @Y[%s, %column]<1xBN> by %producer after[@matmul.complete:final_round, @store.issue:previous_chunk] requires<bulk_copy>
+  }
+}
+
+mapping.program @q_gemm_ws_mapping flow<@q_gemm_ws> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @inputs -> @SMEM
+  map.store @output -> @SMEM
+}

@@ -238,6 +238,7 @@ public:
     std::vector<Subpartition*> node_id_to_sp;
     std::vector<int> node_id_to_sm;
     std::function<void(int, int)> node_completion_observer;
+    std::function<void(int, int)> tma_issue_observer;
     std::size_t completed_node_count;
 
     Simulator(DAG* input_dag, const SimulatorConfig& cfg = SimulatorConfig())

@@ -16,6 +16,10 @@ FORBIDDEN = (
     "block_schedule",
 )
 ALLOWED_CONFIG_LINES = ("config.silence_mode", "config.workload_type")
+ALLOWED_MEMORY_READS = (
+    "const bool segmented = config.memory.address_layout.enabled ||",
+    "config.memory.placement != TensorPlacementProfile::AllHBM;",
+)
 
 
 def main() -> int:
@@ -26,7 +30,8 @@ def main() -> int:
             stripped = line.strip()
             if any(token in stripped for token in FORBIDDEN):
                 violations.append(f"{source.relative_to(root)}:{number}: {stripped}")
-            if "config." in stripped and not any(item in stripped for item in ALLOWED_CONFIG_LINES):
+            if ("config." in stripped and stripped not in ALLOWED_MEMORY_READS
+                    and not any(item in stripped for item in ALLOWED_CONFIG_LINES)):
                 violations.append(f"{source.relative_to(root)}:{number}: {stripped}")
     if violations:
         print("Workload builders may not override hardware-profile timing:", *violations,

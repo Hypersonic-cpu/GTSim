@@ -1,0 +1,30 @@
+flow.kernel @q_split_reduce_flow schedule<explicit> target<sm90> {
+  static.param %N : index
+  static.param %NUM_SMS : index
+  static.param %SPLIT_K : index
+  static.let %columns = 64
+      %ctas = ceildiv(%N,%columns)
+      %offset = %cta*%columns
+      %scratch = %SPLIT_K*%columns*4+%columns*2
+  flow.tensor @Partial : tensor<SPLIT_KxNxfp32, row_major>
+  flow.tensor @Q : tensor<1xNxbf16, row_major>
+  flow.schedule_config tile(1x64x1) stages(1)
+      warps(4) consumer_warps(1) producer_warp(0) warpgroup(4)
+      matrix_tile(64x64x16)
+  flow.loop @cta %cta = 0 to %ctas step 1
+  flow.loop @wave %wave = 0 to 1 step 1
+  flow.executor %producer role<producer> organization<independent>
+  flow.executor %matrix role<matrix> organization<cooperative>
+  flow.buffer %scratch slots(1) access<read_write> : bytes_per_slot<%scratch>
+  flow.pipeline @reduce %k = 0 to 1 step 1 depth(1) generation_counts_per_wave[1] {
+    %load, !read = flow.load_async @load @Partial[0, %offset]<SPLIT_Kx64> by %producer : tensor<SPLIT_Kx64xfp32>
+    %sum = flow.reduction @sum implements<@sum_partial> reads[%load] after[@load.complete:data] : tensor<1x64xfp32> work<SPLIT_Kx64>
+    %cast = flow.arithmetic @cast implements<@cast> reads[%sum] after[@sum.complete:data] : tensor<1x64xbf16>
+  }
+  !written = flow.store_async @store reads[%cast] cast<bf16> to @Q[0, %offset]<1x64> by %producer after[@cast.complete:data] scope<epilogue>
+}
+mapping.program @q_split_reduce_mapping flow<@q_split_reduce_flow> target<sm90> placement<round_robin> {
+  map.execute @producer capability<bulk_copy> -> @TMA
+  map.execute @matrix capability<matrix.mma> -> @WGMMA
+  map.store @scratch -> @SMEM
+}

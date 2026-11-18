@@ -305,6 +305,8 @@ class ExecutionIRProducer:
             )
             ctas = []
             loads = []
+            lookahead = self.options.get("lookahead_regions", {}).get(launch_id)
+            consumers = []
             store_areas = {}
             instruction_batch = []
             instruction_batch_bytes = 0
@@ -376,15 +378,16 @@ class ExecutionIRProducer:
                     node.opcode == A.NativeOpcode.TMA_LOAD.value
                     and node.tensor is not None
                 ):
-                    loads.append(
-                        (
+                    if lookahead is not None and node.tensor == lookahead.tensor:
+                        consumers.append(lookahead.consumer(node))
+                    elif self.options.get("prefetch_windows", True):
+                        loads.append((
                             node.cta,
                             node.pipeline_iteration,
                             node.id,
                             node.tensor,
                             node.tile,
-                        )
-                    )
+                        ))
                 if (
                     node.opcode == A.NativeOpcode.TMA_STORE.value
                     and node.tensor is not None
@@ -398,6 +401,8 @@ class ExecutionIRProducer:
             expander.expand_to(emit_cta, emit_instruction)
             flush_instructions()
 
+            if lookahead is not None:
+                lookahead.emit(writer, consumers)
             for window in self._prefetch_windows(loads, ctas, tensors):
                 writer.send(
                     "PrefetchWindow",

@@ -82,6 +82,7 @@ void KernelExecutionSession::attach(Simulator& simulator, DAG& dag) {
             scheduler->scheduler_warp_num = warps;
             scheduler->set_pipelines(&sp->pipelines);
             scheduler->set_tma_unit(sm->tma);
+            scheduler->tma_issue_observer = &simulator.tma_issue_observer;
             scheduler->set_tmem_unit(sm->tmem);
             scheduler->set_peer_schedulers(&sm->sp_schedulers);
             sp->sp_register->register_totally_used = 0;
@@ -112,6 +113,7 @@ void KernelExecutionSession::detach(Simulator& simulator) {
     verify_retired(simulator);
     auto* gpu = simulator.simulated_gpu;
     simulator.node_completion_observer = {};
+    simulator.tma_issue_observer = {};
     for (auto* sm : gpu->sms) {
         sm->all_tb_ids.clear();
         sm->resident_tb_ids.clear();

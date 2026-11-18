@@ -1,0 +1,32 @@
+prog.program @q_projection {
+  static.param %BN : index
+  static.param %BK : index
+  static.param %SPLIT_K : index
+  static.let %N = 8192
+      %K = 4096
+      %NUM_SMS = 132
+  prog.tensor @X_norm : tensor<1xKxbf16> storage<HBM> external readonly
+  prog.tensor @W_q : tensor<KxNxbf16> storage<HBM> external readonly
+  prog.tensor @Q : tensor<1xNxbf16> storage<HBM>
+  prog.tensor @Partial : tensor<SPLIT_KxNxfp32> storage<HBM>
+  prog.stream @compute ordered {
+    static.if <%SPLIT_K == 1> {
+      %Q, !q_done = prog.launch @q_gemm
+          callee<@q_gemm> implementation<@q_gemm_ws>
+          inputs[@X_norm, @W_q] outputs[@Q]
+          attrs{N=%N, K=%K, NUM_SMS=%NUM_SMS, BN=%BN, BK=%BK, SPLIT_K=%SPLIT_K}
+    }
+    static.else {
+      %Partial, !gemm_done = prog.launch @q_gemm_partial
+          callee<@q_gemm> implementation<@q_gemm_ws>
+          inputs[@X_norm, @W_q] outputs[@Partial]
+          attrs{N=%N, K=%K, NUM_SMS=%NUM_SMS, BN=%BN, BK=%BK, SPLIT_K=%SPLIT_K}
+      %Q, !reduce_done = prog.launch @q_split_reduce
+          callee<@q_split_reduce> implementation<@q_split_reduce_flow>
+          inputs[@Partial] outputs[@Q]
+          attrs{N=%N, NUM_SMS=%NUM_SMS, SPLIT_K=%SPLIT_K}
+    }
+    prog.synchronize @compute after[!q_done, !reduce_done]
+  }
+  prog.return @Q after[!q_done, !reduce_done]
+}

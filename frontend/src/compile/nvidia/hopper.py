@@ -135,7 +135,7 @@ def _select(op, flow, operand_positions):
                 A.ExecutionResource.STORE,
                 index(p.producer_warp),
                 (loop("chunk", f"ceildiv({bn},{mn})"),),
-                region(op.region, r, f"({c}) + %chunk*{mn}", (bm, mn)),
+                region(op.region, r, f"({c}) + %chunk*{mn}", (op.region.shape[0], mn)),
                 op.cast,
                 dimension(op.region.parent_row_stride or tensor.shape[1]),
                 final,

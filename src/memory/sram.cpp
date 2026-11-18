@@ -183,6 +183,7 @@ public:
         if (!backend_->try_submit(routed, now)) return false;
         if (request.read_alias) {
             ++regions_.at(request.read_alias).consumers;
+            if (routed.read_path == MemoryReadPath::Host) ++fallback_read_requests_;
             (routed.read_path == MemoryReadPath::Resident
                  ? resident_read_bytes_
                  : fallback_read_bytes_) += request.size_bytes;
@@ -215,7 +216,10 @@ public:
                 if (region.fill_retired()) {
                     assert(active_fills_ > 0);
                     --active_fills_;
-                    if (region.ready()) ++completed_fills_;
+                    if (region.ready()) {
+                        region.ready_cycle = now;
+                        ++completed_fills_;
+                    }
                 }
                 reclaim(token);
                 continue;
@@ -330,6 +334,12 @@ public:
         return region.ready() && !region.released;
     }
 
+    int prefetch_ready_cycle(std::uint64_t handle) const override {
+        const auto token = prefetch_engine_.alias(handle);
+        auto found = regions_.find(token);
+        return found == regions_.end() ? -1 : found->second.ready_cycle;
+    }
+
     void release_prefetch(std::uint64_t token) override {
         if (token >= HardwarePrefetchEngine::queue_id_base) {
             const auto [owned, admitted] = prefetch_engine_.release(token);
@@ -369,6 +379,7 @@ public:
                 prefetch_engine_.canceled();
             counters.cumulative["resident_read_bytes"] = resident_read_bytes_;
             counters.cumulative["fallback_read_bytes"] = fallback_read_bytes_;
+            counters.cumulative["fallback_read_requests"] = fallback_read_requests_;
             counters.gauges["sram_reserved_bytes"] = reserved_bytes_;
             counters.gauges["sram_peak_reserved_bytes"] = peak_reserved_bytes_;
             counters.gauges["prefetch_peak_outstanding"] = peak_active_fills_;
@@ -418,6 +429,7 @@ private:
         std::unordered_set<std::uint64_t> ready_pages;
         std::vector<Fill> fills;
         std::size_t next_fill{};
+        int ready_cycle{-1};
         bool ready() const {
             return started && !failed && submitted == bytes && !outstanding;
         }
@@ -500,6 +512,7 @@ private:
         peak_active_fills_{};
     std::uint64_t prefetch_bytes_{}, resident_read_bytes_{},
         fallback_read_bytes_{};
+    std::uint64_t fallback_read_requests_{};
     std::unordered_map<std::uint64_t, MemRequest> pending_;
 };
 } // namespace

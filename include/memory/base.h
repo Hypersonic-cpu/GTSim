@@ -74,7 +74,7 @@ struct TierCounterSnapshot {
     std::uint64_t read_bytes{}, write_bytes{};
     DeviceCounters device;
     std::uint64_t read_completions{}, read_latency_cycles{},
-        unadmitted_alias_read_bytes{};
+        unadmitted_alias_read_bytes{}, unadmitted_alias_read_requests{};
 };
 
 // Placement runs before construction of the persistent memory system.
@@ -119,6 +119,7 @@ public:
     virtual bool prefetch_ready(std::uint64_t) const {
         return false;
     }
+    virtual int prefetch_ready_cycle(std::uint64_t) const { return -1; }
     virtual void release_prefetch(std::uint64_t) {
         throw std::invalid_argument("device does not support prefetch");
     }

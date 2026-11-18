@@ -25,6 +25,11 @@ import sys
 import textwrap
 import time
 
+if __package__:
+    from .common.sweep_scheduler import memory_constraints, process_tree_memory
+else:
+    from common.sweep_scheduler import memory_constraints, process_tree_memory
+
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 SOURCE = REPOSITORY / "frontend/asm/qwen3/flash-accel/one_block.progir"
@@ -135,36 +140,9 @@ def _sha(path):
     return digest.hexdigest()
 
 
-def _read_int(path):
-    try:
-        return int(Path(path).read_text().strip())
-    except (FileNotFoundError, ValueError):
-        return None
-
-
 def available_memory_bytes():
     """Return container-visible available memory, never host-total memory."""
-
-    available = None
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                available = int(line.split()[1]) * 1024
-                break
-    except (FileNotFoundError, ValueError):
-        pass
-    limit_text = None
-    try:
-        limit_text = Path("/sys/fs/cgroup/memory.max").read_text().strip()
-    except FileNotFoundError:
-        pass
-    if limit_text and limit_text != "max":
-        limit = _read_int("/sys/fs/cgroup/memory.max")
-        current = _read_int("/sys/fs/cgroup/memory.current") or 0
-        headroom = max(0, limit - current) if limit is not None else None
-        if headroom is not None:
-            available = headroom if available is None else min(available, headroom)
-    return available or ASSUMED_CASE_BYTES
+    return min(max(0, item.capacity - item.used) for item in memory_constraints())
 
 
 def cpu_capacity():
@@ -192,34 +170,8 @@ def effective_concurrency(requested, case_bytes=ASSUMED_CASE_BYTES,
     return min(capacity, memory_slots)
 
 
-def _rss(pid):
-    try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) * 1024
-    except (FileNotFoundError, ValueError):
-        return 0
-    return 0
-
-
-def _children(pid):
-    try:
-        text = Path(f"/proc/{pid}/task/{pid}/children").read_text()
-        return [int(value) for value in text.split()]
-    except (FileNotFoundError, ValueError):
-        return []
-
-
 def process_tree_rss(pid):
-    seen, todo, total = set(), [pid], 0
-    while todo:
-        current = todo.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        total += _rss(current)
-        todo.extend(_children(current))
-    return total
+    return process_tree_memory(pid)[0]
 
 
 def _context_name(context):

@@ -163,6 +163,11 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/streaming_lifecycle.py
                 --build-dir ${CMAKE_CURRENT_BINARY_DIR})
       set_tests_properties(streaming_lifecycle PROPERTIES TIMEOUT 180)
+      add_test(NAME q_projection_lookahead
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/q_projection_lookahead.py
+                --build-dir ${CMAKE_CURRENT_BINARY_DIR})
+      set_tests_properties(q_projection_lookahead PROPERTIES
+        TIMEOUT 180 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
   endif()
 endif()

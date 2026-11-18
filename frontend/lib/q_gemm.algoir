@@ -1,0 +1,13 @@
+algo.kernel @q_gemm(%X: tensor<1xKxbf16>, %W: tensor<KxNxbf16>)
+    -> (%Y: tensor<SPLIT_KxNxbf16>) {
+  static.param %N : index
+  static.param %K : index
+  static.param %SPLIT_K : index
+  algo.domain %s in [0, SPLIT_K), %n in [0, N)
+  algo.accumulator @acc : tensor<SPLIT_KxNxfp32> init<zero>
+  algo.compute @matmul result<%acc[%s,%n]>
+      semantics<sum_k_in_split(cast_f32(%X[0,%k]) * cast_f32(%W[%k,%n]))>
+  algo.compute @write result<%Y[%s,%n]> semantics<store_partial_fp32_or_final_bf16(%acc[%s,%n])>
+  algo.op @matmul category<matrix> cost<none> dtype<fp32> inputs[%X, %W] output[%acc] reduction[k]
+  algo.op @write category<convert> cost<none> dtype<bf16> inputs[%acc] output[%Y] reduction[]
+}

@@ -1435,6 +1435,7 @@ void Simulator::attach_graph(DAG& graph) {
     if (graph.nodes.empty())
         throw std::invalid_argument("cannot attach an empty kernel graph");
     node_completion_observer = {};
+    tma_issue_observer = {};
     KernelExecutionSession::attach(*this, graph);
 }
 
