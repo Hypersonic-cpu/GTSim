@@ -18,8 +18,10 @@ import math
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
+import textwrap
 import time
 
 
@@ -46,6 +48,7 @@ MAIN_CONFIGS = (
 MAX_CONCURRENCY = 150
 PER_CASE_TIMEOUT_SECONDS = 1800
 AGENT_PROGRESS_INTERVAL_SECONDS = 1800
+STATUS_INTERVAL_SECONDS = 300
 ASSUMED_CASE_BYTES = 10 * 1024**3
 MEMORY_SAFETY_FRACTION = 0.75
 MEMORY_GUARD_FRACTION = 0.90
@@ -158,10 +161,15 @@ def cpu_capacity():
     return max(1, capacity)
 
 
-def effective_concurrency(requested):
+def effective_concurrency(requested, case_bytes=ASSUMED_CASE_BYTES,
+                          safety_fraction=MEMORY_SAFETY_FRACTION,
+                          ram_admission=True):
+    capacity = min(requested, MAX_CONCURRENCY, cpu_capacity())
+    if not ram_admission:
+        return capacity
     available = available_memory_bytes()
-    memory_slots = max(1, math.floor(available * MEMORY_SAFETY_FRACTION / ASSUMED_CASE_BYTES))
-    return min(requested, MAX_CONCURRENCY, cpu_capacity(), memory_slots)
+    memory_slots = max(1, math.floor(available * safety_fraction / case_bytes))
+    return min(capacity, memory_slots)
 
 
 def _rss(pid):
@@ -334,28 +342,117 @@ def _tail(path, lines=20):
 
 
 class Scheduler:
-    def __init__(self, root, runner, requested_concurrency, retry_failed=False):
+    def __init__(self, root, runner, requested_concurrency, retry_failed=False,
+                 ram_guard=True, case_bytes=ASSUMED_CASE_BYTES,
+                 safety_fraction=MEMORY_SAFETY_FRACTION, ram_admission=True):
         self.root = root
         self.runner = runner
         self.retry_failed = retry_failed
-        self.allowed_running = effective_concurrency(requested_concurrency)
+        self.ram_guard = ram_guard
+        self.allowed_running = effective_concurrency(
+            requested_concurrency, case_bytes, safety_fraction, ram_admission)
         self.initial_available = available_memory_bytes()
         self.active = {}
         self.active_lock = asyncio.Lock()
         self.monitor_task = None
         self.records = {}
         self.scheduled_groups = set()
+        self.status_task = None
+        self.phase = "initializing"
+        self.job_states = {}
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def log(self, event, **fields):
+        record = {"time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "event": event, "phase": self.phase, **fields}
+        with (self.root / "scheduler_events.jsonl").open("a") as stream:
+            stream.write(json.dumps(record) + "\n")
+        # The event file retains every transition. The console reports routine
+        # work in periodic summaries, so fast compiler checks do not flood it.
+        if event in ("JOB_STARTED", "JOB_RESUMED", "DEPENDENT_JOB_ENQUEUED"):
+            return
+        if event == "JOB_FINISHED" and fields.get("status") in ("SUCCESS", "INFEASIBLE"):
+            return
+        stamp = time.strftime("%H:%M:%S", time.gmtime())
+        if event == "STATUS":
+            lines = [
+                f"[{stamp} UTC] {self.phase}",
+                f"run={fields['running']}  wait={fields['waiting']}  "
+                f"ok={fields['completed_success']}  fail={fields['completed_failed']}  "
+                f"infeasible={fields['infeasible']}",
+                f"limit={fields['concurrency_limit']}  "
+                f"free RAM={fields['available_ram_gib']:.1f} GiB",
+            ]
+        else:
+            lines = [f"[{stamp} UTC] {event.lower().replace('_', ' ')}"]
+            for key, value in fields.items():
+                if key == "error":
+                    # Tracebacks remain in scheduler_events.jsonl and job logs.
+                    value = str(value).strip().splitlines()[-1:] or [""]
+                    value = value[0]
+                lines.append(f"{key.replace('_', ' ')}: {value}")
+        width = max(32, min(88, shutil.get_terminal_size((80, 24)).columns))
+        for line in lines:
+            print(textwrap.fill(line, width=width, subsequent_indent="  "), flush=True)
+
+    def begin_phase(self, phase, cases=(), states=None):
+        self.phase = phase
+        self.job_states = {case.label: "WAITING" for case in cases}
+        self.job_states.update(states or {})
+        self.report_status()
+
+    def report_status(self):
+        counts = {}
+        for state in self.job_states.values():
+            counts[state] = counts.get(state, 0) + 1
+        record = {
+            "running": len(self.active),
+            "waiting": counts.get("WAITING", 0) + counts.get("DEFERRED_RAM", 0),
+            "completed_success": counts.get("SUCCESS", 0),
+            "completed_failed": sum(counts.get(s, 0) for s in ("FAILED", "TIMEOUT", "OOM")),
+            "infeasible": counts.get("INFEASIBLE", 0),
+            "known_jobs": len(self.job_states),
+            "concurrency_limit": self.allowed_running,
+            "available_ram_gib": round(available_memory_bytes() / 1024**3, 2),
+        }
+        self.log("STATUS", **record)
+        (self.root / "scheduler_status.json").write_text(
+            json.dumps({"phase": self.phase, **record}, indent=2) + "\n")
+
+    async def _status_monitor(self):
+        while True:
+            await asyncio.sleep(STATUS_INTERVAL_SECONDS)
+            self.report_status()
+
+    async def requeue(self, case, queue):
+        case.attempt += 1
+        delay = min(300, 30 * case.attempt)
+        self.job_states[case.label] = "WAITING"
+        self.log("RAM_RETRY_SCHEDULED", case=case.label, attempt=case.attempt,
+                 delay_seconds=delay, concurrency_limit=self.allowed_running)
+        await asyncio.sleep(delay)
+        await queue.put(case)
+        self.log("RAM_REQUEUED", case=case.label, attempt=case.attempt)
 
     async def start(self):
-        self.monitor_task = asyncio.create_task(self._memory_monitor())
+        self.status_task = asyncio.create_task(self._status_monitor())
+        self.log("SCHEDULER_STARTED", concurrency_limit=self.allowed_running,
+                 cpu_capacity=cpu_capacity(), ram_guard_enabled=self.ram_guard,
+                 status_interval_seconds=STATUS_INTERVAL_SECONDS)
+        if self.ram_guard:
+            self.monitor_task = asyncio.create_task(self._memory_monitor())
 
     async def stop(self):
-        if self.monitor_task is not None:
-            self.monitor_task.cancel()
+        for task in (self.monitor_task, self.status_task):
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await self.monitor_task
+                await task
             except asyncio.CancelledError:
                 pass
+        self.report_status()
+        self.log("SCHEDULER_STOPPED")
 
     def can_skip(self, case):
         previous = read_case_status(case)
@@ -380,27 +477,40 @@ class Scheduler:
                 if victim["ram_guard"]:
                     continue
                 victim["ram_guard"] = True
+                self.log("RAM_GUARD_TRIGGERED", case=victim["case"],
+                         total_rss_gib=round(total / 1024**3, 3),
+                         threshold_gib=round(limit / 1024**3, 3),
+                         action="Terminate newest job and defer it for retry")
+                self.allowed_running = max(1, self.allowed_running - 1)
+                self.log("CONCURRENCY_REDUCED", concurrency_limit=self.allowed_running)
                 await self._terminate(victim["process"])
                 total = sum(process_tree_rss(item["process"].pid) for item in active)
-                self.allowed_running = max(1, self.allowed_running - 1)
+                self.log("RAM_GUARD_RECHECK", remaining_rss_gib=round(total / 1024**3, 3),
+                         threshold_gib=round(limit / 1024**3, 3))
 
     async def _terminate(self, process):
+        self.log("PROCESS_TERMINATION_REQUESTED", pid=process.pid, signal="SIGTERM")
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         except ProcessLookupError:
+            self.log("PROCESS_ALREADY_EXITED", pid=process.pid)
             return
         try:
             await asyncio.wait_for(process.wait(), 10)
+            self.log("PROCESS_TERMINATED", pid=process.pid, returncode=process.returncode)
             return
         except asyncio.TimeoutError:
             pass
         try:
+            self.log("PROCESS_TERMINATION_ESCALATED", pid=process.pid, signal="SIGKILL")
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except ProcessLookupError:
             pass
         await process.wait()
+        self.log("PROCESS_TERMINATED", pid=process.pid, returncode=process.returncode)
 
     async def execute(self, case, compile_only=False):
+        self.job_states[case.label] = "RUNNING"
         case.output.mkdir(parents=True, exist_ok=True)
         log_path = case.output / "driver.log"
         started = time.monotonic()
@@ -412,9 +522,12 @@ class Scheduler:
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
         )
-        entry = {"process": process, "started": started, "ram_guard": False}
+        entry = {"process": process, "started": started, "ram_guard": False,
+                 "case": case.label}
         async with self.active_lock:
             self.active[case.label] = entry
+        self.log("JOB_STARTED", case=case.label, pid=process.pid,
+                 attempt=case.attempt, compile_only=compile_only)
         status, error = "FAILED", ""
         returncode = None
         try:
@@ -430,8 +543,21 @@ class Scheduler:
                 else:
                     status = "INFEASIBLE" if compile_only else "FAILED"
                     error = _tail(log_path)
+                    memory_error_text = error + "\n" + _tail(case.output / "simulation.log")
+                    oom_reported = any(marker in memory_error_text.lower() for marker in (
+                        "memoryerror", "std::bad_alloc", "cannot allocate memory", "out of memory"))
+                    if oom_reported:
+                        self.log("OUT_OF_MEMORY", case=case.label, pid=process.pid,
+                                 returncode=returncode, error=error)
+                        status = "DEFERRED_RAM"
+                        self.allowed_running = max(1, self.allowed_running - 1)
+                        self.log("CONCURRENCY_REDUCED", concurrency_limit=self.allowed_running)
+                    elif returncode == -signal.SIGKILL:
+                        self.log("JOB_KILLED", case=case.label, pid=process.pid,
+                                 reason="SIGKILL; OOM is possible but unconfirmed")
             except asyncio.TimeoutError:
                 status, error = "TIMEOUT", "1800-second wall-clock timeout"
+                self.log("JOB_TIMEOUT", case=case.label, pid=process.pid)
                 await self._terminate(process)
             except asyncio.CancelledError:
                 await self._terminate(process)
@@ -453,6 +579,9 @@ class Scheduler:
             if not isinstance(timing.get("total_cycles"), int):
                 status = "FAILED"
                 error = "successful process had no total_cycles in result.json"
+        if status == "DEFERRED_RAM" and case.attempt >= 20:
+            status = "OOM"
+            self.log("RAM_RETRY_LIMIT_REACHED", case=case.label, attempts=case.attempt + 1)
         record = {
             "fingerprint": case.fingerprint,
             "case_id": case.label,
@@ -475,6 +604,10 @@ class Scheduler:
         case.output.joinpath("case_status.json").write_text(
             json.dumps(record, indent=2) + "\n"
         )
+        self.job_states[case.label] = status
+        self.log("JOB_FINISHED", case=case.label, status=status,
+                 returncode=returncode, elapsed_seconds=round(elapsed, 2),
+                 error=error if status not in ("SUCCESS", "INFEASIBLE") else "")
         return JobResult(case, status, returncode, elapsed, error, payload)
 
     async def run_queue(self, cases, compile_only, on_result):
@@ -495,9 +628,7 @@ class Scheduler:
                         await asyncio.sleep(5)
                     result = await self.execute(case, compile_only)
                     if result.status == "DEFERRED_RAM" and case.attempt < 20:
-                        case.attempt += 1
-                        await asyncio.sleep(min(300, 30 * case.attempt))
-                        await queue.put(case)
+                        await self.requeue(case, queue)
                     else:
                         self.records[case.label] = result
                         await on_result(result, queue)
@@ -799,7 +930,16 @@ async def main_async(args):
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     runner_sha = _sha(runner)
     params = _base_params()
-    scheduler = Scheduler(root, runner, args.max_concurrency, args.retry_failed)
+    scheduler = Scheduler(root, runner, args.max_concurrency, args.retry_failed,
+                          ram_guard=args.ram_guard == "on",
+                          case_bytes=args.memory_per_case_gib * 1024**3,
+                          safety_fraction=args.memory_budget_fraction,
+                          ram_admission=args.ram_admission == "on")
+    scheduler.log("RESOURCE_POLICY", requested_concurrency=args.max_concurrency,
+                  effective_concurrency=scheduler.allowed_running,
+                  memory_per_case_gib=args.memory_per_case_gib,
+                  memory_budget_fraction=args.memory_budget_fraction,
+                  ram_admission=args.ram_admission, ram_guard=args.ram_guard)
     for context in CONTEXT_LENGTHS:
         params["CONTEXTS"] = [context]
         break
@@ -849,8 +989,19 @@ async def main_async(args):
     )
     await scheduler.start()
     try:
-        if not scheduler.can_skip(pilot):
+        scheduler.begin_phase("pilot", () if args.skip_pilot else (pilot,))
+        if args.skip_pilot:
+            scheduler.log("PILOT_SKIPPED", reason="--skip-pilot was specified")
+        elif scheduler.can_skip(pilot):
+            previous = read_case_status(pilot)
+            scheduler.job_states[pilot.label] = previous["status"]
+            scheduler.log("PILOT_SKIPPED", case=pilot.label,
+                          reason="A matching saved status exists", status=previous["status"])
+        if not args.skip_pilot and not scheduler.can_skip(pilot):
+            scheduler.log("PILOT_STARTED", case=pilot.label,
+                          reason="Serial smoke check before candidate compilation and concurrent simulation")
             pilot_result = await scheduler.execute(pilot)
+            scheduler.log("PILOT_FINISHED", case=pilot.label, status=pilot_result.status)
             if pilot_result.status != "SUCCESS":
                 raise SystemExit(
                     "T0 pilot failed; inspect " + str(pilot.output / "driver.log")
@@ -882,7 +1033,9 @@ async def main_async(args):
             scheduler.records[result.case.label] = result
             write_progress({}, "preflight")
 
+        scheduler.begin_phase("preflight", preflight_cases)
         await scheduler.run_queue(preflight_cases, True, preflight_done)
+        scheduler.report_status()
 
         legal = []
         statuses = {}
@@ -949,8 +1102,12 @@ async def main_async(args):
             previous = read_case_status(replay)
             if previous and scheduler.can_skip(replay):
                 statuses[replay.label] = dict(previous)
+                scheduler.job_states[replay.label] = previous["status"]
+                scheduler.log("JOB_RESUMED", case=replay.label, status=previous["status"])
             else:
+                scheduler.job_states[replay.label] = "WAITING"
                 await queue.put(replay)
+                scheduler.log("DEPENDENT_JOB_ENQUEUED", case=replay.label)
             if hardware == "4f1m":
                 control = make_case("controls", context, hardware, policy, "off", tile, root)
                 control.fingerprint = _case_fingerprint(
@@ -960,8 +1117,12 @@ async def main_async(args):
                 previous = read_case_status(control)
                 if previous and scheduler.can_skip(control):
                     statuses[control.label] = dict(previous)
+                    scheduler.job_states[control.label] = previous["status"]
+                    scheduler.log("JOB_RESUMED", case=control.label, status=previous["status"])
                 else:
+                    scheduler.job_states[control.label] = "WAITING"
                     await queue.put(control)
+                    scheduler.log("DEPENDENT_JOB_ENQUEUED", case=control.label)
 
         async def main_done(result, queue):
             case = result.case
@@ -1014,13 +1175,15 @@ async def main_async(args):
                     await enqueue_dependents(group, queue)
 
         async def run_main_and_dependents():
+            scheduler.begin_phase("main_and_dependents", pending_main,
+                {name: value["status"] for name, value in statuses.items()})
             queue = asyncio.Queue()
             for case in pending_main:
                 await queue.put(case)
             await existing_dependents(queue)
             # Use the scheduler's queue machinery for the main jobs, but
             # allow completion callbacks to append dependent jobs to it.
-            worker_count = max(1, min(scheduler.allowed_running, max(1, len(pending_main) + len(dependent_cases))))
+            worker_count = max(1, min(scheduler.allowed_running, max(1, queue.qsize())))
 
             async def worker():
                 while True:
@@ -1030,9 +1193,7 @@ async def main_async(args):
                             await asyncio.sleep(5)
                         result = await scheduler.execute(case)
                         if result.status == "DEFERRED_RAM" and case.attempt < 20:
-                            case.attempt += 1
-                            await asyncio.sleep(min(300, 30 * case.attempt))
-                            await queue.put(case)
+                            await scheduler.requeue(case, queue)
                         else:
                             scheduler.records[case.label] = result
                             await main_done(result, queue)
@@ -1046,6 +1207,7 @@ async def main_async(args):
             await asyncio.gather(*workers, return_exceptions=True)
 
         await run_main_and_dependents()
+        scheduler.report_status()
 
         for case in bandwidth_cases + controls:
             previous = read_case_status(case)
@@ -1066,10 +1228,13 @@ async def main_async(args):
             json.dumps(
                 {
                     "initial_available_memory_bytes": scheduler.initial_available,
-                    "effective_concurrency": effective_concurrency(args.max_concurrency),
-                    "assumed_case_bytes": ASSUMED_CASE_BYTES,
-                    "memory_safety_fraction": MEMORY_SAFETY_FRACTION,
+                    "effective_concurrency": scheduler.allowed_running,
+                    "assumed_case_bytes": args.memory_per_case_gib * 1024**3,
+                    "memory_safety_fraction": args.memory_budget_fraction,
+                    "ram_admission_enabled": args.ram_admission == "on",
+                    "pilot_skipped": args.skip_pilot,
                     "memory_guard_fraction": MEMORY_GUARD_FRACTION,
+                    "ram_guard_enabled": scheduler.ram_guard,
                     "polling_note": "agent inspection interval is at least 1800 seconds; safety monitor is internal",
                 },
                 indent=2,
@@ -1087,11 +1252,25 @@ def main():
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--max-concurrency", type=int, default=MAX_CONCURRENCY)
     parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--ram-guard", choices=("on", "off"), default="on",
+                        help="Enable/disable RSS-based termination and requeue; admission RAM limits remain active")
+    parser.add_argument("--ram-admission", choices=("on", "off"), default="on",
+                        help="Enable/disable the RAM-derived concurrency cap")
+    parser.add_argument("--memory-per-case-gib", type=float, default=10,
+                        help="Estimated GiB per simulation for RAM admission (default: 10)")
+    parser.add_argument("--memory-budget-fraction", type=float, default=0.75,
+                        help="Fraction of available RAM used for admission (default: 0.75)")
+    parser.add_argument("--skip-pilot", action="store_true",
+                        help="Skip the initial serial smoke run; compiler feasibility checks still run")
     parser.add_argument("--flashaccel-memory", type=Path, default=FLASHACCEL_MEMORY)
     parser.add_argument("--pilot-config", choices=("double", "fullhbm"), default="double")
     args = parser.parse_args()
     if args.max_concurrency < 1:
         parser.error("--max-concurrency must be positive")
+    if not math.isfinite(args.memory_per_case_gib) or args.memory_per_case_gib <= 0:
+        parser.error("--memory-per-case-gib must be finite and positive")
+    if not 0 < args.memory_budget_fraction <= 1:
+        parser.error("--memory-budget-fraction must be in (0, 1]")
     FLASHACCEL_MEMORY = args.flashaccel_memory.resolve()
     if not FLASHACCEL_MEMORY.is_file():
         parser.error(f"memory configuration does not exist: {FLASHACCEL_MEMORY}")
