@@ -55,7 +55,8 @@ flow.kernel @fa3_gqa_decode_split_flow schedule<explicit> target<%TARGET> {
     flow.dependency_rule @reuse_v from[@pv.complete] at[%wave=%wave, %k=%k-%STAGES] select<all>
   }
   static.if <%fragment>0> {
-    flow.dependency_rule @fragment from[@qk.complete, @pv.complete] at[%wave=%wave, %k=%k, %executor=%executor, %fragment=%fragment-1] select<all>
+    flow.dependency_rule @qk_fragment from[@qk.complete] at[%wave=%wave, %k=%k, %executor=%executor, %fragment=%fragment-1] select<all>
+    flow.dependency_rule @pv_fragment from[@pv.complete] at[%wave=%wave, %k=%k, %executor=%executor, %fragment=%fragment-1] select<all>
   }
   flow.dependency_rule @lane from[@score.complete, @tile_max.complete, @max_new.complete, @alpha_delta.complete, @alpha.complete, @delta.complete, @probability.complete, @prob_sum.complete, @sum_scaled.complete, @sum_new.complete, @out_scaled.complete, @normalize.complete, @cast.complete, @log_sum.complete, @lse.complete, @qk.complete, @pv.complete, @prob_cast.complete] at[%wave = %wave, %k = %k, %executor = %executor] select<all>
   flow.dependency_rule @last from[@pv.complete, @sum_new.complete, @max_new.complete] at[%wave=%wave, %k=ceildiv(%END-%START,%TILE)-1, %executor=%executor] select<all>
@@ -98,7 +99,7 @@ flow.kernel @fa3_gqa_decode_split_flow schedule<explicit> target<%TARGET> {
     %value, !value_ready = flow.load_async @value @V[%CACHE_BASE+%START+%k*%TILE, 0]<VALIDxD> by %producer slots[%v_stage.s] requires<bulk_copy_exact> after[@pv.complete:reuse_v] : tensor<VALIDxDx%QKV_DTYPE> scope<pipeline>
     %pad_k = flow.arithmetic @pad_k implements<@pad_k> reads[] after[@qk.complete:reuse_k] : tensor<1xPAD_K_ELEMENTSx%QKV_DTYPE> scope<pipeline> static.if<%PAD_K_ELEMENTS != 0>
     %pad_v = flow.arithmetic @pad_v implements<@pad_v> reads[] after[@pv.complete:reuse_v] : tensor<1xPAD_V_ELEMENTSx%QKV_DTYPE> scope<pipeline> static.if<%PAD_V_ELEMENTS != 0>
-    %qk = flow.matmul @qk implements<@qk> reads[%query, %key] after[@query.complete:data, @pad_q.complete:padding, @key.complete:data, @pad_k.complete:padding, @qk.complete:fragment] : tensor<R_VALIDxVALIDxfp32> scope<pipeline> iterate<%executor = 0 to %CONSUMER_WARPS> iterate<%fragment = 0 to %M_TILES*ceildiv(%D,%MMA_K)*ceildiv(%VALID,%MMA_N)> work<MMA_WARP_MxMMA_N>
+    %qk = flow.matmul @qk implements<@qk> reads[%query, %key] after[@query.complete:data, @pad_q.complete:padding, @key.complete:data, @pad_k.complete:padding, @qk.complete:qk_fragment] : tensor<R_VALIDxVALIDxfp32> scope<pipeline> iterate<%executor = 0 to %CONSUMER_WARPS> iterate<%fragment = 0 to %M_TILES*ceildiv(%D,%MMA_K)*ceildiv(%VALID,%MMA_N)> work<MMA_WARP_MxMMA_N>
     %score = flow.arithmetic @score implements<@score> reads[%qk] after[@qk.complete:lane] : tensor<ROWSxVALIDxfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS>
     %tile_max = flow.reduction @tile_max implements<@tile_max> reads[%score] after[@score.complete:lane] : tensor<ROWSx1xfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS> work<ROWSxVALID>
     %max_new = flow.arithmetic @max_new implements<@max_new> reads[%tile_max] after[@tile_max.complete:lane, @max_init.complete:state_max_new, @max_new.complete:state_max_new] : tensor<ROWSx1xfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS>
@@ -111,7 +112,7 @@ flow.kernel @fa3_gqa_decode_split_flow schedule<explicit> target<%TARGET> {
     %sum_scaled = flow.arithmetic @sum_scaled implements<@sum_scaled> reads[%alpha] after[@alpha.complete:lane, @sum_init.complete:state_sum_new, @sum_new.complete:state_sum_new] : tensor<ROWSx1xfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS>
     %sum_new = flow.arithmetic @sum_new implements<@sum_new> reads[%sum_scaled, %prob_sum] after[@sum_scaled.complete:lane, @prob_sum.complete:lane] : tensor<ROWSx1xfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS>
     %out_scaled = flow.arithmetic @out_scaled implements<@out_scaled> reads[%alpha] after[@alpha.complete:lane, @out_init.complete:state_pv, @pv.complete:state_pv] : tensor<ROWSxDxfp32> scope<pipeline> iterate<%executor = 0 to %ACTIVE_WARPS>
-    %pv = flow.matmul @pv implements<@pv> reads[%prob_cast, %value, %out_scaled] after[@prob_cast.complete:packed_rows, @value.complete:data, @pad_v.complete:padding, @out_scaled.complete:packed_rows, @pv.complete:fragment] : tensor<R_VALIDxDxfp32> scope<pipeline> iterate<%executor = 0 to %CONSUMER_WARPS> iterate<%fragment = 0 to %M_TILES*ceildiv(%VALID,%MMA_K)*ceildiv(%D,%MMA_N)> work<MMA_WARP_MxMMA_N>
+    %pv = flow.matmul @pv implements<@pv> reads[%prob_cast, %value, %out_scaled] after[@prob_cast.complete:packed_rows, @value.complete:data, @pad_v.complete:padding, @out_scaled.complete:packed_rows, @pv.complete:pv_fragment] : tensor<R_VALIDxDxfp32> scope<pipeline> iterate<%executor = 0 to %CONSUMER_WARPS> iterate<%fragment = 0 to %M_TILES*ceildiv(%VALID,%MMA_K)*ceildiv(%D,%MMA_N)> work<MMA_WARP_MxMMA_N>
   }
   %normalize = flow.arithmetic @normalize implements<@normalize> reads[%pv, %sum_new] after[@pv.complete:last, @sum_new.complete:last] : tensor<ROWSxDxfp32> scope<epilogue> iterate<%executor = 0 to %ACTIVE_WARPS>
   %log_sum = flow.special_function @log_sum implements<@log_sum> reads[%sum_new] after[@sum_new.complete:last] : tensor<ROWSx1xfp32> scope<epilogue> iterate<%executor = 0 to %ACTIVE_WARPS>
